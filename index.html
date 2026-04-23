@@ -1,100 +1,250 @@
-<!DOCTYPE html>
-<html lang="hi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Seoni Circle App Preview</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Righteous&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
-    <style>
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
-        :root {
-            --theme-color: #0d9488;
-            --theme-grad: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
-            --fixed-green: #0d9488;
-        }
-        body {
-            background-color: #f1f5f9;
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-            display: flex;
-            justify-content: center;
-            height: 100vh;
-            overflow: hidden;
-        }
-        .app-shell {
-            width: 100%;
-            max-width: 420px;
-            background-color: #ffffff;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 0 0 30px rgba(0,0,0,0.05);
-            position: relative;
-            overflow: hidden;
-        }
-        .app-header {
-            padding: 14px 20px;
-            color: white;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            z-index: 100;
-            display: grid;
-            grid-template-columns: 40px 1fr 40px;
-            align-items: center;
-            flex-shrink: 0;
-            transition: background 0.3s ease;
-        }
-        .header-info { text-align: center; grid-column: 2; line-height: 1.2; }
-        .header-info h1 { font-size: 1.4rem; font-weight: 900; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; }
-        .header-info p { font-size: 8.5px !important; opacity: 0.95; font-weight: 400 !important; text-transform: uppercase; white-space: nowrap; letter-spacing: 0.4px; margin-top: 2px; color: #ffffff; }
-        @keyframes fadeInView {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .view {
-            display: none;
-            padding: 12px 16px 80px 16px;
-            flex-grow: 1;
-            overflow-y: auto;
-            scrollbar-width: none;
-        }
-        .view.active {
-            display: flex !important;
-            flex-direction: column;
-            animation: fadeInView 0.4s ease-out;
-        }
-        .welcome-box { text-align: center; margin-top: 20px; margin-bottom: 5px; }
-        .welcome-text { font-family: 'Righteous', cursive; font-size: 2.2rem; color: var(--theme-color); text-transform: uppercase; letter-spacing: 3px; display: inline-block; animation: float 3s ease-in-out infinite; }
-        @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
-        .dots-container { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; width: 100%; }
-        .color-dot { width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
-        .list-item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 45px 12px 30px; cursor: pointer; color: #ffffff !important; text-align: center; clip-path: polygon(0% 0%, 92% 0%, 100% 50%, 92% 100%, 0% 100%); margin-bottom: 15px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1)); font-weight: 800; }
-        .item-title { font-size: 1.3rem; }
-        .item-subtitle { font-size: 0.9rem; opacity: 0.95; }
-        .dashboard-btn { width: 100%; padding: 16px 18px; border-radius: 16px; color: #ffffff !important; font-weight: 800; text-align: center; text-transform: uppercase; font-size: 0.85rem; margin-bottom: 15px; box-shadow: 0 6px 15px rgba(0,0,0,0.1); background: var(--theme-grad); }
-        .btn-update-red { background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important; }
-        .btn-progress-black { background: #000000 !important; padding: 12px 18px !important; font-size: 0.75rem !important; }
-        .btn-green-fix { background: linear-gradient(135deg, #22c55e 0%, #15803d 100%); }
-        .small-bottom-btn {
-            width: auto !important;
-            min-width: 240px;
-            padding: 14px 20px !important;
-            font-size: 11px !important;
-            margin: 20px auto 60px auto !important;
-            align-self: center !important;
-            border-radius: 16px !important;
-            color: #ffffff !important;
-            background-color: #000000 !important;
-            font-weight: 900 !important;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
-            text-transform: uppercase;
-        }
-        .title-box-container { width: 100%; display: flex !important; justify-content: center !important; align-items: center !important; padding: 10px 0 20px 0; text-align: center; }
-        .title-box { background-color: #dcfce7; padding: 10px 22px; border-radius: 12px; display: inline-flex; justify-content: center; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border: 1px solid rgba(34, 197, 94, 0.2); }
-        .title-text-bold { font-weight: 900 !important; font-size: 15px; color: #000000; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1; }
-        .main-card { background: #ffffff; border-radius: 24px; padding: 5px 16px 30px 16px; margin-top: 5px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04); text-align: center; width: 100%; }
-        .dropdown-box { position: relative !important; width: 100%; max-width: 340px; margin: 0 auto; }
-        .professional-trigger {
-            width: 100%;
+        .stock-section-title { margin: 0 0 12px; font-size: 0.92rem; font-weight: 900; color: #0f172a; text-transform: uppercase; }
+        .stock-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
+        .stock-row:last-child { border-bottom: none; padding-bottom: 0; }
+        .stock-row-main { font-weight: 800; color: #0f172a; font-size: 0.84rem; }
+        .stock-row-sub { font-size: 0.72rem; color: #64748b; font-weight: 700; margin-top: 3px; }
+        .stock-chip { min-width: 78px; padding: 8px 10px; border-radius: 999px; text-align: center; font-size: 0.72rem; font-weight: 900; }
+        .chip-ok { background: #dcfce7; color: #166534; }
+        .chip-warn { background: #fef3c7; color: #92400e; }
+        .chip-danger { background: #fee2e2; color: #991b1b; }
+        .stock-form { display: flex; flex-direction: column; gap: 12px; }
+        .stock-input, .stock-select { width: 100%; height: 50px; border-radius: 14px; border: 2px solid #cbd5e1; padding: 0 14px; font-size: 0.95rem; font-weight: 800; color: #0f172a; background: #ffffff; }
+        .stock-textarea { width: 100%; min-height: 90px; border-radius: 14px; border: 2px solid #cbd5e1; padding: 14px; font-size: 0.9rem; font-weight: 700; color: #0f172a; resize: vertical; font-family: 'Inter', sans-serif; }
+        .stock-submit { width: 100%; height: 52px; border: none; border-radius: 16px; color: #ffffff; font-weight: 900; text-transform: uppercase; box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12); }
+        .form-green { background: linear-gradient(135deg, #16a34a 0%, #166534 100%); }
+        .form-red { background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%); }
+        .stock-note { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 16px; padding: 14px; color: #1d4ed8; font-size: 0.77rem; font-weight: 800; line-height: 1.6; }
+        .stock-table-head { display: grid; grid-template-columns: 1.4fr 0.8fr 0.9fr; background: #0f172a; color: #ffffff; border-radius: 14px 14px 0 0; padding: 12px 10px; font-size: 0.64rem; font-weight: 900; text-transform: uppercase; }
+        .stock-table-row { display: grid; grid-template-columns: 1.4fr 0.8fr 0.9fr; padding: 12px 10px; border-bottom: 1px solid #e2e8f0; font-size: 0.76rem; font-weight: 800; align-items: center; }
+        .stock-table-row:last-child { border-bottom: none; }
+    </style>
+</head>
+<body>
+    <div id="toast-notif"></div>
+
+    <div id="pwd-modal">
+        <div class="pwd-card">
+            <h3 id="pwd-modal-title" class="text-sm font-black text-slate-800 uppercase mb-1">Report Access</h3>
+            <input type="password" id="pwd-input" placeholder="••••••">
+            <button class="bg-teal-grad w-full h-[52px] text-white rounded-xl font-black mb-4 theme-btn-grad" onclick="verifyPassword()">Unlock Report</button>
+            <div class="text-[#94a3b8] font-bold text-[10px] cursor-pointer" onclick="closePwdModal()">GO BACK</div>
+        </div>
+    </div>
+
+    <div class="app-shell">
+        <header id="app-header" class="app-header bg-teal-grad">
+            <div style="grid-column: 1;">
+                <div id="back-btn" class="cursor-pointer flex items-center justify-center h-full w-full" style="display: none;" onclick="goBack()">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"></path></svg>
+                </div>
+            </div>
+            <div class="header-info">
+                <h1 id="main-header-title">SEONI CIRCLE</h1>
+                <p>DEVELOPED BY-AKHILESH PATIDAR (AE)</p>
+            </div>
+        </header>
+
+        <main id="home-view" class="view active">
+            <div class="welcome-box"><h2 id="welcomeText" class="welcome-text">Welcome</h2></div>
+            <div class="dots-container">
+                <div class="color-dot" style="background-color: #0d9488;" onclick="changeTheme('#0d9488')"></div>
+                <div class="color-dot" style="background-color: #3b82f6;" onclick="changeTheme('#3b82f6')"></div>
+                <div class="color-dot" style="background-color: #ef4444;" onclick="changeTheme('#ef4444')"></div>
+            </div>
+            <div class="flex flex-col px-4">
+                <div class="list-item bg-blue-grad" onclick="showDivision('DIVISION SEONI', 'bg-blue-grad')">
+                    <div class="item-title">Seoni</div><div class="item-subtitle">Division</div>
+                </div>
+                <div class="list-item bg-orange-grad" onclick="showDivision('DIVISION LAKHNADON', 'bg-orange-grad')">
+                    <div class="item-title">Lakhnadon</div><div class="item-subtitle">Division</div>
+                </div>
+            </div>
+            <button class="small-bottom-btn" onclick="askPassword('CIRCLE')">SEONI CIRCLE DAILY PROGRESS</button>
+        </main>
+
+        <main id="dc-selection-view" class="view">
+            <div class="main-card">
+                <div class="title-box-container"><div class="title-box"><span class="title-text-bold">SELECT YOUR DC</span></div></div>
+                <div class="dropdown-box">
+                    <div id="prof-trigger" class="professional-trigger" onclick="toggleDropdown()">
+                        <span id="selected-dc-label">Choose DC Name...</span>
+                        <svg class="chevron-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"></path></svg>
+                    </div>
+                    <div id="dc-menu" class="dropdown-menu"></div>
+                </div>
+            </div>
+            <div id="lakhnadon-special-actions" class="px-2" style="display: none;">
+                <button class="dashboard-btn bg-cyan-grad" onclick="switchView('subdn-chhapara')">SUB DN CHHAPARA</button>
+            </div>
+            <button class="small-bottom-btn" onclick="askPassword('DIVISION')">DIVISION DAILY PROGRESS</button>
+        </main>
+
+        <main id="dc-dashboard-view" class="view">
+            <div class="px-2 py-8 flex flex-col gap-4">
+                <button class="dashboard-btn btn-green-fix" onclick="window.open('https://billing.mpez.co.in/', '_blank')">PAY & VIEW BIJLEE BILL</button>
+                <button class="dashboard-btn btn-update-red" onclick="switchView('mobile-update')">Mobile No Update</button>
+                <button class="dashboard-btn btn-progress-black" onclick="askPassword('DC')">Daily Progress</button>
+            </div>
+        </main>
+
+        <main id="subdn-chhapara-view" class="view">
+            <div class="px-2 py-8 flex flex-col gap-4">
+                <button class="dashboard-btn bg-amber-grad" onclick="openStockDashboard()">STOCK MATERIAL</button>
+            </div>
+        </main>
+
+        <main id="stock-material-view" class="view">
+            <div class="stock-wrap">
+                <div class="stock-hero">
+                    <h3>Stock Material Dashboard</h3>
+                    <p>Yahan se aap receive, issue, live balance, low stock aur material list sab ek jagah dekh sakte hain.</p>
+                </div>
+                <div class="stock-stat-grid" id="stock-stats"></div>
+                <div class="stock-action-grid">
+                    <button class="stock-tile tile-indigo" onclick="openStockSection('material-list')">Material List<span>Sabhi approved items aur unit details</span></button>
+                    <button class="stock-tile tile-emerald" onclick="openStockSection('material-receive')">Material Receive<span>Store se aane wala inward entry</span></button>
+                    <button class="stock-tile tile-rose" onclick="openStockSection('material-issue')">Material Issue<span>Field ya line work ke liye issue entry</span></button>
+                    <button class="stock-tile tile-slate" onclick="openStockSection('live-stock')">Live Stock<span>Abhi kitna balance material bacha hai</span></button>
+                    <button class="stock-tile tile-violet" onclick="openStockSection('low-stock')">Low Stock<span>Jin items ka balance minimum se kam hai</span></button>
+                    <button class="stock-tile tile-sky" onclick="openStockSection('stock-report')">Stock Report<span>Daily summary aur recent movement</span></button>
+                </div>
+                <div class="stock-section-card" id="stock-preview"></div>
+            </div>
+        </main>
+
+        <main id="material-list-view" class="view">
+            <div class="stock-wrap">
+                <div class="stock-section-card">
+                    <h3 class="stock-section-title">Material List</h3>
+                    <div id="material-list-content"></div>
+                </div>
+            </div>
+        </main>
+
+        <main id="material-receive-view" class="view">
+            <div class="stock-wrap">
+                <div class="stock-section-card">
+                    <h3 class="stock-section-title">Material Receive Entry</h3>
+                    <div class="stock-note">Yahan store se aaya hua material receive hoga. Final version me yeh entry sheet aur live stock dono update karegi.</div>
+                    <div class="stock-form" style="margin-top: 14px;">
+                        <select id="receive-material" class="stock-select"></select>
+                        <input id="receive-qty" class="stock-input" type="number" placeholder="Receive Quantity">
+                        <input id="receive-source" class="stock-input" type="text" placeholder="Source / Challan No">
+                        <textarea id="receive-remark" class="stock-textarea" placeholder="Remark"></textarea>
+                        <button class="stock-submit form-green" onclick="submitStockDemo('receive')">Save Receive Entry</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <main id="material-issue-view" class="view">
+            <div class="stock-wrap">
+                <div class="stock-section-card">
+                    <h3 class="stock-section-title">Material Issue Entry</h3>
+                    <div class="stock-note">Yahan issue quantity live balance se compare hogi. Final system me available stock se jyada issue allow nahi hoga.</div>
+                    <div class="stock-form" style="margin-top: 14px;">
+                        <select id="issue-material" class="stock-select"></select>
+                        <input id="issue-qty" class="stock-input" type="number" placeholder="Issue Quantity">
+                        <input id="issue-to" class="stock-input" type="text" placeholder="Issue To / Site / Feeder">
+                        <textarea id="issue-remark" class="stock-textarea" placeholder="Remark"></textarea>
+                        <button class="stock-submit form-red" onclick="submitStockDemo('issue')">Save Issue Entry</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <main id="live-stock-view" class="view">
+            <div class="stock-wrap">
+                <div class="stock-section-card">
+                    <h3 class="stock-section-title">Live Stock Position</h3>
+                    <div id="live-stock-content"></div>
+                </div>
+            </div>
+        </main>
+
+        <main id="low-stock-view" class="view">
+            <div class="stock-wrap">
+                <div class="stock-section-card">
+                    <h3 class="stock-section-title">Low Stock Alert</h3>
+                    <div id="low-stock-content"></div>
+                </div>
+            </div>
+        </main>
+
+        <main id="stock-report-view" class="view">
+            <div class="stock-wrap">
+                <div class="stock-section-card">
+                    <h3 class="stock-section-title">Stock Report</h3>
+                    <div id="stock-report-content"></div>
+                </div>
+            </div>
+        </main>
+
+        <main id="mobile-update-view" class="view">
+            <div class="title-box-container"><div class="title-box"><span class="title-text-bold">UPDATE MOBILE NO</span></div></div>
+            <div class="search-panel">
+                <div class="input-wrapper relative w-full max-w-[260px] mx-auto">
+                    <input type="tel" id="search-ivrs" class="ivrs-input" placeholder="Search IVRS No" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
+                </div>
+                <button id="search-btn" class="search-btn-custom" onclick="performSearch()">Search Records</button>
+
+                <div id="result-box" class="result-card-custom">
+                    <div class="res-row"><span class="res-label">IVRS NO</span><span id="res-ivrs" class="res-val"></span></div>
+                    <div class="res-row"><span class="res-label">Consumer Name</span><span id="res-name" class="res-val"></span></div>
+                    <div class="res-row"><span class="res-label">Old Mobile No</span><span id="res-old" class="res-val"></span></div>
+                    <div class="res-row border-none"><span class="res-label">Address</span><span id="res-addr" class="res-val"></span></div>
+
+                    <div class="title-box-container" style="padding-top: 15px;"><div class="title-box" style="background-color: #fee2e2;"><span class="title-text-bold" style="color: #991b1b;">Enter Correct Mobile No</span></div></div>
+                    <input type="tel" id="new-mobile" class="teal-boundary-input" placeholder="Enter 10 Digit No..." oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
+                </div>
+                <button id="submit-btn" class="submit-sync-btn" onclick="submitToSheet()">Submit</button>
+            </div>
+        </main>
+
+        <main id="summary-view" class="view">
+            <div class="title-box-container"><div class="title-box flex flex-col items-center"><span class="title-text-bold" id="summary-title">PROGRESS REPORT</span></div></div>
+            <div class="px-2">
+                <div class="report-type-box">
+                    <div id="opt-daily" class="report-opt active" onclick="setMode('DAILY')">Daily</div>
+                    <div id="opt-monthly" class="report-opt" onclick="setMode('MONTHLY')">Monthly</div>
+                </div>
+                <input type="date" id="report-date" class="w-full h-12 border-2 border-teal-600 rounded-xl px-4 font-black text-teal-900 mb-4" style="border-color: #0d9488;" onchange="refreshSummary()">
+            </div>
+            <div id="summary-content"></div>
+        </main>
+    </div>
+
+    <script>
+        const seoniDCs = ["ARI", "BADALPAR", "BANDOL", "BARGHAT", "DHARNA", "GOPALGANJ", "KANHIWADA", "KEOLARI", "KHAIRAPALARI", "KURAI", "MUNGWANI", "PANDIYA CHHAPARA", "SEONI (T)", "SEONI (RES)", "UGALI"];
+        const lakhnadonDCs = ["ADEGAON", "CHHAPARA-1", "CHHAPARA-2", "DHANORA", "DHUMA", "GANESHGANJ", "GHANSORE", "KEDARPUR", "LAKHNADON"];
+
+        const dcDatabaseLinks = {
+            "CHHAPARA-1": "https://docs.google.com/spreadsheets/d/e/2PACX-1vQCqVfz1_zR2sJfe9LP_UptL1BdVfrisq60Snnd0sh94FDzrjMTwFUq5HD_7W-B_gMUaFBIVSdwZDGd/pub?output=csv",
+            "CHHAPARA-2": "https://docs.google.com/spreadsheets/d/e/2PACX-1vQHvHOehoWyr2bzp64NeuDZbf7D6vVv3NrmmI2JGPLXYN9Qrhol-0Ti520uk9HSqI6uWKg_KUiQ32tr/pub?output=csv",
+            "GANESHGANJ": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSpKAgJ9I3cus_l-QbagEIsaM8kmIZrkV0cYc00lnOg_MAXJZXrIzJC9QghdStYz0g-yWbtUKjn4uFI/pub?output=csv",
+            "GHANSORE": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSoRVa5mLGf7Mnz_2ZoPvbK5WO3Ew3I8YTRJDV6KFKd9CLv2fUAzkrmz8vcOGUwtrIVQ-jr4yt4Yy-D/pub?output=csv",
+            "DHUMA": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLZb7N8resS05d0x0Txuh38Th4_bHXBHDBcKNc_mrJaqeYe0FyzdpbctR0r6xhtCFpNLuXN_737the/pub?output=csv",
+            "KEDARPUR": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTBdrZyG4W8F0sR5lCoTxfTC9J15m86DRo2GXLwAI_HM3TBua4zFYq96qu_Obu6DjhWp6hK-TZNFaVr/pub?output=csv",
+            "ADEGAON": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTMkEMNGnfv0_jHM12lAl34sD8kJLWPbLuA8WGhKH_smPfH3aDdmVrwbtyyPJZuD6KK4m6quw-q9MWN/pub?output=csv",
+            "DHANORA": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRm09i9bR8bIyWqZ82_MVLxrSoC-LL-sxw9-V8BXnOBjZDekPzBydAYw5Q9bJZaXe8bjFOfa_WYcZer/pub?output=csv",
+            "LAKHNADON": "https://docs.google.com/spreadsheets/d/e/2PACX-1vTGixc1ReIutuAxRbMRTF29ZLd0v2DrcSgFFC6uw-ppBtvNkBa6rMJtqA37oGx2JAWgi-aXVhXVE8vq/pub?output=csv"
+        };
+
+        const scriptURL = "https://script.google.com/macros/s/AKfycbw-euczRMZFKMjHveuvWd-vkuNqLXmFLkrLUERWgdExC7obxVGcBkBKGBWuHNfimzEh3g/exec";
+        const stockMaterials = [
+            { id: "M001", name: "AB Cable 3X95+1X50", unit: "Meter", opening: 1200, inward: 380, issue: 910, min: 300 },
+            { id: "M002", name: "PVC Insulated Wire 10 SQMM", unit: "Coil", opening: 42, inward: 16, issue: 31, min: 10 },
+            { id: "M003", name: "Stay Set Complete", unit: "Nos", opening: 18, inward: 8, issue: 20, min: 8 },
+            { id: "M004", name: "Disc Insulator", unit: "Nos", opening: 75, inward: 20, issue: 63, min: 25 },
+            { id: "M005", name: "LT Pin Insulator", unit: "Nos", opening: 140, inward: 40, issue: 149, min: 35 }
+        ];
+        const stockMovements = [
+            { type: "RECEIVE", material: "AB Cable 3X95+1X50", qty: 180, date: "23/04/2026", note: "Main Store Challan 17" },
+            { type: "ISSUE", material: "Disc Insulator", qty: 12, date: "23/04/2026", note: "11 KV line maintenance" },
+            { type: "RECEIVE", material: "Stay Set Complete", qty: 8, date: "22/04/2026", note: "Emergency stock refill" },
+            { type: "ISSUE", material: "LT Pin Insulator", qty: 20, date: "22/04/2026", note: "Village feeder replacement" }
+        ];
+
+        let activeDiv = "", activeDC = "", activeGrad = "bg-teal-grad", summaryMode = "DAILY", activeViewLevel = "", currentData = null, pendingLevel = "", dcCacheRaw = {}, uiListSummary = [], grandTC = 0, grandTU = 0;
+
+        document.addEventListener("DOMContentLoaded", () => {
