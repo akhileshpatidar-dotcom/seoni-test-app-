@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Seoni Circle App Preview</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Righteous&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+        :root {
+            --theme-color: #0d9488;
+            --theme-grad: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
+            --fixed-green: #0d9488;
+        }
+        body {
+            background-color: #f1f5f9;
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .app-shell {
+            width: 100%;
+            max-width: 420px;
+            background-color: #ffffff;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 30px rgba(0,0,0,0.05);
+            position: relative;
+            overflow: hidden;
+        }
+        .app-header {
+            padding: 14px 20px;
+            color: white;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 100;
+            display: grid;
+            grid-template-columns: 40px 1fr 40px;
+            align-items: center;
+            flex-shrink: 0;
+            transition: background 0.3s ease;
+        }
+        .header-info { text-align: center; grid-column: 2; line-height: 1.2; }
+        .header-info h1 { font-size: 1.4rem; font-weight: 900; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; }
+        .header-info p { font-size: 8.5px !important; opacity: 0.95; font-weight: 400 !important; text-transform: uppercase; white-space: nowrap; letter-spacing: 0.4px; margin-top: 2px; color: #ffffff; }
+        @keyframes fadeInView {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .view {
+            display: none;
+            padding: 12px 16px 80px 16px;
+            flex-grow: 1;
+            overflow-y: auto;
+            scrollbar-width: none;
+        }
+        .view.active {
+            display: flex !important;
+            flex-direction: column;
+            animation: fadeInView 0.4s ease-out;
+        }
+        .welcome-box { text-align: center; margin-top: 20px; margin-bottom: 5px; }
+        .welcome-text { font-family: 'Righteous', cursive; font-size: 2.2rem; color: var(--theme-color); text-transform: uppercase; letter-spacing: 3px; display: inline-block; animation: float 3s ease-in-out infinite; }
+        @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
+        .dots-container { display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; width: 100%; }
+        .color-dot { width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
+        .list-item { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 45px 12px 30px; cursor: pointer; color: #ffffff !important; text-align: center; clip-path: polygon(0% 0%, 92% 0%, 100% 50%, 92% 100%, 0% 100%); margin-bottom: 15px; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1)); font-weight: 800; }
+        .item-title { font-size: 1.3rem; }
+        .item-subtitle { font-size: 0.9rem; opacity: 0.95; }
+        .dashboard-btn { width: 100%; padding: 16px 18px; border-radius: 16px; color: #ffffff !important; font-weight: 800; text-align: center; text-transform: uppercase; font-size: 0.85rem; margin-bottom: 15px; box-shadow: 0 6px 15px rgba(0,0,0,0.1); background: var(--theme-grad); }
+        .btn-update-red { background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important; }
+        .btn-progress-black { background: #000000 !important; padding: 12px 18px !important; font-size: 0.75rem !important; }
+        .btn-green-fix { background: linear-gradient(135deg, #22c55e 0%, #15803d 100%); }
+        .small-bottom-btn {
+            width: auto !important;
+            min-width: 240px;
+            padding: 14px 20px !important;
+            font-size: 11px !important;
+            margin: 20px auto 60px auto !important;
+            align-self: center !important;
+            border-radius: 16px !important;
+            color: #ffffff !important;
+            background-color: #000000 !important;
+            font-weight: 900 !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+            text-transform: uppercase;
+        }
+        .title-box-container { width: 100%; display: flex !important; justify-content: center !important; align-items: center !important; padding: 10px 0 20px 0; text-align: center; }
+        .title-box { background-color: #dcfce7; padding: 10px 22px; border-radius: 12px; display: inline-flex; justify-content: center; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border: 1px solid rgba(34, 197, 94, 0.2); }
+        .title-text-bold { font-weight: 900 !important; font-size: 15px; color: #000000; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1; }
+        .main-card { background: #ffffff; border-radius: 24px; padding: 5px 16px 30px 16px; margin-top: 5px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04); text-align: center; width: 100%; }
+        .dropdown-box { position: relative !important; width: 100%; max-width: 340px; margin: 0 auto; }
+        .professional-trigger {
+            width: 100%;
