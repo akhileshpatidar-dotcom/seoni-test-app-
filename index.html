@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Consumer IVRS Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="screen-bg"></div>
+
+  <main class="app-shell">
+    <section class="phone-stage">
+      <div class="phone-device">
+        <header class="app-header">
+          <div class="header-main">
+            <a class="header-title" href="https://wa.me/919999999999" id="whatsappLink" target="_blank" rel="noreferrer">
+              <span class="header-icon" aria-hidden="true"></span>
+              <span class="header-text-group">
+                <strong>Update WhatsApp No</strong>
+                <small>For Receive Bijlee Bill on WhatsApp</small>
+              </span>
+              <span class="header-icon" aria-hidden="true"></span>
+            </a>
+          </div>
+        </header>
+
+        <section class="search-card">
+          <input type="file" id="csvFile" accept=".csv" hidden>
+
+          <form id="searchForm" novalidate>
+            <p class="search-instruction">WhatsApp पर बिजली बिल प्राप्त करने के लिए किसी भी पुराने बिजली बिल या प्रत्येक माह प्राप्त होने वाले Text मैसेज से देखकर 10 अंकों का IVRS No यहा दर्ज करे</p>
+            <div class="ivrs-input-shell">
+              <input
+                id="ivrsInput"
+                name="ivrs"
+                type="tel"
+                inputmode="numeric"
+                maxlength="10"
+                placeholder="Enter 10 Digit IVRS Number"
+                autocomplete="off"
+                required
+              >
+            </div>
+
+            <button type="submit" class="primary-btn">Search Record</button>
+          </form>
+        </section>
+
+        <section class="results-wrap">
+          <div class="result-grid hidden" id="resultGrid">
+            <article class="result-card">
+              <span>Consumer Name</span>
+              <strong id="resultName">-</strong>
+            </article>
+
+            <article class="result-card">
+              <span>Father Name</span>
+              <strong id="resultFather">-</strong>
+            </article>
+
+            <article class="result-card">
+              <span>Address</span>
+              <strong id="resultAddress">-</strong>
+            </article>
+
+            <article class="result-card">
+              <span>Mobile No</span>
+              <strong id="resultMobile">-</strong>
+            </article>
+          </div>
+
+          <form class="whatsapp-form hidden" id="whatsappForm" novalidate>
+            <label class="whatsapp-label" for="whatsappInput">10 Digit WhatsApp No</label>
+            <input
+              id="whatsappInput"
+              name="whatsapp"
+              type="tel"
+              inputmode="numeric"
+              maxlength="10"
+              placeholder="Enter 10 Digit WhatsApp No"
+              autocomplete="off"
+              required
+            >
+            <button type="submit" class="primary-btn">Submit</button>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <form id="scriptSubmitForm" action="https://script.google.com/macros/s/AKfycbzrTLo4cPXRS2r6uv89IqvSzIsmEB99lon9eI9MzbEtTkLWWUHHTPLzqWo6yZhmFEtXXw/exec" method="POST" target="scriptSubmitFrame" class="hidden"></form>
+  <iframe name="scriptSubmitFrame" id="scriptSubmitFrame" class="hidden"></iframe>
+  <div id="submitToast" class="submit-toast hidden">Submitted Successfully</div>
+
+  <script src="records-map.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
