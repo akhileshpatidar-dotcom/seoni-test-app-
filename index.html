@@ -46,6 +46,47 @@
         html.dark-mode-on .dark-mode-toggle-btn {
             filter: invert(1) hue-rotate(180deg);
         }
+        .pwa-install-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 600;
+            background: #0d9488;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.25);
+            padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+        }
+        .pwa-install-banner-inner {
+            max-width: 480px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .pwa-install-banner-icon { font-size: 1.5rem; flex-shrink: 0; }
+        .pwa-install-banner-text { flex: 1; min-width: 0; }
+        .pwa-install-banner-title { color: #fff; font-weight: 900; font-size: 0.82rem; }
+        .pwa-install-banner-message { color: #d1fae5; font-weight: 600; font-size: 0.72rem; line-height: 1.35; }
+        .pwa-install-action-btn {
+            flex-shrink: 0;
+            background: #ffffff;
+            color: #0d9488;
+            border: none;
+            border-radius: 999px;
+            padding: 8px 16px;
+            font-weight: 950;
+            font-size: 0.78rem;
+            cursor: pointer;
+        }
+        .pwa-install-close-btn {
+            flex-shrink: 0;
+            background: transparent;
+            border: none;
+            color: #d1fae5;
+            font-size: 1rem;
+            padding: 4px 6px;
+            cursor: pointer;
+        }
         :root {
             --theme-color: #0d9488;
             --theme-grad: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
@@ -595,6 +636,18 @@
 <body>
     <div id="toast-notif" role="status" aria-live="polite" aria-atomic="true"></div>
     <button id="dark-mode-toggle-btn" class="dark-mode-toggle-btn" type="button" onclick="toggleDarkMode()" aria-label="Dark mode on/off karein" title="Dark Mode">🌙</button>
+
+    <div id="pwa-install-banner" class="pwa-install-banner" style="display:none;" role="dialog" aria-label="App install karein">
+        <div class="pwa-install-banner-inner">
+            <span class="pwa-install-banner-icon">📲</span>
+            <div class="pwa-install-banner-text">
+                <div id="pwa-install-banner-title" class="pwa-install-banner-title">App Install Karein</div>
+                <div id="pwa-install-banner-message" class="pwa-install-banner-message">Home screen se seedhe app kholiye.</div>
+            </div>
+            <button id="pwa-install-action-btn" class="pwa-install-action-btn" type="button" onclick="handlePwaInstallAction()">Install</button>
+            <button class="pwa-install-close-btn" type="button" onclick="dismissPwaInstallBanner()" aria-label="Band karein">✕</button>
+        </div>
+    </div>
     <input type="file" id="gps-camera-input" accept="image/*" capture="environment" style="display:none;" onchange="handleGpsCameraPhoto(this)">
     <input type="file" id="vehicle-photo-input" accept="image/*" capture="environment" style="display:none;" onchange="handleVehiclePhotoCapture(this)">
 
@@ -1785,6 +1838,7 @@
 
         document.addEventListener("DOMContentLoaded", () => {
             initDarkModePreference();
+            initPwaInstallBannerForIos();
             if ("serviceWorker" in navigator) {
                 window.addEventListener("load", () => {
                     navigator.serviceWorker.register("./service-worker.js").catch(() => {});
@@ -4040,6 +4094,81 @@
             button.innerHTML = isProcessing ? `<span class="btn-inline-spinner"></span>${text}` : text;
             button.style.opacity = isProcessing ? "0.65" : "1";
             button.style.pointerEvents = isProcessing ? "none" : "auto";
+        }
+
+        let deferredPwaInstallPrompt = null;
+        const pwaInstallDismissKey = "seoni-pwa-install-dismissed-at";
+
+        function isPwaInstallDismissedRecently() {
+            try {
+                const raw = localStorage.getItem(pwaInstallDismissKey);
+                if (!raw) return false;
+                const dismissedAt = Number(raw);
+                const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+                return Number.isFinite(dismissedAt) && (Date.now() - dismissedAt) < fourteenDaysMs;
+            } catch (_) { return false; }
+        }
+
+        function isRunningAsInstalledPwa() {
+            return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+        }
+
+        function showPwaInstallBanner(platform) {
+            if (isRunningAsInstalledPwa() || isPwaInstallDismissedRecently()) return;
+            const banner = document.getElementById("pwa-install-banner");
+            const title = document.getElementById("pwa-install-banner-title");
+            const message = document.getElementById("pwa-install-banner-message");
+            const actionBtn = document.getElementById("pwa-install-action-btn");
+            if (!banner) return;
+            if (platform === "ios") {
+                title.innerText = "App Install Karein";
+                message.innerText = "Share button dabाइए, phir 'Add to Home Screen' select kijiye.";
+                actionBtn.innerText = "Samjh Gaya";
+            } else {
+                title.innerText = "App Install Karein";
+                message.innerText = "Home screen se seedhe app kholiye, network kam use hoga.";
+                actionBtn.innerText = "Install";
+            }
+            banner.dataset.platform = platform;
+            banner.style.display = "block";
+        }
+
+        function dismissPwaInstallBanner() {
+            const banner = document.getElementById("pwa-install-banner");
+            if (banner) banner.style.display = "none";
+            try { localStorage.setItem(pwaInstallDismissKey, String(Date.now())); } catch (_) {}
+        }
+
+        async function handlePwaInstallAction() {
+            const banner = document.getElementById("pwa-install-banner");
+            const platform = banner?.dataset.platform;
+            if (platform === "ios") {
+                dismissPwaInstallBanner();
+                return;
+            }
+            if (!deferredPwaInstallPrompt) {
+                dismissPwaInstallBanner();
+                return;
+            }
+            deferredPwaInstallPrompt.prompt();
+            try { await deferredPwaInstallPrompt.userChoice; } catch (_) {}
+            deferredPwaInstallPrompt = null;
+            dismissPwaInstallBanner();
+        }
+
+        window.addEventListener("beforeinstallprompt", (event) => {
+            event.preventDefault();
+            deferredPwaInstallPrompt = event;
+            showPwaInstallBanner("android");
+        });
+
+        window.addEventListener("appinstalled", () => {
+            dismissPwaInstallBanner();
+        });
+
+        function initPwaInstallBannerForIos() {
+            const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+            if (isIos) showPwaInstallBanner("ios");
         }
 
         function toggleDarkMode() {
