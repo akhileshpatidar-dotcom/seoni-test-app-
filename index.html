@@ -12263,8 +12263,9 @@
             });
 
             const serverByDc = {};
-            Object.values(getRevenueUploadedPaidCache() || {}).forEach((row) => {
-                const dcName = getRevenueUploadedPaidRowDcName(row);
+            Object.entries(getRevenueUploadedPaidCache() || {}).forEach(([cacheKey, row]) => {
+                const cacheDcName = String(cacheKey || "").split("|")[0] || "";
+                const dcName = getRevenueUploadedPaidRowDcName(row, cacheDcName);
                 if (!dcName) return;
                 if (!serverByDc[dcName]) serverByDc[dcName] = [];
                 getRevenueUploadedPaidPaymentRows(row).forEach((paymentRow) => {
