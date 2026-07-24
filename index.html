@@ -1683,7 +1683,7 @@
                     { name: "ARI", subDn: "AE (D)", csvUrl: "" },
                     { name: "BADALPAR", subDn: "AE (D)", csvUrl: "" },
                     { name: "BANDOL", subDn: "AE (D)", csvUrl: "" },
-                    { name: "BARGHAT", subDn: "AE (D)", csvUrl: "" },
+                    { name: "BARGHAT", subDn: "AE (D)", csvUrl: "https://docs.google.com/spreadsheets/d/1b5g3VBlKjCiOX0cfE5Na-jyRY4cPCjrIJIsU3YozG_U/export?format=csv&gid=0" },
                     { name: "DHARNA", subDn: "AE (D)", csvUrl: "" },
                     { name: "GOPALGANJ", subDn: "AE (D)", csvUrl: "" },
                     { name: "KANHIWADA", subDn: "KEOLARI", csvUrl: "" },
@@ -1759,7 +1759,8 @@
             "GHANSORE": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrnZZ4FhdFSpFM2NfiTGAxbkUa9OQin4VQW9t06bAzRzjHZd_F4mVc3_vv4XxXPWSF_p78YoVIJI5Y/pub?output=csv",
             "LAKHNADON": "https://docs.google.com/spreadsheets/d/1_r5WgGV9bs-aed86dZLOlDKmK5g9J7qiGsmQAqDE1as/export?format=csv&gid=0",
             "KURAI": "https://docs.google.com/spreadsheets/d/15c2CHolan0YVYh5Hwe4akn1YNk1SUhhLVa24h9ZBQbU/export?format=csv&gid=0",
-            "KEDARPUR": "https://docs.google.com/spreadsheets/d/145bjD_AoAKWnTfzSaVAXoFpq9cZooSoM8jl0JKBfDkw/export?format=csv&gid=0"
+            "KEDARPUR": "https://docs.google.com/spreadsheets/d/145bjD_AoAKWnTfzSaVAXoFpq9cZooSoM8jl0JKBfDkw/export?format=csv&gid=0",
+            "BARGHAT": "https://docs.google.com/spreadsheets/d/1b5g3VBlKjCiOX0cfE5Na-jyRY4cPCjrIJIsU3YozG_U/export?format=csv&gid=0"
         };
         const stockMaterialsCsvUrl = "https://docs.google.com/spreadsheets/d/1OfrU7ZuN5LV9f_3hqORv66BVLYKFGIBBjDyeSXHwldA/export?format=csv&gid=641545139";
         const shmsCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTbq-yne90yg9Vn8eylxM3zKMfZjPLlVhca3JhsjAzMlcm6MAVl8vAA-xXVgZI_XjWQBHyjB36YO1Cz/pub?output=csv";
@@ -2651,61 +2652,10 @@
             return (amount / 100000).toFixed(2);
         }
 
-        function formatRevenueCategoryPercent(value, total) {
-            const numerator = Number(value || 0);
-            const denominator = Number(total || 0);
-            if (!denominator) return "0.00%";
-            return `${((numerator / denominator) * 100).toFixed(2)}%`;
-        }
-
-        function getRevenueCategoryPaidCountPercent(categoryTotals) {
-            return formatRevenueCategoryPercent(categoryTotals?.paid || 0, Number(categoryTotals?.paid || 0) + Number(categoryTotals?.unpaid || 0));
-        }
-
-        function getRevenueCategoryPaidAmountPercent(categoryTotals) {
-            return formatRevenueCategoryPercent(categoryTotals?.paidAmount || 0, Number(categoryTotals?.paidAmount || 0) + Number(categoryTotals?.unpaidAmount || 0));
-        }
-
         function getRevenueCategoryTargetDcs() {
             if (activeViewLevel === "DC") return [activeDC].filter(Boolean);
             if (activeViewLevel === "DIVISION") return getDivisionDcNames(activeDiv);
             return getAllDcNames();
-        }
-
-        function getRevenueCategoryDcAliases(dcName) {
-            const normalized = normalizeDcName(dcName);
-            const compact = normalizeLookupValue(dcName);
-            return Array.from(new Set([normalized, compact].filter(Boolean)));
-        }
-
-        function getRevenueCategoryPaidInfoForDc(paidInfoByDc, dcName) {
-            const aliases = getRevenueCategoryDcAliases(dcName);
-            for (const alias of aliases) {
-                if (paidInfoByDc?.[alias]) return paidInfoByDc[alias];
-            }
-            return {};
-        }
-
-        function buildRevenueCategoryMasterDcLookup(targetDcNames = getRevenueCategoryTargetDcs()) {
-            const lookup = {};
-            targetDcNames.forEach((dcName) => {
-                const masterSet = new Set(getRevenueMasterRowsForDc(dcName).map((row) => normalizeRevenueIvrs(row.ivrsNo)).filter(Boolean));
-                getRevenueCategoryDcAliases(dcName).forEach((dcKey) => {
-                    lookup[dcKey] = masterSet;
-                });
-            });
-            return lookup;
-        }
-
-        function resolveRevenueCategoryPaymentDcKey(paymentRow, ivrs, targetDcs, masterIvrsByDc) {
-            const rowDcName = getRevenueUploadedPaidRowDcName(paymentRow);
-            const rowDcKey = getRevenueCategoryDcAliases(rowDcName).find((alias) => targetDcs.has(alias));
-            if (rowDcKey) return rowDcKey;
-            if (!ivrs) return "";
-            for (const dcKey of targetDcs) {
-                if (masterIvrsByDc?.[dcKey]?.has(ivrs)) return dcKey;
-            }
-            return "";
         }
 
         function getRevenueMasterRowsForDc(dcName) {
@@ -2838,21 +2788,16 @@
             if (mode === "MONTHLY") {
                 const targetMonthKey = normalizeRevenueMonthFilterKey(filterValue);
                 if (!targetMonthKey) return false;
-                const paidDate = normalizeRevenueUploadedPaidRowDateForFilter(row);
+                const paidDate = normalizeRevenuePaidDate(getRevenueUploadedPaidRowDate(row), targetMonthKey);
                 if (!paidDate) return false;
                 return getRevenueMonthKey(paidDate) === targetMonthKey;
             }
             const targetDate = normalizeRevenueReportDate(filterValue || getCurrentDateDDMMYYYY());
             if (!targetDate) return false;
-            const paidDate = normalizeRevenueUploadedPaidRowDateForFilter(row);
+            const targetMonthKey = getRevenueMonthKey(targetDate);
+            const paidDate = normalizeRevenuePaidDate(getRevenueUploadedPaidRowDate(row), targetMonthKey);
             if (!paidDate) return false;
             return normalizeRevenueReportDate(paidDate) === targetDate;
-        }
-
-        function normalizeRevenueUploadedPaidRowDateForFilter(row) {
-            const sourceType = row?.sourceType || row?.source_type || "";
-            const rawDate = getRevenueUploadedPaidRowDate(row);
-            return normalizeRevenuePaidDateForSource(rawDate, sourceType);
         }
 
         function getRevenueUploadedPaidRowDcName(row, fallbackDc = "") {
@@ -2919,14 +2864,18 @@
             return [row];
         }
 
-        async function fetchUploadedPaidEntriesWithRetry_(dcName, attempts = 3) {
+        async function fetchUploadedPaidEntriesWithRetry_(dcName, attempts = 2) {
             for (let attempt = 1; attempt <= attempts; attempt++) {
+                const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 45000);
                 try {
-                    const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidEntries&dc_name=${encodeURIComponent(dcName)}&t=${Date.now()}`);
+                    const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidEntries&dc_name=${encodeURIComponent(dcName)}&t=${Date.now()}`, controller ? { signal: controller.signal } : {});
                     const parsed = await response.json();
                     if (parsed && parsed.status === "success") return parsed;
-                } catch (_) {}
-                if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+                } catch (_) {} finally {
+                    clearTimeout(timer);
+                }
+                if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 800));
             }
             return null;
         }
@@ -2968,19 +2917,12 @@
 
         function buildRevenueCategoryUploadedPaidInfo(mode, filterValue) {
             const paidInfoByDc = {};
-            const targetDcNames = getRevenueCategoryTargetDcs();
-            const targetDcs = new Set(targetDcNames.flatMap(getRevenueCategoryDcAliases).filter(Boolean));
-            const masterIvrsByDc = buildRevenueCategoryMasterDcLookup(targetDcNames);
             getRevenueCategoryPaymentSourceRows().forEach((paymentRow) => {
+                const dcName = getRevenueUploadedPaidRowDcName(paymentRow);
                 const ivrs = getRevenueUploadedPaidRowIvrs(paymentRow);
-                const resolvedDcKey = resolveRevenueCategoryPaymentDcKey(paymentRow, ivrs, targetDcs, masterIvrsByDc);
-                if (!resolvedDcKey || !ivrs || !isRevenueUploadedPaidInCategoryPeriod(paymentRow, mode, filterValue)) return;
-                const dcAliases = getRevenueCategoryDcAliases(resolvedDcKey);
-                if (!dcAliases.includes(resolvedDcKey)) dcAliases.unshift(resolvedDcKey);
-                const primaryDcKey = resolvedDcKey;
-                if (!primaryDcKey) return;
-                if (!paidInfoByDc[primaryDcKey]) paidInfoByDc[primaryDcKey] = {};
-                const existing = paidInfoByDc[primaryDcKey][ivrs] || {
+                if (!dcName || !ivrs || !isRevenueUploadedPaidInCategoryPeriod(paymentRow, mode, filterValue)) return;
+                if (!paidInfoByDc[dcName]) paidInfoByDc[dcName] = {};
+                const existing = paidInfoByDc[dcName][ivrs] || {
                     normalAmount: 0, normalCount: 0,
                     agAmount: 0, agCount: 0,
                     unknownAmount: 0, unknownCount: 0,
@@ -3003,18 +2945,17 @@
                     categoryEntry.count += 1;
                     existing.categoryTotals[rowCategory] = categoryEntry;
                 }
-                dcAliases.forEach((dcKey) => {
-                    if (!paidInfoByDc[dcKey]) paidInfoByDc[dcKey] = {};
-                    paidInfoByDc[dcKey][ivrs] = existing;
-                });
+                paidInfoByDc[dcName][ivrs] = existing;
             });
             return paidInfoByDc;
         }
 
         function buildRevenueCategoryDiagnostic(mode, filterValue) {
-            const targetDcNames = getRevenueCategoryTargetDcs();
-            const targetDcs = new Set(targetDcNames.flatMap(getRevenueCategoryDcAliases).filter(Boolean));
-            const masterIvrsByDc = buildRevenueCategoryMasterDcLookup(targetDcNames);
+            const targetDcs = new Set(getRevenueCategoryTargetDcs().map((dcName) => normalizeDcName(dcName)).filter(Boolean));
+            const masterIvrsByDc = {};
+            targetDcs.forEach((dcName) => {
+                masterIvrsByDc[dcName] = new Set(getRevenueMasterRowsForDc(dcName).map((row) => normalizeRevenueIvrs(row.ivrsNo)).filter(Boolean));
+            });
 
             let uploadedRows = 0;
             let selectedMonthRows = 0;
@@ -3024,15 +2965,15 @@
             let missingDate = 0;
 
             getRevenueCategoryPaymentSourceRows().forEach((paymentRow) => {
+                    const dcName = getRevenueUploadedPaidRowDcName(paymentRow);
                     const ivrs = getRevenueUploadedPaidRowIvrs(paymentRow);
-                    const dcKey = resolveRevenueCategoryPaymentDcKey(paymentRow, ivrs, targetDcs, masterIvrsByDc);
-                    if (!ivrs || !dcKey) return;
+                    if (!dcName || !ivrs || !targetDcs.has(dcName)) return;
 
                     uploadedRows += 1;
                     const targetMonthKey = mode === "MONTHLY"
                         ? normalizeRevenueMonthFilterKey(filterValue)
                         : getRevenueMonthKey(filterValue || getCurrentDateDDMMYYYY());
-                    const paidDate = normalizeRevenueUploadedPaidRowDateForFilter(paymentRow);
+                    const paidDate = normalizeRevenuePaidDate(getRevenueUploadedPaidRowDate(paymentRow), targetMonthKey);
                     if (!paidDate) {
                         missingDate += 1;
                         return;
@@ -3044,7 +2985,7 @@
                     }
 
                     selectedMonthRows += 1;
-                    if (masterIvrsByDc[dcKey]?.has(ivrs)) {
+                    if (masterIvrsByDc[dcName]?.has(ivrs)) {
                         matchedMasterRows += 1;
                     } else {
                         masterNotMatchedRows += 1;
@@ -3067,7 +3008,7 @@
             if (activeViewLevel === "DC") {
                 const groups = {};
                 const dcName = normalizeDcName(activeDC);
-                const paidInfo = getRevenueCategoryPaidInfoForDc(paidInfoByDc, dcName);
+                const paidInfo = paidInfoByDc[dcName] || {};
                 const paidCountedIvrsSet = new Set();
                 getRevenueMasterRowsForDc(activeDC).forEach((row) => {
                     const hqName = String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL";
@@ -3083,7 +3024,7 @@
                     const groupRows = group.dcs.map((dcName) => {
                         const normalizedDc = normalizeDcName(dcName);
                         const g = createRevenueCategoryGroup(normalizedDc);
-                        const paidInfo = getRevenueCategoryPaidInfoForDc(paidInfoByDc, normalizedDc);
+                        const paidInfo = paidInfoByDc[normalizedDc] || {};
                         const paidCountedIvrsSet = new Set();
                         getRevenueMasterRowsForDc(dcName).forEach((row) => addRevenueCategoryConsumer(g, row, paidInfo, paidCountedIvrsSet));
                         return g;
@@ -3101,7 +3042,7 @@
                     const groupRows = group.dcs.map((dcName) => {
                         const normalizedDc = normalizeDcName(dcName);
                         const g = createRevenueCategoryGroup(normalizedDc, { divisionName });
-                        const paidInfo = getRevenueCategoryPaidInfoForDc(paidInfoByDc, normalizedDc);
+                        const paidInfo = paidInfoByDc[normalizedDc] || {};
                         const paidCountedIvrsSet = new Set();
                         getRevenueMasterRowsForDc(dcName).forEach((row) => addRevenueCategoryConsumer(g, row, paidInfo, paidCountedIvrsSet));
                         return g;
@@ -3182,14 +3123,21 @@
             return "Circle: SEONI CIRCLE";
         }
 
+        function formatRevenuePercent(numerator, denominator) {
+            const num = Number(numerator) || 0;
+            const den = Number(denominator) || 0;
+            if (!den) return "0%";
+            return `${((num / den) * 100).toFixed(1)}%`;
+        }
+
         function exportRevenueCategorySummary(fmt, rows, label, reportType, diagnostic = null) {
             const levelT = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
             const firstCols = activeViewLevel === "CIRCLE" ? ["DIVISION", "DC NAME"] : [activeViewLevel === "DC" ? "HQ NAME" : "DC NAME"];
             const metricCols = revenueCategoryList.flatMap((category) => {
                 const label = getRevenueCategoryDisplayLabel(category);
-                return [`${label} PAID`, `${label} PAID %`, `${label} PAID AMT (LAKH)`, `${label} AMT %`, `${label} UNPAID`, `${label} UNPAID AMT (LAKH)`];
+                return [`${label} PAID`, `${label} PAID %`, `${label} PAID AMT (LAKH)`, `${label} PAID AMT %`, `${label} UNPAID`, `${label} UNPAID AMT (LAKH)`];
             });
-            const header = [...firstCols, ...metricCols, "TOTAL PAID", "TOTAL PAID %", "TOTAL PAID AMT (LAKH)", "TOTAL AMT %", "TOTAL UNPAID", "TOTAL UNPAID AMT (LAKH)"];
+            const header = [...firstCols, ...metricCols, "TOTAL PAID", "TOTAL PAID AMT (LAKH)", "TOTAL UNPAID", "TOTAL UNPAID AMT (LAKH)"];
             const diagnosticRows = diagnostic ? [
                 ["Uploaded Payment Rows", diagnostic.uploadedUnique],
                 ["Selected Month Payment Rows", diagnostic.selectedMonth],
@@ -3203,34 +3151,32 @@
                 return [
                     ...leading,
                     ...revenueCategoryList.flatMap((category) => {
-                        const categoryTotals = row.categories?.[category] || {};
+                        const c = row.categories?.[category] || {};
+                        const paid = c.paid || 0, unpaid = c.unpaid || 0;
+                        const paidAmount = c.paidAmount || 0, unpaidAmount = c.unpaidAmount || 0;
                         return [
-                            categoryTotals.paid || 0,
-                            getRevenueCategoryPaidCountPercent(categoryTotals),
-                            formatRevenueLakhValue(categoryTotals.paidAmount || 0),
-                            getRevenueCategoryPaidAmountPercent(categoryTotals),
-                            categoryTotals.unpaid || 0,
-                            formatRevenueLakhValue(categoryTotals.unpaidAmount || 0)
+                            paid,
+                            formatRevenuePercent(paid, paid + unpaid),
+                            formatRevenueLakhValue(paidAmount),
+                            formatRevenuePercent(paidAmount, paidAmount + unpaidAmount),
+                            unpaid,
+                            formatRevenueLakhValue(unpaidAmount)
                         ];
                     }),
                     row.paidTotal || 0,
-                    formatRevenueCategoryPercent(row.paidTotal || 0, Number(row.paidTotal || 0) + Number(row.unpaidTotal || 0)),
                     formatRevenueLakhValue(row.paidAmountTotal || 0),
-                    formatRevenueCategoryPercent(row.paidAmountTotal || 0, Number(row.paidAmountTotal || 0) + Number(row.unpaidAmountTotal || 0)),
                     row.unpaidTotal || 0,
                     formatRevenueLakhValue(row.unpaidAmountTotal || 0)
                 ];
             };
             const grand = getRevenueCategoryGrandTotals(rows);
+            const grandCategoryCells = (category) => {
+                const c = grand.categories[category];
+                return [c.paid, formatRevenuePercent(c.paid, c.paid + c.unpaid), formatRevenueLakhValue(c.paidAmount), formatRevenuePercent(c.paidAmount, c.paidAmount + c.unpaidAmount), c.unpaid, formatRevenueLakhValue(c.unpaidAmount)];
+            };
             const grandRow = activeViewLevel === "CIRCLE"
-                ? ["", "GRAND TOTAL", ...revenueCategoryList.flatMap((category) => {
-                    const categoryTotals = grand.categories[category];
-                    return [categoryTotals.paid, getRevenueCategoryPaidCountPercent(categoryTotals), formatRevenueLakhValue(categoryTotals.paidAmount), getRevenueCategoryPaidAmountPercent(categoryTotals), categoryTotals.unpaid, formatRevenueLakhValue(categoryTotals.unpaidAmount)];
-                }), grand.paidTotal, formatRevenueCategoryPercent(grand.paidTotal, Number(grand.paidTotal || 0) + Number(grand.unpaidTotal || 0)), formatRevenueLakhValue(grand.paidAmountTotal), formatRevenueCategoryPercent(grand.paidAmountTotal, Number(grand.paidAmountTotal || 0) + Number(grand.unpaidAmountTotal || 0)), grand.unpaidTotal, formatRevenueLakhValue(grand.unpaidAmountTotal)]
-                : ["GRAND TOTAL", ...revenueCategoryList.flatMap((category) => {
-                    const categoryTotals = grand.categories[category];
-                    return [categoryTotals.paid, getRevenueCategoryPaidCountPercent(categoryTotals), formatRevenueLakhValue(categoryTotals.paidAmount), getRevenueCategoryPaidAmountPercent(categoryTotals), categoryTotals.unpaid, formatRevenueLakhValue(categoryTotals.unpaidAmount)];
-                }), grand.paidTotal, formatRevenueCategoryPercent(grand.paidTotal, Number(grand.paidTotal || 0) + Number(grand.unpaidTotal || 0)), formatRevenueLakhValue(grand.paidAmountTotal), formatRevenueCategoryPercent(grand.paidAmountTotal, Number(grand.paidAmountTotal || 0) + Number(grand.unpaidAmountTotal || 0)), grand.unpaidTotal, formatRevenueLakhValue(grand.unpaidAmountTotal)];
+                ? ["", "GRAND TOTAL", ...revenueCategoryList.flatMap(grandCategoryCells), grand.paidTotal, formatRevenueLakhValue(grand.paidAmountTotal), grand.unpaidTotal, formatRevenueLakhValue(grand.unpaidAmountTotal)]
+                : ["GRAND TOTAL", ...revenueCategoryList.flatMap(grandCategoryCells), grand.paidTotal, formatRevenueLakhValue(grand.paidAmountTotal), grand.unpaidTotal, formatRevenueLakhValue(grand.unpaidAmountTotal)];
             const title = `${levelT} ${reportType} CATEGORY WISE PAID/UNPAID SUMMARY`;
             const generatedAt = `${getCurrentDateDDMMYYYY()} ${getCurrentTimeHHMM()}`;
 
@@ -3290,11 +3236,11 @@
                 [
                     ...firstCols.map((col) => ({ content: col, rowSpan: 2, styles: { valign: "middle", halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } })),
                     ...revenueCategoryList.map((category) => ({ content: getRevenueCategoryDisplayLabel(category), colSpan: 6, styles: { halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } })),
-                    { content: "TOTAL", colSpan: 6, styles: { halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } }
+                    { content: "TOTAL", colSpan: 4, styles: { halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } }
                 ],
                 [
-                    ...revenueCategoryList.flatMap(() => ["Paid", "Paid %", "Paid Amt (L)", "Amt %", "Unpaid", "Unpaid Amt (L)"]),
-                    "Paid", "Paid %", "Paid Amt (L)", "Amt %", "Unpaid", "Unpaid Amt (L)"
+                    ...revenueCategoryList.flatMap(() => ["Paid", "Paid %", "Paid Amt (L)", "Paid Amt %", "Unpaid", "Unpaid Amt (L)"]),
+                    "Paid", "Paid Amt (L)", "Unpaid", "Unpaid Amt (L)"
                 ]
             ];
             doc.autoTable({
@@ -12035,9 +11981,21 @@
                 if (uploadPanel) uploadPanel.style.display = "none";
             }
             setRevenuePaidUploadStatus("", true, false);
-            renderRevenuePaidUploadSummary(getRevenuePaidUploadMeta(activeDC || ""));
+            const localMeta = getRevenuePaidUploadMeta(activeDC || "");
+            renderRevenuePaidUploadSummary(localMeta);
+            const summaryBox = document.getElementById("revenue-paid-upload-summary");
+            if (summaryBox) {
+                summaryBox.style.display = "block";
+                const checkingNote = document.createElement("div");
+                checkingNote.id = "revenue-paid-upload-summary-checking";
+                checkingNote.style.cssText = "text-align:center; font-size:0.68rem; font-weight:800; color:#0d9488; margin-top:6px;";
+                checkingNote.innerText = "Latest status check ho raha hai...";
+                summaryBox.appendChild(checkingNote);
+            }
             refreshRevenuePaidUploadBackendStatus(activeDC || "");
             fetchRevenuePaidUploadSummaryFromServer(activeDC || "").then((serverMeta) => {
+                const checkingNote = document.getElementById("revenue-paid-upload-summary-checking");
+                if (checkingNote) checkingNote.remove();
                 if (!serverMeta) return;
                 renderRevenuePaidUploadSummary(serverMeta);
                 saveRevenuePaidUploadMeta(serverMeta);
@@ -12282,9 +12240,8 @@
             });
 
             const serverByDc = {};
-            Object.entries(getRevenueUploadedPaidCache() || {}).forEach(([cacheKey, row]) => {
-                const cacheDcName = String(cacheKey || "").split("|")[0] || "";
-                const dcName = getRevenueUploadedPaidRowDcName(row, cacheDcName);
+            Object.values(getRevenueUploadedPaidCache() || {}).forEach((row) => {
+                const dcName = getRevenueUploadedPaidRowDcName(row);
                 if (!dcName) return;
                 if (!serverByDc[dcName]) serverByDc[dcName] = [];
                 getRevenueUploadedPaidPaymentRows(row).forEach((paymentRow) => {
@@ -12301,9 +12258,9 @@
             allDcNames.forEach((dcName) => {
                 const rawList = rawByDc[dcName] || [];
                 const serverList = serverByDc[dcName] || [];
-                // Raw uploaded payment rows category/date/source ke liye sabse exact hain.
-                // Agar raw rows available hain to unhi ko priority do, warna backend cache fallback rahega.
-                rows.push(...(rawList.length ? rawList : serverList));
+                // Jo bhi source zyada complete ho (zyada rows) usi DC ke liye use karo -
+                // taaki partial/adhoora local cache poore server data ko hide na kare.
+                rows.push(...(serverList.length > rawList.length ? serverList : rawList));
             });
             return rows;
         }
@@ -12677,28 +12634,19 @@
             }));
         }
 
-        async function verifyRevenuePaidBackendUpload(entries, dcName, maxAttempts = 18) {
-            const expected = new Map((entries || []).map((entry) => [
-                getRevenueUploadedPaidRowIvrs(entry),
-                Math.round(getRevenueUploadedPaidRowAmount(entry))
-            ]).filter(([ivrs]) => ivrs));
-            if (!expected.size) return false;
+        async function verifyRevenuePaidBackendUpload(entries, dcName, maxAttempts = 30) {
+            const expectedCount = (entries || []).filter((entry) => getRevenueUploadedPaidRowIvrs(entry)).length;
+            if (!expectedCount) return false;
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                 try {
-                    const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidEntries&dc_name=${encodeURIComponent(dcName || "")}&t=${Date.now()}`);
+                    const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getPaidMasterRowCount&dc_name=${encodeURIComponent(dcName || "")}&t=${Date.now()}`);
                     const parsed = await response.json();
-                    const remoteEntries = Array.isArray(parsed?.entries) ? parsed.entries : (Array.isArray(parsed?.data) ? parsed.data : []);
-                    const remote = new Map(remoteEntries.map((entry) => [
-                        getRevenueUploadedPaidRowIvrs(entry),
-                        Math.round(getRevenueUploadedPaidRowAmount(entry))
-                    ]).filter(([ivrs]) => ivrs));
-                    const verified = remote.size === expected.size && Array.from(expected.entries()).every(([ivrs, amount]) => remote.get(ivrs) === amount);
-                    if (parsed?.status === "success" && verified) return true;
+                    if (parsed?.status === "success" && Number(parsed.count) === expectedCount) return true;
                 } catch (_) {}
                 if (attempt < maxAttempts) {
                     const verificationPercent = 70 + Math.round((attempt / maxAttempts) * 29);
                     setRevenuePaidUploadProgress(verificationPercent, `Backend verification chal rahi hai... (${attempt}/${maxAttempts})`);
-                    await new Promise((resolve) => setTimeout(resolve, 5000));
+                    await new Promise((resolve) => setTimeout(resolve, 3000));
                 }
             }
             return false;
