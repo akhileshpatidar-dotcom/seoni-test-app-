@@ -138,7 +138,7 @@
         .header-menu-wrap { grid-column: 3; justify-self: end; position: relative; display: none; }
         .header-menu-btn { width: 34px; height: 34px; border: none; border-radius: 999px; background: rgba(255,255,255,0.18); color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 1.2rem; line-height: 1; }
         .header-menu-list { position: absolute; right: 0; top: 40px; min-width: 138px; background: #ffffff; border: 1px solid #bfdbfe; border-radius: 14px; box-shadow: 0 12px 28px rgba(15,23,42,0.18); padding: 7px; display: none; z-index: 300; }
-        .header-menu-item { width: 100%; border: none; background: #eff6ff; color: #1d4ed8; border-radius: 10px; padding: 9px 10px; font-size: 0.72rem; font-weight: 950; text-align: left; text-transform: none; }
+        .header-menu-item { width: 100%; border: 1.5px solid #e2e8f0; background: #f8fafc; color: #1e293b; border-radius: 10px; padding: 10px 12px; font-size: 0.74rem; font-weight: 800; text-align: left; text-transform: none; letter-spacing: 0.01em; }
         @keyframes liveProgressBlink {
             0%, 100% { background: #dcfce7; color: #166534; box-shadow: 0 0 0 rgba(34,197,94,0); }
             50% { background: #16a34a; color: #ffffff; box-shadow: 0 0 14px rgba(34,197,94,0.55); }
@@ -631,6 +631,79 @@
         @media (max-width: 800px) {
             .stock-mini-grid { grid-template-columns: 1fr; }
         }
+
+        /* ===== Professional UI polish (visual only, no logic changes) ===== */
+        button, .dashboard-btn, .btn-unique, .search-btn-custom, .submit-sync-btn,
+        .small-bottom-btn, .stock-submit, .stock-top-btn, .stock-small-btn,
+        .chhapara-calc-action, .gps-camera-action-btn, .feeder-submit-btn,
+        .vehicle-photo-btn, .header-menu-btn, .professional-trigger,
+        .pwa-install-action-btn, .progress-module-btn, .report-opt,
+        .stock-tile, .option-item, .stock-remove-btn, .chhapara-delete-btn,
+        .gps-camera-status-btn, .pwa-install-close-btn, .dark-mode-toggle-btn {
+            cursor: pointer;
+            transition: transform 0.12s cubic-bezier(0.4,0,0.2,1), box-shadow 0.18s ease, filter 0.15s ease, opacity 0.15s ease;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+        button:active, .dashboard-btn:active, .btn-unique:active, .search-btn-custom:active,
+        .submit-sync-btn:active, .small-bottom-btn:active, .stock-submit:active,
+        .stock-top-btn:active, .stock-small-btn:active, .chhapara-calc-action:active,
+        .gps-camera-action-btn:active, .feeder-submit-btn:active, .vehicle-photo-btn:active,
+        .header-menu-btn:active, .pwa-install-action-btn:active, .progress-module-btn:active,
+        .stock-tile:active, .option-item:active, .stock-remove-btn:active,
+        .chhapara-delete-btn:active, .gps-camera-status-btn:active, .dark-mode-toggle-btn:active {
+            transform: scale(0.965);
+            filter: brightness(0.96);
+        }
+        button:disabled, [disabled] { opacity: 0.55; cursor: not-allowed; transform: none !important; filter: none !important; }
+
+        /* Softer, more layered shadows on primary action surfaces */
+        .dashboard-btn { box-shadow: 0 1px 2px rgba(15,23,42,0.06), 0 8px 20px -6px rgba(15,23,42,0.28); letter-spacing: 0.03em; }
+        .dashboard-btn:hover { box-shadow: 0 2px 4px rgba(15,23,42,0.08), 0 12px 26px -6px rgba(15,23,42,0.32); }
+        .btn-unique, .search-btn-custom, .stock-submit, .stock-top-btn, .stock-small-btn,
+        .stock-tile, .gps-camera-action-btn, .feeder-submit-btn, .chhapara-calc-action,
+        .submit-sync-btn, .small-bottom-btn, .gps-camera-status-btn {
+            box-shadow: 0 1px 2px rgba(15,23,42,0.08), 0 10px 22px -8px rgba(15,23,42,0.35);
+        }
+
+        /* Header: crisper depth + refined icon buttons */
+        .app-header { box-shadow: 0 1px 0 rgba(255,255,255,0.12) inset, 0 6px 18px -4px rgba(0,0,0,0.22); }
+        .header-menu-btn, .dark-mode-toggle-btn {
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15), 0 0 0 1px rgba(255,255,255,0.08) inset;
+        }
+        .header-menu-btn:hover { background: rgba(255,255,255,0.26); }
+        .header-menu-list { border-color: #e2e8f0; }
+        .header-menu-item { transition: background 0.15s ease, border-color 0.15s ease; }
+        .header-menu-item:hover { background: #eef2f7; border-color: #cbd5e1; }
+
+        /* Inputs: calmer borders, glowing focus ring instead of static thick borders */
+        .professional-trigger, .ivrs-input, .teal-boundary-input, .stock-input, .stock-select,
+        .stock-textarea, .chhapara-calc-input, .feeder-reading-box {
+            border-width: 1.5px !important;
+            transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        }
+        .professional-trigger:focus-within, .ivrs-input:focus, .teal-boundary-input:focus,
+        .stock-input:focus, .stock-select:focus, .stock-textarea:focus,
+        .chhapara-calc-input:focus, .feeder-reading-box:focus {
+            box-shadow: 0 0 0 4px rgba(13,148,136,0.14);
+        }
+
+        /* Cards: consistent, softer elevation */
+        .main-card, .stock-stat, .stock-section-card, .feeder-card, .vehicle-reading-card,
+        .stock-ledger-item, .chhapara-entry-card, .summary-wrapper, .stock-mini-card,
+        .stock-summary-box, .gps-camera-card, .gps-camera-status-card, .pwd-card {
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 10px 28px -10px rgba(15,23,42,0.16);
+        }
+
+        /* Toast + modals: modern soft elevation */
+        #toast-notif { box-shadow: 0 10px 30px -6px rgba(15,23,42,0.35); }
+        .gps-camera-card, .gps-camera-status-card, .pwd-card { border-radius: 26px; }
+
+        /* Slightly calmer type weight on shouty uppercase labels for a more professional feel */
+        .dashboard-btn, .btn-unique, .stock-top-btn, .stock-small-btn, .stock-tile,
+        .progress-module-btn, .report-opt, .small-bottom-btn, .submit-sync-btn, .stock-submit {
+            font-weight: 800;
+        }
     </style>
 </head>
 <body>
@@ -694,7 +767,7 @@
     <div class="app-shell">
         <header id="app-header" class="app-header bg-teal-grad">
             <div style="grid-column: 1;">
-                <div id="back-btn" class="cursor-pointer flex items-center justify-center h-full w-full" style="display: none;" onclick="goBack()" role="button" tabindex="0" aria-label="Peeche jaayein" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault(); goBack();}">
+                <div id="back-btn" class="cursor-pointer flex items-center justify-center h-full w-full" style="display: none;" onclick="history.back()" role="button" tabindex="0" aria-label="Peeche jaayein" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault(); history.back();}">
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"></path></svg>
                 </div>
             </div>
@@ -705,11 +778,11 @@
             <div id="header-menu-wrap" class="header-menu-wrap">
                 <button type="button" class="header-menu-btn" onclick="toggleHeaderMenu(event)">⋮</button>
                 <div id="header-menu-list" class="header-menu-list">
-                    <button type="button" class="header-menu-item revenue-header-menu-item live-progress-menu-item" onclick="openRevenueLiveProgress()">Live progress</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueReportDownload()" style="margin-top:6px; text-align:center;">Date/month report</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePendingList()" style="margin-top:6px; text-align:center;">Pending list</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueMessageCenter()" style="margin-top:6px; text-align:center; background:#ecfdf5; color:#047857; border:1.5px solid #86efac;">Send SMS / WhatsApp</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePaidUpload()" style="margin-top:6px; text-align:center; background:#fee2e2; color:#b91c1c; border:1.5px solid #fca5a5;">Admin Upload Cash List</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item live-progress-menu-item" onclick="openRevenueLiveProgress()">⏱️ Live Progress</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueReportDownload()" style="margin-top:6px; text-align:center;">📄 Date/Month Report</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePendingList()" style="margin-top:6px; text-align:center;">⏳ Pending List</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueMessageCenter()" style="margin-top:6px; text-align:center;">💬 Send SMS / WhatsApp</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePaidUpload()" style="margin-top:10px; text-align:center; background:#fee2e2; color:#b91c1c; border:1.5px solid #fca5a5; border-top:2px solid #f87171; padding-top:10px;">🔒 Admin Upload Cash List</button>
                     <button id="staff-admin-header-menu-item" type="button" class="header-menu-item" onclick="openStaffAdmin()" style="display:none; text-align:center; background:#fff7ed; color:#c2410c; border:1.5px solid #fdba74;">STAFF ADMIN</button>
                 </div>
             </div>
@@ -750,7 +823,7 @@
                     <div id="dc-menu" class="dropdown-menu"></div>
                 </div>
             </div>
-            <div id="lakhnadon-special-actions" class="px-2" style="display: none;">
+            <div id="lakhnadon-special-actions" class="px-4" style="display: none;">
                 <button class="dashboard-btn bg-cyan-grad" onclick="switchView('subdn-chhapara')">SUB DN CHHAPARA</button>
             </div>
             <button class="small-bottom-btn" onclick="askPassword('DIVISION')">DIVISION DAILY PROGRESS</button>
@@ -1615,7 +1688,7 @@
                     { name: "KANHIWADA", subDn: "KEOLARI", csvUrl: "" },
                     { name: "KEOLARI", subDn: "KEOLARI", csvUrl: "" },
                     { name: "KHAIRAPALARI", subDn: "KEOLARI", csvUrl: "" },
-                    { name: "KURAI", subDn: "AE (D)", csvUrl: "" },
+                    { name: "KURAI", subDn: "AE (D)", csvUrl: "https://docs.google.com/spreadsheets/d/15c2CHolan0YVYh5Hwe4akn1YNk1SUhhLVa24h9ZBQbU/export?format=csv&gid=0" },
                     { name: "MUNGWANI", subDn: "AE (D)", csvUrl: "" },
                     { name: "PANDIYA CHHAPARA", subDn: "KEOLARI", csvUrl: "" },
                     { name: "SEONI (T)", subDn: "SEONI (T)", csvUrl: "https://docs.google.com/spreadsheets/d/1XCmXDVrZSEFK_TBjsGsx2ZHwhTqGNN_kLM6CcJ0VD-Q/export?format=csv&gid=0" },
@@ -1637,7 +1710,7 @@
                     { name: "DHUMA", subDn: "LAKHNADON", csvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vTLZb7N8resS05d0x0Txuh38Th4_bHXBHDBcKNc_mrJaqeYe0FyzdpbctR0r6xhtCFpNLuXN_737the/pub?output=csv" },
                     { name: "GANESHGANJ", subDn: "CHHAPARA", csvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSpKAgJ9I3cus_l-QbagEIsaM8kmIZrkV0cYc00lnOg_MAXJZXrIzJC9QghdStYz0g-yWbtUKjn4uFI/pub?output=csv" },
                     { name: "GHANSORE", subDn: "LAKHNADON", csvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrnZZ4FhdFSpFM2NfiTGAxbkUa9OQin4VQW9t06bAzRzjHZd_F4mVc3_vv4XxXPWSF_p78YoVIJI5Y/pub?output=csv" },
-                    { name: "KEDARPUR", subDn: "LAKHNADON", csvUrl: "https://docs.google.com/spreadsheets/d/e/2PACX-1vTBdrZyG4W8F0sR5lCoTxfTC9J15m86DRo2GXLwAI_HM3TBua4zFYq96qu_Obu6DjhWp6hK-TZNFaVr/pub?output=csv" },
+                    { name: "KEDARPUR", subDn: "LAKHNADON", csvUrl: "https://docs.google.com/spreadsheets/d/145bjD_AoAKWnTfzSaVAXoFpq9cZooSoM8jl0JKBfDkw/export?format=csv&gid=0" },
                     { name: "LAKHNADON", subDn: "LAKHNADON", csvUrl: "https://docs.google.com/spreadsheets/d/1_r5WgGV9bs-aed86dZLOlDKmK5g9J7qiGsmQAqDE1as/export?format=csv&gid=0" }
                 ]
             }
@@ -1683,7 +1756,9 @@
             "GANESHGANJ": "https://docs.google.com/spreadsheets/d/1jQJPvuEn4NZZRyUf-2ye7skeD6cMdLSrzx7aBTiDmR0/export?format=csv&gid=0",
             "DHANORA": "https://docs.google.com/spreadsheets/d/1qNgLx9o6hp4nwLGaCwy5DRW8xmh6eaNCoysbbH5bL1o/export?format=csv&gid=0",
             "GHANSORE": "https://docs.google.com/spreadsheets/d/e/2PACX-1vRrnZZ4FhdFSpFM2NfiTGAxbkUa9OQin4VQW9t06bAzRzjHZd_F4mVc3_vv4XxXPWSF_p78YoVIJI5Y/pub?output=csv",
-            "LAKHNADON": "https://docs.google.com/spreadsheets/d/1_r5WgGV9bs-aed86dZLOlDKmK5g9J7qiGsmQAqDE1as/export?format=csv&gid=0"
+            "LAKHNADON": "https://docs.google.com/spreadsheets/d/1_r5WgGV9bs-aed86dZLOlDKmK5g9J7qiGsmQAqDE1as/export?format=csv&gid=0",
+            "KURAI": "https://docs.google.com/spreadsheets/d/15c2CHolan0YVYh5Hwe4akn1YNk1SUhhLVa24h9ZBQbU/export?format=csv&gid=0",
+            "KEDARPUR": "https://docs.google.com/spreadsheets/d/145bjD_AoAKWnTfzSaVAXoFpq9cZooSoM8jl0JKBfDkw/export?format=csv&gid=0"
         };
         const stockMaterialsCsvUrl = "https://docs.google.com/spreadsheets/d/1OfrU7ZuN5LV9f_3hqORv66BVLYKFGIBBjDyeSXHwldA/export?format=csv&gid=641545139";
         const shmsCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTbq-yne90yg9Vn8eylxM3zKMfZjPLlVhca3JhsjAzMlcm6MAVl8vAA-xXVgZI_XjWQBHyjB36YO1Cz/pub?output=csv";
@@ -1713,6 +1788,7 @@
         ];
 
         let activeDiv = "", activeDC = "", activeGrad = "bg-teal-grad", summaryMode = "DAILY", summaryModule = "MOBILE", activeViewLevel = "", currentData = null, pendingLevel = "", dcCacheRaw = {}, dcCacheRows = {}, uiListSummary = [], grandTC = 0, grandTU = 0, courtCaseRaw = "", courtCaseCacheByDc = {}, courtCaseLines = [], courtCaseRecords = [], lokDistributedRows = [], lokDistributedLoaded = false, currentCourtRecord = null, receiverGeoData = null;
+        let suppressHistoryPush = false;
         let progressSummaryDownloadInProgress = false;
         let selectedStockReceiveItem = null, selectedStockIssueItem = null, pendingReceiveItems = [], pendingIssueItems = [];
         let activeIssueDc = "";
@@ -1844,7 +1920,7 @@
                     navigator.serviceWorker.register("./service-worker.js").catch(() => {});
                 });
             }
-            const today = new Date().toISOString().split("T")[0];
+            const today = getTodayIsoDate();
             document.getElementById("report-date").value = today;
             getAllDcConfigs().forEach(async ({ name, csvUrl }) => {
                 if (!csvUrl) return;
@@ -1869,7 +1945,9 @@
             setupStockEntrySearch("receive");
             setupStockEntrySearch("issue");
             renderIssueDcDropdown();
+            suppressHistoryPush = true;
             switchView("home");
+            suppressHistoryPush = false;
             prewarmGpsCameraLocationIfAllowed();
         });
 
@@ -2174,8 +2252,8 @@
                 ivrs: getConsumerField(found, ["IVRS", "IVRS NO", "IVRS NUMBER", "IVRSNO"], searchIvrs),
                 name: getConsumerField(found, ["NAME", "CONSUMER NAME"]),
                 father: getConsumerField(found, ["FATHER", "FATHER NAME"]),
-                old: getConsumerField(found, ["OLD MOBILE", "OLD MOBILE NO", "OLD MOBILE NUMBER", "MOBILE NO", "MOBILE NUMBER"]),
-                addr: getConsumerField(found, ["ADDRESS", "ADDR"]),
+                old: normalizeMobileDisplayValue(getConsumerField(found, ["OLD MOBILE", "OLD MOBILE NO", "OLD MOBILE NUMBER", "MOBILE NO", "MOBILE NUMBER"])),
+                addr: getConsumerField(found, ["ADDRESS", "ADDR", "VILLAGE"]),
                 hq: getConsumerField(found, ["HQ", "HQ NAME", "HEADQUARTER", "HEAD QUARTER", "H.Q."])
             };
             document.getElementById("res-ivrs").innerText = currentData.ivrs;
@@ -2547,6 +2625,16 @@
         }
 
         const revenueCategoryList = ["LV1", "LV2", "LV3", "LV4", "LV5"];
+        const revenueCategoryDisplayLabels = {
+            "LV1": "DOMESTIC",
+            "LV2": "NON DOMESTIC",
+            "LV3": "PUBLIC WATER WORKS AND STREET LIGHTS",
+            "LV4": "LT INDUSTRIAL",
+            "LV5": "AGRICULTURE AND ALLIED ACTIVITIES"
+        };
+        function getRevenueCategoryDisplayLabel(category) {
+            return revenueCategoryDisplayLabels[category] || category;
+        }
 
         function normalizeRevenueCategory(value) {
             const raw = normalizeLookupValue(value || "");
@@ -2692,13 +2780,19 @@
         }
 
         function isRevenueUploadedPaidInCategoryPeriod(row, mode, filterValue) {
-            const targetMonthKey = mode === "MONTHLY"
-                ? normalizeRevenueMonthFilterKey(filterValue)
-                : getRevenueMonthKey(filterValue || getCurrentDateDDMMYYYY());
-            if (!targetMonthKey) return false;
+            if (mode === "MONTHLY") {
+                const targetMonthKey = normalizeRevenueMonthFilterKey(filterValue);
+                if (!targetMonthKey) return false;
+                const paidDate = normalizeRevenuePaidDate(getRevenueUploadedPaidRowDate(row), targetMonthKey);
+                if (!paidDate) return false;
+                return getRevenueMonthKey(paidDate) === targetMonthKey;
+            }
+            const targetDate = normalizeRevenueReportDate(filterValue || getCurrentDateDDMMYYYY());
+            if (!targetDate) return false;
+            const targetMonthKey = getRevenueMonthKey(targetDate);
             const paidDate = normalizeRevenuePaidDate(getRevenueUploadedPaidRowDate(row), targetMonthKey);
             if (!paidDate) return false;
-            return getRevenueMonthKey(paidDate) === targetMonthKey;
+            return normalizeRevenueReportDate(paidDate) === targetDate;
         }
 
         function getRevenueUploadedPaidRowDcName(row, fallbackDc = "") {
@@ -3006,7 +3100,10 @@
         function exportRevenueCategorySummary(fmt, rows, label, reportType, diagnostic = null) {
             const levelT = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
             const firstCols = activeViewLevel === "CIRCLE" ? ["DIVISION", "DC NAME"] : [activeViewLevel === "DC" ? "HQ NAME" : "DC NAME"];
-            const metricCols = revenueCategoryList.flatMap((category) => [`${category} PAID`, `${category} PAID AMT (LAKH)`, `${category} UNPAID`, `${category} UNPAID AMT (LAKH)`]);
+            const metricCols = revenueCategoryList.flatMap((category) => {
+                const label = getRevenueCategoryDisplayLabel(category);
+                return [`${label} PAID`, `${label} PAID AMT (LAKH)`, `${label} UNPAID`, `${label} UNPAID AMT (LAKH)`];
+            });
             const header = [...firstCols, ...metricCols, "TOTAL PAID", "TOTAL PAID AMT (LAKH)", "TOTAL UNPAID", "TOTAL UNPAID AMT (LAKH)"];
             const diagnosticRows = diagnostic ? [
                 ["Uploaded Payment Rows", diagnostic.uploadedUnique],
@@ -3094,7 +3191,7 @@
             const groupedHead = [
                 [
                     ...firstCols.map((col) => ({ content: col, rowSpan: 2, styles: { valign: "middle", halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } })),
-                    ...revenueCategoryList.map((category) => ({ content: category, colSpan: 4, styles: { halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } })),
+                    ...revenueCategoryList.map((category) => ({ content: getRevenueCategoryDisplayLabel(category), colSpan: 4, styles: { halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } })),
                     { content: "TOTAL", colSpan: 4, styles: { halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } }
                 ],
                 [
@@ -3205,6 +3302,35 @@
             return html;
         }
 
+        function renderSyncingProgress(cont, isStillValid, label = "SYNCING ALL DC DATA...") {
+            cont.innerHTML = `
+                <div class="text-center py-10">
+                    <p class="font-black text-slate-500" style="font-size:0.85rem;">${escapeHtml(label)}</p>
+                    <div style="max-width:220px; margin:14px auto 0; background:#e2e8f0; border-radius:999px; height:8px; overflow:hidden;">
+                        <div id="summary-sync-progress-fill" style="height:100%; width:2%; background:linear-gradient(90deg,#0d9488,#0f766e); border-radius:999px; transition:width 0.25s ease;"></div>
+                    </div>
+                    <p id="summary-sync-progress-text" class="font-bold text-slate-400" style="font-size:0.72rem; margin-top:6px;">2%</p>
+                </div>
+            `;
+            let percent = 2;
+            const intervalId = setInterval(() => {
+                if (!isStillValid()) {
+                    clearInterval(intervalId);
+                    return;
+                }
+                const fill = document.getElementById("summary-sync-progress-fill");
+                const text = document.getElementById("summary-sync-progress-text");
+                if (!fill || !text) {
+                    clearInterval(intervalId);
+                    return;
+                }
+                percent = Math.min(90, percent + Math.max(1, Math.round((90 - percent) / 8)));
+                fill.style.width = `${percent}%`;
+                text.innerText = `${percent}%`;
+                if (percent >= 90) clearInterval(intervalId);
+            }, 220);
+        }
+
         async function refreshSummary() {
             const refreshToken = ++summaryRefreshToken;
             const moduleAtStart = summaryModule;
@@ -3219,7 +3345,7 @@
                 divAtStart !== activeDiv
             );
             const cont = document.getElementById("summary-content");
-            cont.innerHTML = '<p class="text-center py-10 animate-pulse font-black text-slate-400">SYNCING ALL DC DATA...</p>';
+            renderSyncingProgress(cont, () => refreshToken === summaryRefreshToken);
             const raw = document.getElementById("report-date").value;
             if (!raw) return;
             const parsedSummarySelection = parseSummarySelection(raw, summaryMode);
@@ -4376,6 +4502,18 @@
             return dcCacheRows[normalizeDcName(dcName)] || [];
         }
 
+        function normalizeMobileDisplayValue(value) {
+            const raw = String(value ?? "").trim();
+            if (!raw) return raw;
+            // Google Sheets kabhi-kabhi bade number ko scientific notation me export kar deta hai
+            // (jaise "9.62E+09") — usko wapas poore digit wale number me convert karna.
+            if (/^\d(\.\d+)?e\+?\d+$/i.test(raw)) {
+                const num = Number(raw);
+                if (Number.isFinite(num)) return String(Math.round(num));
+            }
+            return raw;
+        }
+
         function getConsumerField(row, aliases, fallback = "") {
             if (!row) return fallback;
             for (const alias of aliases) {
@@ -4582,6 +4720,10 @@
         function isIosLikeDevice() {
             const ua = String(navigator.userAgent || "");
             return /iPhone|iPad|iPod/i.test(ua) || (ua.includes("Mac") && "ontouchend" in document);
+        }
+
+        function isMobileDevice() {
+            return isIosLikeDevice() || /Android/i.test(navigator.userAgent || "");
         }
 
         function hasRecentGpsCameraGeo() {
@@ -7006,7 +7148,7 @@
             if (input) {
                 input.type = "date";
                 input.value = yesterday.iso;
-                input.max = new Date().toISOString().split("T")[0];
+                input.max = getTodayIsoDate();
             }
             setShmsProgressStatus("SHMS daily progress data load ho raha hai...");
             const loaded = await loadShmsProgressData(true);
@@ -7042,7 +7184,7 @@
                 } else {
                     input.type = "date";
                     input.value = yesterday.iso;
-                    input.max = today.toISOString().split("T")[0];
+                    input.max = getTodayIsoDate();
                 }
             }
             if (dailyBtn) {
@@ -7142,34 +7284,41 @@
                 ? blob
                 : new Blob([blob], { type: "application/pdf" });
 
+            const url = URL.createObjectURL(pdfBlob);
+            const preview = window.open(url, "_blank");
+            if (preview) {
+                setTimeout(() => URL.revokeObjectURL(url), 120000);
+                return true;
+            }
+
             try {
                 const pdfFile = new File([pdfBlob], safeFileName, { type: "application/pdf" });
                 const canShareFile = !!(navigator.share && (!navigator.canShare || navigator.canShare({ files: [pdfFile] })));
                 if (canShareFile) {
                     await navigator.share({ files: [pdfFile], title: safeFileName });
+                    URL.revokeObjectURL(url);
                     return true;
                 }
             } catch (error) {
-                if (error && error.name === "AbortError") return true;
+                if (error && error.name === "AbortError") {
+                    URL.revokeObjectURL(url);
+                    return true;
+                }
             }
 
-            const url = URL.createObjectURL(pdfBlob);
-            const preview = window.open(url, "_blank");
-            if (!preview) {
-                const link = document.createElement("a");
-                link.href = url;
-                link.target = "_blank";
-                link.rel = "noopener";
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-            }
+            const link = document.createElement("a");
+            link.href = url;
+            link.target = "_blank";
+            link.rel = "noopener";
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
             setTimeout(() => URL.revokeObjectURL(url), 120000);
             return true;
         }
 
         function savePdfDocumentForDevice(doc, fileName) {
-            if (!isIosLikeDevice()) {
+            if (!isMobileDevice()) {
                 doc.save(fileName);
                 return true;
             }
@@ -7430,8 +7579,7 @@
             const dateInput = document.getElementById("shms-event-date");
             if (!substationMenu || !feederMenu) return;
             if (dateInput) {
-                const today = new Date().toISOString().split("T")[0];
-                dateInput.max = today;
+                dateInput.max = getTodayIsoDate();
             }
 
             const loaded = await loadShmsData(true);
@@ -8898,7 +9046,7 @@
         function initChhaparaFeederCalculator() {
             const dateInput = document.getElementById("chhapara-reading-date");
             if (dateInput && !dateInput.value) {
-                dateInput.value = new Date().toISOString().split("T")[0];
+                dateInput.value = getTodayIsoDate();
             }
             try {
                 const savedEntries = JSON.parse(localStorage.getItem(chhaparaFeederStorageKey) || "[]");
@@ -11787,6 +11935,11 @@
             setRevenuePaidUploadStatus("", true, false);
             renderRevenuePaidUploadSummary(getRevenuePaidUploadMeta(activeDC || ""));
             refreshRevenuePaidUploadBackendStatus(activeDC || "");
+            fetchRevenuePaidUploadSummaryFromServer(activeDC || "").then((serverMeta) => {
+                if (!serverMeta) return;
+                renderRevenuePaidUploadSummary(serverMeta);
+                saveRevenuePaidUploadMeta(serverMeta);
+            });
         }
 
         function unlockRevenuePaidUpload() {
@@ -11858,17 +12011,44 @@
                 summaryBox.innerHTML = "";
                 return;
             }
+            const lastUploadText = meta.uploadedAtDisplay || formatRevenueUploadDateTime(meta.uploadedAt);
             summaryBox.style.display = "block";
             summaryBox.innerHTML = `
                 <div style="font-size:0.78rem; font-weight:950; color:#166534; text-align:center; margin-bottom:8px;">Last Upload Summary</div>
                 <div><strong>Selected DC:</strong> ${escapeHtml(meta.dcName || "-")}</div>
                 <div><strong>Record Count:</strong> ${escapeHtml(meta.uniqueCount || "0")} Unique IVRS</div>
                 <div><strong>Normal Rows:</strong> ${escapeHtml(meta.normalRows || "0")} | <strong>AG Rows:</strong> ${escapeHtml(meta.agRows || "0")}</div>
-                <div><strong>Last Upload:</strong> ${escapeHtml(formatRevenueUploadDateTime(meta.uploadedAt))}</div>
+                <div><strong>Last Upload:</strong> ${escapeHtml(lastUploadText)}</div>
                 <div><strong>Old Data Status:</strong> ${meta.oldDataReplaced ? "Old data replaced" : "Old data not replaced"}</div>
                 <div><strong>Upload Progress:</strong> ${meta.backendSynced ? "100%" : "99%"}</div>
                 <div><strong>Backend Status:</strong> ${meta.backendSynced ? "Successfully Uploaded" : "Verification pending"}</div>
             `;
+        }
+
+        async function fetchRevenuePaidUploadSummaryFromServer(dcName = activeDC) {
+            const normalizedDc = normalizeDcName(dcName || "");
+            if (!normalizedDc || !revenueCollectionSubmitScriptUrl) return null;
+            try {
+                const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidEntries&dc_name=${encodeURIComponent(normalizedDc)}&t=${Date.now()}`);
+                const parsed = await response.json();
+                if (parsed?.status !== "success" || !Array.isArray(parsed?.entries) || !parsed.entries.length) return null;
+                const entries = parsed.entries;
+                const normalRows = entries.filter((e) => normalizeLookupValue(e.source_type || "") === "NORMAL").length;
+                const agRows = entries.filter((e) => normalizeLookupValue(e.source_type || "") === "AG").length;
+                const latest = entries[entries.length - 1] || {};
+                const uploadedAtDisplay = [latest.uploaded_date, latest.uploaded_time].filter(Boolean).join(" ") || "-";
+                return {
+                    dcName: normalizedDc,
+                    uniqueCount: entries.length,
+                    normalRows,
+                    agRows,
+                    uploadedAtDisplay,
+                    oldDataReplaced: true,
+                    backendSynced: true
+                };
+            } catch (_) {
+                return null;
+            }
         }
 
         async function refreshRevenuePaidUploadBackendStatus(dcName = activeDC) {
@@ -11991,18 +12171,36 @@
 
         function getRevenueCategoryPaymentSourceRows() {
             const rawRows = getRevenueCategoryRawPaymentRows();
-            const rawDcNames = new Set(rawRows.map((row) => getRevenueUploadedPaidRowDcName(row)).filter(Boolean));
-            const rows = [...rawRows];
+            const rawByDc = {};
+            rawRows.forEach((row) => {
+                const dcName = getRevenueUploadedPaidRowDcName(row);
+                if (!dcName) return;
+                if (!rawByDc[dcName]) rawByDc[dcName] = [];
+                rawByDc[dcName].push(row);
+            });
+
+            const serverByDc = {};
             Object.values(getRevenueUploadedPaidCache() || {}).forEach((row) => {
                 const dcName = getRevenueUploadedPaidRowDcName(row);
-                if (rawDcNames.has(dcName)) return;
+                if (!dcName) return;
+                if (!serverByDc[dcName]) serverByDc[dcName] = [];
                 getRevenueUploadedPaidPaymentRows(row).forEach((paymentRow) => {
-                    rows.push({
+                    serverByDc[dcName].push({
                         ...paymentRow,
                         dcName: getRevenueUploadedPaidRowDcName(paymentRow, dcName),
                         ivrsNo: getRevenueUploadedPaidRowIvrs(paymentRow) || getRevenueUploadedPaidRowIvrs(row)
                     });
                 });
+            });
+
+            const allDcNames = new Set([...Object.keys(rawByDc), ...Object.keys(serverByDc)]);
+            const rows = [];
+            allDcNames.forEach((dcName) => {
+                const rawList = rawByDc[dcName] || [];
+                const serverList = serverByDc[dcName] || [];
+                // Jo bhi source zyada complete ho (zyada rows) usi DC ke liye use karo -
+                // taaki partial/adhoora local cache poore server data ko hide na kare.
+                rows.push(...(serverList.length > rawList.length ? serverList : rawList));
             });
             return rows;
         }
@@ -12049,6 +12247,10 @@
                 const ivrsNo = getRevenueUploadedPaidRowIvrs(entry);
                 if (!ivrsNo) return;
                 const resolvedDcName = getRevenueUploadedPaidRowDcName(entry, dcName || activeDC || "");
+                let paymentRowsValue = entry.paymentRows || entry.payment_rows || entry.payments || entry.paymentDetails || [];
+                if (typeof paymentRowsValue === "string") {
+                    try { paymentRowsValue = JSON.parse(paymentRowsValue); } catch (_) { paymentRowsValue = []; }
+                }
                 cache[getRevenueUploadedPaidCacheKey(ivrsNo, resolvedDcName)] = {
                     ivrsNo,
                     dcName: resolvedDcName,
@@ -12056,7 +12258,9 @@
                     paymentDate: getRevenueUploadedPaidRowDate(entry),
                     paymentDateRaw: entry.paymentDateRaw || entry.payment_date_raw || getRevenueUploadedPaidRowDate(entry),
                     paymentCount: entry.payment_count || entry.paymentCount || entry.count || "",
-                    sourceType: entry.source_type || entry.sourceType || entry.type || ""
+                    sourceType: entry.source_type || entry.sourceType || entry.type || "",
+                    tariffCategory: entry.tariffCategory || entry.tariff_category || getRevenueUploadedPaidRowCategory(entry, entry.source_type || entry.sourceType || ""),
+                    paymentRows: Array.isArray(paymentRowsValue) ? paymentRowsValue : []
                 };
             });
             setRevenueUploadedPaidCache(cache);
@@ -12936,13 +13140,16 @@
             ]);
         }
 
+        let revenueLiveProgressToken = 0;
         async function renderRevenueLiveProgress() {
             const tableBox = document.getElementById("revenue-live-table");
             if (!tableBox) return;
+            const myToken = ++revenueLiveProgressToken;
             const dcLabelBox = document.getElementById("revenue-live-dc-label");
             if (dcLabelBox) dcLabelBox.innerText = activeDC ? `DC: ${activeDC}` : getRevenueReportScopeLabel();
-            tableBox.innerHTML = '<p class="text-center py-10 animate-pulse font-black text-slate-400">SYNCING LATEST REPORT...</p>';
+            renderSyncingProgress(tableBox, () => myToken === revenueLiveProgressToken, "SYNCING LATEST REPORT...");
             await Promise.all([syncRevenueLiveEntriesFromSheet(), syncRevenueTdEntriesFromSheet()]);
+            if (myToken !== revenueLiveProgressToken) return;
             const rows = getRevenueCombinedFilteredEntries("DAILY", getCurrentDateDDMMYYYY());
             tableBox.innerHTML = renderRevenueReportHtml(rows, "Aaj ki date me paid/TD entry nahi hai.");
         }
@@ -13020,9 +13227,29 @@
                 doc.text(`Generated: ${reportMeta.generatedAt}`, 283, 10, { align: "right" });
                 doc.setFontSize(11);
                 doc.setTextColor(30, 58, 138);
-                doc.text("Summary", 14, 40);
+                doc.text("Report Diagnostics", 14, 40);
                 doc.autoTable({
                     startY: 44,
+                    head: [["Diagnostic", "Value"]],
+                    body: [
+                        ["Total Records In Report", String(rows.length)],
+                        ["Total Paid Amount", formatRevenueAmount(summaryTotal.amount)],
+                        ["Total Line TD Entries", String(summaryTotal.tdCount)],
+                        ["Report Period", reportMeta.periodLabel],
+                        ["Scope", reportMeta.scopeLabel]
+                    ],
+                    theme: "grid",
+                    headStyles: { fillColor: [15, 118, 110], halign: "center" },
+                    styles: { fontSize: 6, cellPadding: 1.2, halign: "center" },
+                    columnStyles: { 0: { halign: "left" } },
+                    margin: { left: 96, right: 96 }
+                });
+                const summaryTitleY = (doc.lastAutoTable?.finalY || 44) + 8;
+                doc.setFontSize(11);
+                doc.setTextColor(30, 58, 138);
+                doc.text("Summary", 14, summaryTitleY - 2);
+                doc.autoTable({
+                    startY: summaryTitleY + 2,
                     head: [summaryHeaders],
                     body: summaryRows.map((items) => items.map(pdfText)),
                     theme: "grid",
@@ -13060,6 +13287,11 @@
                 ["SCOPE", reportMeta.scopeLabel],
                 ["FILTER", reportMeta.filterLabel],
                 ["GENERATED AT", reportMeta.generatedAt],
+                [],
+                ["DIAGNOSTIC", "VALUE"],
+                ["Total Records In Report", String(rows.length)],
+                ["Total Paid Amount", formatRevenueAmount(summaryTotal.amount)],
+                ["Total Line TD Entries", String(summaryTotal.tdCount)],
                 [],
                 ["SUMMARY"],
                 summaryHeaders,
@@ -13249,6 +13481,9 @@
         }
 
         function switchView(id) {
+            if (!suppressHistoryPush) {
+                try { history.pushState({ appView: id }, "", ""); } catch (_) {}
+            }
             document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
             const target = document.getElementById(id + "-view");
             if (target) {
@@ -13400,6 +13635,15 @@
             }
         }
 
+        window.addEventListener("popstate", () => {
+            suppressHistoryPush = true;
+            try {
+                goBack();
+            } finally {
+                suppressHistoryPush = false;
+            }
+        });
+
         function goBack() {
             const activeNode = document.querySelector(".view.active");
             if (!activeNode) return;
@@ -13474,7 +13718,7 @@
                 input.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
             } else {
                 input.type = "date";
-                input.value = new Date().toISOString().split("T")[0];
+                input.value = getTodayIsoDate();
             }
             refreshSummary();
         }
