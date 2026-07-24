@@ -1408,6 +1408,7 @@
 
         <main id="revenue-collection-view" class="view">
             <div class="search-panel" style="padding-top:26px;">
+                <div id="revenue-active-dc-label" style="display:none; width:fit-content; max-width:280px; margin:0 auto 10px; background:#eff6ff; border:1.5px solid #bfdbfe; border-radius:10px; padding:6px 14px; text-align:center; font-size:0.72rem; font-weight:950; color:#1d4ed8;"></div>
                 <div id="revenue-search-input-wrapper" class="input-wrapper relative w-full max-w-[280px] mx-auto">
                     <svg style="position:absolute; left:16px; top:50%; transform:translateY(-50%); width:22px; height:22px; color:#0369a1; pointer-events:none;" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z"></path>
@@ -1936,6 +1937,9 @@
                         } catch (_) {}
                     }
                 } catch (e) {}
+            });
+            Object.keys(revenueCollectionCsvUrls).forEach((dcKey) => {
+                loadRevenueCollectionData(dcKey).catch(() => {});
             });
             loadCourtCaseData();
             loadStockMaterialsData();
@@ -3073,6 +3077,7 @@
             return totals;
         }
 
+        let categoryDownloadProgressToken = 0;
         function setProgressCategoryDownloadState(isDownloading, message = "") {
             const status = document.getElementById("progress-category-download-status");
             const buttons = document.querySelectorAll("#progress-category-download-box button");
@@ -3082,12 +3087,20 @@
                 button.style.opacity = isDownloading ? "0.65" : "1";
                 button.style.pointerEvents = isDownloading ? "none" : "auto";
             });
+            categoryDownloadProgressToken++;
             if (status) {
-                status.style.display = statusMessage ? "block" : "none";
-                status.textContent = statusMessage;
-                const failed = statusMessage === getActionStatusText("failed");
-                status.style.background = isDownloading ? "#dbeafe" : (failed ? "#fff1f2" : "#dcfce7");
-                status.style.color = isDownloading ? "#1d4ed8" : (failed ? "#991b1b" : "#047857");
+                if (isDownloading) {
+                    status.style.display = "block";
+                    status.style.background = "#dbeafe";
+                    status.style.color = "#1d4ed8";
+                    renderSyncingProgress(status, ((token) => () => token === categoryDownloadProgressToken)(categoryDownloadProgressToken), statusMessage || "Downloading...");
+                } else {
+                    status.style.display = statusMessage ? "block" : "none";
+                    status.textContent = statusMessage;
+                    const failed = statusMessage === getActionStatusText("failed");
+                    status.style.background = failed ? "#fff1f2" : "#dcfce7";
+                    status.style.color = failed ? "#991b1b" : "#047857";
+                }
             }
         }
 
@@ -9610,6 +9623,15 @@
             const input = document.getElementById("revenue-search-ivrs");
             const resultBox = document.getElementById("revenue-result-box");
             const noteBox = document.getElementById("revenue-empty-note");
+            const dcLabel = document.getElementById("revenue-active-dc-label");
+            if (dcLabel) {
+                if (activeDC) {
+                    dcLabel.style.display = "block";
+                    dcLabel.innerText = `DC: ${activeDC}`;
+                } else {
+                    dcLabel.style.display = "none";
+                }
+            }
             currentRevenueRecord = null;
             showRevenueSearchControls();
             hideRevenueSearchMoreButton();
@@ -10047,8 +10069,9 @@
                         ${renderRevenueMiniBox("Village", record.village)}
                         ${renderRevenueMiniBox("HQ Name", record.hqName)}
                         ${renderRevenueMiniBox("Category", record.tariffCategory)}
-                        ${renderRevenueMobileActionBox(record.mobileNo)}
+                        ${renderRevenueMiniBox("Mobile No", normalizeMobileDisplayValue(record.mobileNo))}
                     </div>
+                    ${renderRevenueMobileActionRow(record.mobileNo)}
 
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">
                         <div style="background:#fff7ed; border:1.5px solid #fdba74; border-radius:12px; padding:7px; text-align:center;">
@@ -10077,20 +10100,14 @@
             `;
         }
 
-        function renderRevenueMobileActionBox(mobileNo) {
+        function renderRevenueMobileActionRow(mobileNo) {
             const validMobile = normalizeRevenueMessageMobile(mobileNo);
             const disabledStyle = validMobile ? "" : "opacity:0.45; pointer-events:none;";
             return `
-                <div style="display:grid; grid-template-columns:minmax(0,1fr) 58px; gap:5px; min-height:86px;">
-                    <div style="background:#f8fafc; border:1px solid #dbeafe; border-radius:11px; padding:6px; min-width:0; display:flex; flex-direction:column; justify-content:center;">
-                        <div style="font-size:0.56rem; font-weight:950; color:#2563eb; text-transform:uppercase;">Mobile No</div>
-                        <div style="font-size:0.68rem; font-weight:850; color:#1e293b; margin-top:3px; word-break:break-word;">${escapeHtml(validMobile || mobileNo || "-")}</div>
-                    </div>
-                    <div style="display:flex; flex-direction:column; gap:4px; ${disabledStyle}">
-                        <button type="button" onclick="openCurrentRevenueSms()" style="flex:1; min-height:25px; border:none; border-radius:7px; background:#2563eb; color:#fff; font-size:0.52rem; font-weight:950;">SMS</button>
-                        <button type="button" onclick="openCurrentRevenueWhatsApp()" style="flex:1; min-height:25px; border:none; border-radius:7px; background:#16a34a; color:#fff; font-size:0.49rem; font-weight:950;">WHATSAPP</button>
-                        <button type="button" onclick="callCurrentRevenueConsumer()" style="flex:1; min-height:25px; border:none; border-radius:7px; background:#dc2626; color:#fff; font-size:0.52rem; font-weight:950;">CALL</button>
-                    </div>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:7px; ${disabledStyle}">
+                    <button type="button" onclick="openCurrentRevenueSms()" style="min-height:36px; border:none; border-radius:10px; background:#2563eb; color:#fff; font-size:0.6rem; font-weight:950;">SMS</button>
+                    <button type="button" onclick="openCurrentRevenueWhatsApp()" style="min-height:36px; border:none; border-radius:10px; background:#16a34a; color:#fff; font-size:0.58rem; font-weight:950;">WHATSAPP</button>
+                    <button type="button" onclick="callCurrentRevenueConsumer()" style="min-height:36px; border:none; border-radius:10px; background:#dc2626; color:#fff; font-size:0.6rem; font-weight:950;">CALL</button>
                 </div>
             `;
         }
@@ -13684,7 +13701,7 @@
                 switchView("revenue-collection");
             } else if (act === "dc-dashboard-view" || act === "mobile-update-view" || act === "revenue-collection-view") {
                 if (act === "mobile-update-view") {
-                    resetForm();
+                    resetForm(true);
                     switchView("dc-dashboard");
                 } else if (act === "revenue-collection-view") {
                     initRevenueCollection();
