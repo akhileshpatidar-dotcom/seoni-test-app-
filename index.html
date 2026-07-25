@@ -802,8 +802,9 @@
                 <div id="header-menu-list" class="header-menu-list">
                     <button type="button" class="header-menu-item revenue-header-menu-item live-progress-menu-item" onclick="openRevenueLiveProgress()">⏱️ Live Progress</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueReportDownload()" style="margin-top:6px; text-align:center;">📄 Date/Month Report</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePendingList()" style="margin-top:6px; text-align:center;">⏳ Pending List</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePendingList()" style="margin-top:6px; text-align:center;">⏳ Pending DO List</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueMessageCenter()" style="margin-top:6px; text-align:center;">💬 Send SMS / WhatsApp</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueCashReconcile()" style="margin-top:6px; text-align:center;">🧾 Paid by Staff vs NGB Cash List</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePaidUpload()" style="margin-top:10px; text-align:center; background:#fee2e2; color:#b91c1c; border:1.5px solid #fca5a5; border-top:2px solid #f87171; padding-top:10px;">🔒 Admin Upload Cash List</button>
                     <button id="staff-admin-header-menu-item" type="button" class="header-menu-item" onclick="openStaffAdmin()" style="display:none; text-align:center; background:#fff7ed; color:#c2410c; border:1.5px solid #fdba74;">STAFF ADMIN</button>
                 </div>
@@ -1527,6 +1528,37 @@
                 </div>
                 <div id="revenue-report-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#eff6ff; border:1.2px solid #93c5fd; color:#1d4ed8; font-size:0.66rem; font-weight:950; text-align:center;">Downloading...</div>
                 <div id="revenue-report-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
+            </div>
+        </main>
+
+        <main id="revenue-cash-reconcile-view" class="view">
+            <div class="search-panel" style="padding-top:10px;">
+                <div style="width:100%; max-width:360px; background:#fff7ed; border:1.2px solid #fdba74; border-radius:14px; padding:10px 12px; text-align:center;">
+                    <div style="font-size:0.78rem; font-weight:950; color:#c2410c; text-transform:uppercase;">Paid by Staff vs NGB Cash List</div>
+                    <div style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">Staff paid entries ko uploaded cash list se compare karein</div>
+                </div>
+                <div style="display:flex; gap:8px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="revenue-cash-date-mode-btn" onclick="setRevenueCashReconcileMode('DAILY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#c2410c; color:#ffffff; font-size:0.62rem; font-weight:950;">DATE WISE</button>
+                    <button id="revenue-cash-month-mode-btn" onclick="setRevenueCashReconcileMode('MONTHLY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#ffedd5; color:#c2410c; font-size:0.62rem; font-weight:950;">MONTH WISE</button>
+                </div>
+                <div style="width:100%; max-width:360px; overflow:hidden; border-radius:12px; margin:8px auto 0;">
+                    <input id="revenue-cash-date" type="date" onchange="renderRevenueCashReconcile()" style="width:100%; height:38px; border:1.2px solid #fdba74; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                    <input id="revenue-cash-month" type="month" onchange="renderRevenueCashReconcile()" style="width:100%; height:38px; display:none; border:1.2px solid #fdba74; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                </div>
+                <select id="revenue-cash-hq" onchange="renderRevenueCashReconcile()" style="width:100%; max-width:360px; height:38px; margin:8px auto 0; display:block; border:1.2px solid #fdba74; border-radius:12px; padding:0 12px; font-size:0.7rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                    <option value="">All HQ</option>
+                </select>
+                <select id="revenue-cash-status" onchange="renderRevenueCashReconcile()" style="width:100%; max-width:360px; height:38px; margin:8px auto 0; display:block; border:1.2px solid #fdba74; border-radius:12px; padding:0 12px; font-size:0.7rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                    <option value="ALL">All Staff Paid</option>
+                    <option value="NGB">NGB Updated</option>
+                    <option value="BALANCE">Balance / Not Updated</option>
+                </select>
+                <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="revenue-cash-pdf-btn" onclick="downloadRevenueCashReconcile('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF</button>
+                    <button id="revenue-cash-excel-btn" onclick="downloadRevenueCashReconcile('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL</button>
+                </div>
+                <div id="revenue-cash-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#fff7ed; border:1.2px solid #fdba74; color:#c2410c; font-size:0.66rem; font-weight:950; text-align:center;">Loading...</div>
+                <div id="revenue-cash-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
             </div>
         </main>
 
@@ -11037,6 +11069,11 @@
             switchView("revenue-pending-list");
         }
 
+        function openRevenueCashReconcile() {
+            closeHeaderMenu();
+            switchView("revenue-cash-reconcile");
+        }
+
         function openRevenuePaidUpload() {
             closeHeaderMenu();
             switchView("revenue-paid-upload");
@@ -11866,7 +11903,7 @@
             if (!rows.length) return showToast("Pending list me data nahi hai", false);
             const headers = getRevenuePendingExportHeaders();
             const exportRows = getRevenuePendingExportRows(rows);
-            const title = `Pending List - ${activeDC || ""}`;
+            const title = `Pending DO List - ${activeDC || ""}`;
 
             setRevenuePendingDownloadState(true, "Downloading... kripya wait kijiye", true);
             setTimeout(() => {
@@ -13509,6 +13546,8 @@
         }
 
         let revenueReportMode = "DAILY";
+        let revenueCashReconcileMode = "DAILY";
+        let revenueCashReconcileRows = [];
 
         function initRevenueReportDownload() {
             const dateInput = document.getElementById("revenue-report-date");
@@ -13633,6 +13672,164 @@
             }
         }
 
+        function initRevenueCashReconcile() {
+            const dateInput = document.getElementById("revenue-cash-date");
+            const monthInput = document.getElementById("revenue-cash-month");
+            if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
+            if (monthInput && !monthInput.value) monthInput.value = getTodayIsoDate().slice(0, 7);
+            setRevenueCashReconcileMode(revenueCashReconcileMode || "DAILY");
+        }
+
+        function setRevenueCashReconcileMode(mode) {
+            revenueCashReconcileMode = mode === "MONTHLY" ? "MONTHLY" : "DAILY";
+            const dateInput = document.getElementById("revenue-cash-date");
+            const monthInput = document.getElementById("revenue-cash-month");
+            const dateBtn = document.getElementById("revenue-cash-date-mode-btn");
+            const monthBtn = document.getElementById("revenue-cash-month-mode-btn");
+            if (dateInput) dateInput.style.display = revenueCashReconcileMode === "DAILY" ? "block" : "none";
+            if (monthInput) monthInput.style.display = revenueCashReconcileMode === "MONTHLY" ? "block" : "none";
+            if (dateBtn) {
+                dateBtn.style.background = revenueCashReconcileMode === "DAILY" ? "#c2410c" : "#ffedd5";
+                dateBtn.style.color = revenueCashReconcileMode === "DAILY" ? "#ffffff" : "#c2410c";
+            }
+            if (monthBtn) {
+                monthBtn.style.background = revenueCashReconcileMode === "MONTHLY" ? "#c2410c" : "#ffedd5";
+                monthBtn.style.color = revenueCashReconcileMode === "MONTHLY" ? "#ffffff" : "#c2410c";
+            }
+            renderRevenueCashReconcile();
+        }
+
+        function getRevenueCashUploadedIvrsSet() {
+            const set = new Set();
+            const addRow = (row) => {
+                const ivrs = getRevenueUploadedPaidRowIvrs(row);
+                if (ivrs) set.add(ivrs);
+                getRevenueUploadedPaidPaymentRows(row).forEach((paymentRow) => {
+                    const paymentIvrs = getRevenueUploadedPaidRowIvrs(paymentRow) || ivrs;
+                    if (paymentIvrs) set.add(paymentIvrs);
+                });
+            };
+            Object.values(getRevenueUploadedPaidCache() || {}).forEach((row) => {
+                const dcName = getRevenueUploadedPaidRowDcName(row, activeDC || "");
+                if (normalizeLookupValue(dcName || "") === normalizeLookupValue(activeDC || "")) addRow(row);
+            });
+            getRevenueCategoryRawPaymentRows().forEach((row) => {
+                const dcName = getRevenueUploadedPaidRowDcName(row, activeDC || "");
+                if (normalizeLookupValue(dcName || "") === normalizeLookupValue(activeDC || "")) addRow(row);
+            });
+            return set;
+        }
+
+        function getRevenueCashStaffRows() {
+            const rows = getRevenueLiveEntries().filter(isRevenueRowInCurrentScope);
+            if (revenueCashReconcileMode === "MONTHLY") {
+                const monthValue = document.getElementById("revenue-cash-month")?.value || getTodayIsoDate().slice(0, 7);
+                return rows.filter((row) => getRevenueMonthKey(row.paidDate) === monthValue);
+            }
+            const dateValue = normalizeRevenueReportDate(document.getElementById("revenue-cash-date")?.value || getCurrentDateDDMMYYYY());
+            return rows.filter((row) => normalizeRevenueReportDate(row.paidDate) === dateValue);
+        }
+
+        function buildRevenueCashReconcileRows() {
+            const uploadedIvrsSet = getRevenueCashUploadedIvrsSet();
+            return getRevenueCashStaffRows().map((row) => {
+                const ivrs = normalizeRevenueIvrs(row.ivrsNo);
+                const ngbUpdated = !!ivrs && uploadedIvrsSet.has(ivrs);
+                return { ...row, ngbStatus: ngbUpdated ? "NGB Updated" : "Balance / Not Updated", ngbUpdated };
+            });
+        }
+
+        function getRevenueCashFilteredRows() {
+            const hqValue = document.getElementById("revenue-cash-hq")?.value || "";
+            const statusValue = document.getElementById("revenue-cash-status")?.value || "ALL";
+            return revenueCashReconcileRows.filter((row) => (!hqValue || normalizeLookupValue(row.hqName || "") === normalizeLookupValue(hqValue))
+                && (statusValue === "ALL" || (statusValue === "NGB" ? row.ngbUpdated : !row.ngbUpdated)));
+        }
+
+        function populateRevenueCashHqOptions(rows) {
+            const hqSelect = document.getElementById("revenue-cash-hq");
+            if (!hqSelect) return;
+            const selected = hqSelect.value || "";
+            const hqNames = getRevenueUniqueValues(rows || [], "hqName");
+            populateRevenueSelect(hqSelect, hqNames, "All HQ");
+            if (selected && hqNames.some((name) => normalizeLookupValue(name) === normalizeLookupValue(selected))) hqSelect.value = selected;
+        }
+
+        function buildRevenueCashSummaryRows(rows) {
+            const groups = {};
+            (rows || []).forEach((row) => {
+                const hqName = row.hqName || "-";
+                const key = normalizeLookupValue(hqName) || "GENERAL";
+                if (!groups[key]) groups[key] = { hqName, staffCount: 0, staffAmount: 0, ngbCount: 0, ngbAmount: 0, balanceCount: 0, balanceAmount: 0 };
+                const amount = parseRevenuePaidAmount(row.paidAmount);
+                groups[key].staffCount += 1;
+                groups[key].staffAmount += amount;
+                if (row.ngbUpdated) {
+                    groups[key].ngbCount += 1;
+                    groups[key].ngbAmount += amount;
+                } else {
+                    groups[key].balanceCount += 1;
+                    groups[key].balanceAmount += amount;
+                }
+            });
+            return Object.values(groups).sort((a, b) => String(a.hqName).localeCompare(String(b.hqName)));
+        }
+
+        function renderRevenueCashSummary(rows) {
+            const summaryRows = buildRevenueCashSummaryRows(rows);
+            if (!summaryRows.length) return `<div style="background:#ecfdf5; border:1.5px solid #86efac; border-radius:14px; padding:14px; color:#047857; font-size:0.78rem; font-weight:900; text-align:center;">Is filter me staff paid data nahi mila.</div>`;
+            const totals = summaryRows.reduce((acc, row) => {
+                acc.staffCount += row.staffCount; acc.staffAmount += row.staffAmount; acc.ngbCount += row.ngbCount; acc.ngbAmount += row.ngbAmount; acc.balanceCount += row.balanceCount; acc.balanceAmount += row.balanceAmount;
+                return acc;
+            }, { staffCount: 0, staffAmount: 0, ngbCount: 0, ngbAmount: 0, balanceCount: 0, balanceAmount: 0 });
+            const body = summaryRows.map((row) => `<tr><td style="border:1px solid #fdba74; padding:5px; word-break:break-word;">${escapeHtml(row.hqName)}</td><td style="border:1px solid #fdba74; padding:5px;">${row.staffCount}<br>${escapeHtml(formatRevenueAmount(row.staffAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#047857;">${row.ngbCount}<br>${escapeHtml(formatRevenueAmount(row.ngbAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#b91c1c;">${row.balanceCount}<br>${escapeHtml(formatRevenueAmount(row.balanceAmount))}</td></tr>`).join("");
+            return `<div style="background:#ffffff; border:1.5px solid #fdba74; border-radius:16px; padding:10px; overflow:hidden;"><div style="font-size:0.72rem; font-weight:950; color:#c2410c; text-align:center; margin-bottom:8px;">IVRS Matching Only | DC: ${escapeHtml(activeDC || "-")}</div><table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:0.55rem; font-weight:850; color:#1e293b; text-align:center;"><thead><tr style="background:#fed7aa; color:#7c2d12;"><th style="border:1px solid #fdba74; padding:5px;">HQ Name</th><th style="border:1px solid #fdba74; padding:5px;">Paid by Staff</th><th style="border:1px solid #fdba74; padding:5px;">NGB Update</th><th style="border:1px solid #fdba74; padding:5px;">Balance</th></tr></thead><tbody>${body}</tbody><tfoot><tr style="background:#fff7ed; font-weight:950;"><td style="border:1px solid #fdba74; padding:5px;">TOTAL</td><td style="border:1px solid #fdba74; padding:5px;">${totals.staffCount}<br>${escapeHtml(formatRevenueAmount(totals.staffAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#047857;">${totals.ngbCount}<br>${escapeHtml(formatRevenueAmount(totals.ngbAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#b91c1c;">${totals.balanceCount}<br>${escapeHtml(formatRevenueAmount(totals.balanceAmount))}</td></tr></tfoot></table></div>`;
+        }
+
+        async function renderRevenueCashReconcile() {
+            const tableBox = document.getElementById("revenue-cash-table");
+            const statusBox = document.getElementById("revenue-cash-download-status");
+            if (!tableBox) return;
+            if (statusBox) { statusBox.style.display = "block"; statusBox.innerText = "Report load ho rahi hai..."; }
+            try {
+                await Promise.all([syncRevenueLiveEntriesFromSheet(), getRevenueUploadedPaidMasterRows()]);
+                revenueCashReconcileRows = buildRevenueCashReconcileRows();
+                populateRevenueCashHqOptions(revenueCashReconcileRows);
+                tableBox.innerHTML = renderRevenueCashSummary(getRevenueCashFilteredRows());
+                if (statusBox) statusBox.style.display = "none";
+            } catch (_) {
+                if (statusBox) { statusBox.style.display = "block"; statusBox.innerText = "Report load nahi ho payi"; }
+            }
+        }
+
+        function getRevenueCashExportRows() {
+            return getRevenueCashFilteredRows().map((row) => [row.ngbStatus || "", row.ivrsNo || "", row.consumerName || "", row.fatherName || "", row.village || "", row.hqName || "", row.tariffCategory || "", row.mobileNo || "", row.paidDate || "", formatRevenuePaidTime(row.paidTime || ""), row.paidAmount || "", row.dcName || activeDC || ""]);
+        }
+
+        function downloadRevenueCashReconcile(type) {
+            const rows = getRevenueCashExportRows();
+            if (!rows.length) return showToast("Report ke liye data nahi hai", false);
+            const headers = ["STATUS", "IVRS NO", "CONSUMER NAME", "FATHER NAME", "VILLAGE", "HQ NAME", "CATEGORY", "MOBILE NO", "STAFF PAID DATE", "STAFF PAID TIME", "STAFF PAID AMOUNT", "DC NAME"];
+            const suffix = revenueCashReconcileMode === "MONTHLY" ? (document.getElementById("revenue-cash-month")?.value || getTodayIsoDate().slice(0, 7)) : normalizeRevenueReportDate(document.getElementById("revenue-cash-date")?.value || getCurrentDateDDMMYYYY());
+            const fileName = `staff-cash-check-${activeDC || "DC"}-${suffix}`.replace(/[\\/:*?"<>|]+/g, "_");
+            if (type === "PDF") {
+                if (!window.jspdf?.jsPDF) return showToast("PDF library load nahi hui", false);
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation: "landscape" });
+                doc.setFontSize(13); doc.text(`Paid by Staff vs NGB Cash List - ${activeDC || ""}`, 148, 14, { align: "center" });
+                doc.setFontSize(8); doc.text(`Matching: IVRS only | ${suffix}`, 148, 20, { align: "center" });
+                doc.autoTable({ startY: 26, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [194, 65, 12] } });
+                savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                return;
+            }
+            const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+            const csv = [headers, ...rows].map((row) => row.map(csvSafe).join(",")).join("\n");
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+            link.download = `${fileName}.csv`;
+            link.click();
+        }
+
         function switchView(id) {
             if (!suppressHistoryPush) {
                 try { history.pushState({ appView: id }, "", ""); } catch (_) {}
@@ -13652,6 +13849,9 @@
                 }
                 if (id === "revenue-report-download") {
                     initRevenueReportDownload();
+                }
+                if (id === "revenue-cash-reconcile") {
+                    initRevenueCashReconcile();
                 }
                 if (id === "revenue-pending-list") {
                     initRevenuePendingList();
@@ -13707,7 +13907,8 @@
                 if (id === "revenue-collection") headerTitle = "REVENUE COLLECTION";
                 if (id === "revenue-live-progress") headerTitle = "LIVE PROGRESS";
                 if (id === "revenue-report-download") headerTitle = "REPORT DOWNLOAD";
-                if (id === "revenue-pending-list") headerTitle = "PENDING LIST";
+                if (id === "revenue-cash-reconcile") headerTitle = "PAID BY STAFF VS NGB CASH LIST";
+                if (id === "revenue-pending-list") headerTitle = "PENDING DO LIST";
                 if (id === "revenue-paid-upload") headerTitle = "ADMIN UPLOAD CASH LIST";
                 if (id === "revenue-message-login") headerTitle = "SEND MESSAGE";
                 if (id === "material-list") headerTitle = "MATERIAL LIST";
@@ -13721,7 +13922,7 @@
                 document.getElementById("main-header-title").innerText = headerTitle;
                 const header = document.getElementById("app-header");
                 const headerMenuWrap = document.getElementById("header-menu-wrap");
-                const revenueMenuVisible = (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-pending-list" || id === "revenue-paid-upload");
+                const revenueMenuVisible = (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload");
                 if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || id === "subdn-chhapara") ? "block" : "none";
                 document.querySelectorAll(".revenue-header-menu-item").forEach((item) => item.style.display = revenueMenuVisible ? "block" : "none");
                 const staffAdminMenuItem = document.getElementById("staff-admin-header-menu-item");
@@ -13736,7 +13937,7 @@
                 } else if (id === "mobile-update") {
                     header.className = "app-header bg-red-grad";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)";
-                } else if (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-pending-list" || id === "revenue-paid-upload" || id === "revenue-message-login") {
+                } else if (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload" || id === "revenue-message-login") {
                     header.className = "app-header bg-blue-grad";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #38bdf8 0%, #0369a1 100%)";
                 } else if (id === "staff-admin") {
@@ -13836,7 +14037,7 @@
             } else if (act === "revenue-message-login-view") {
                 revenueMessageSelectionMode = false;
                 switchView("revenue-collection");
-            } else if (act === "revenue-live-progress-view" || act === "revenue-report-download-view" || act === "revenue-pending-list-view" || act === "revenue-paid-upload-view") {
+            } else if (act === "revenue-live-progress-view" || act === "revenue-report-download-view" || act === "revenue-cash-reconcile-view" || act === "revenue-pending-list-view" || act === "revenue-paid-upload-view") {
                 switchView("revenue-collection");
             } else if (act === "dc-dashboard-view" || act === "mobile-update-view" || act === "revenue-collection-view") {
                 if (act === "mobile-update-view") {
