@@ -1549,7 +1549,7 @@
                     <option value="">All HQ</option>
                 </select>
                 <select id="revenue-cash-status" onchange="renderRevenueCashReconcile()" style="width:100%; max-width:360px; height:38px; margin:8px auto 0; display:block; border:1.2px solid #fdba74; border-radius:12px; padding:0 12px; font-size:0.7rem; font-weight:900; color:#0f172a; background:#ffffff;">
-                    <option value="ALL">All Staff Paid</option>
+                    <option value="ALL">All Paid/Balance</option>
                     <option value="NGB">NGB Updated</option>
                     <option value="BALANCE">Balance / Not Updated</option>
                 </select>
@@ -13806,24 +13806,33 @@
             return getRevenueCashFilteredRows().map((row) => [row.ngbStatus || "", row.ivrsNo || "", row.consumerName || "", row.fatherName || "", row.village || "", row.hqName || "", row.tariffCategory || "", row.mobileNo || "", row.paidDate || "", formatRevenuePaidTime(row.paidTime || ""), row.paidAmount || "", row.dcName || activeDC || ""]);
         }
 
+        function getRevenueCashReportTitle() {
+            const statusValue = document.getElementById("revenue-cash-status")?.value || "ALL";
+            const dcName = activeDC || "";
+            if (statusValue === "BALANCE") return `"Paid by staff" Amount not updated in NGB Cash List-${dcName}`;
+            if (statusValue === "NGB") return `"Paid by staff" Amount updated in NGB Cash List-${dcName}`;
+            return `"Paid by staff" Amount All Paid/Balance in NGB Cash List-${dcName}`;
+        }
+
         function downloadRevenueCashReconcile(type) {
             const rows = getRevenueCashExportRows();
             if (!rows.length) return showToast("Report ke liye data nahi hai", false);
             const headers = ["STATUS", "IVRS NO", "CONSUMER NAME", "FATHER NAME", "VILLAGE", "HQ NAME", "CATEGORY", "MOBILE NO", "STAFF PAID DATE", "STAFF PAID TIME", "STAFF PAID AMOUNT", "DC NAME"];
             const suffix = revenueCashReconcileMode === "MONTHLY" ? (document.getElementById("revenue-cash-month")?.value || getTodayIsoDate().slice(0, 7)) : normalizeRevenueReportDate(document.getElementById("revenue-cash-date")?.value || getCurrentDateDDMMYYYY());
-            const fileName = `staff-cash-check-${activeDC || "DC"}-${suffix}`.replace(/[\\/:*?"<>|]+/g, "_");
+            const reportTitle = getRevenueCashReportTitle();
+            const fileName = `${reportTitle}-${suffix}`.replace(/[\\/:*?"<>|]+/g, "_");
             if (type === "PDF") {
                 if (!window.jspdf?.jsPDF) return showToast("PDF library load nahi hui", false);
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF({ orientation: "landscape" });
-                doc.setFontSize(13); doc.text(`Paid by Staff vs NGB Cash List - ${activeDC || ""}`, 148, 14, { align: "center" });
+                doc.setFontSize(13); doc.text(reportTitle, 148, 14, { align: "center" });
                 doc.setFontSize(8); doc.text(`Matching: IVRS only | ${suffix}`, 148, 20, { align: "center" });
                 doc.autoTable({ startY: 26, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [194, 65, 12] } });
                 savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                 return;
             }
             const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
-            const csv = [headers, ...rows].map((row) => row.map(csvSafe).join(",")).join("\n");
+            const csv = [[reportTitle], [`Matching: IVRS only | ${suffix}`], [], headers, ...rows].map((row) => row.map(csvSafe).join(",")).join("\n");
             const link = document.createElement("a");
             link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
             link.download = `${fileName}.csv`;
