@@ -9363,9 +9363,7 @@
 
         function openRevenueHqVillageReport() {
             closeHeaderMenu();
-            // TODO: HQ/Village Wise Paid-Unpaid report abhi banna baaki hai - jab view/render
-            // function ready ho jaaye, yahan switchView("revenue-hq-village") kar dena.
-            showToast("HQ / Village Wise Paid-Unpaid report jald hi add hoga", true);
+            switchView("revenue-hq-village");
         }
 
         function openRevenueCashReconcile() {
@@ -12205,6 +12203,290 @@
             link.click();
         }
 
+        // =====================================================================
+        // HQ / VILLAGE WISE PAID-UNPAID REPORT
+        // Existing "Category Wise Paid/Unpaid Summary" ke paid/unpaid classification
+        // logic (createRevenueCategoryGroup + addRevenueCategoryConsumer +
+        // buildRevenueCategoryUploadedPaidInfo) ko hi reuse kiya hai - bas grouping
+        // dimension category ki jagah HQ -> Village hai. DC level par top rows HQ
+        // hain (tap karke Village khulta hai); Division/Circle par top rows DC hain
+        // (tap -> HQ -> tap -> Village), subtotal rows kabhi clickable nahi hote.
+        // =====================================================================
+        let revenueHqVillageMode = "DAILY";
+        let revenueHqVillageRenderToken = 0;
+        let revenueHqVillageTree = [];
+        let revenueHqVillageDrillPath = [];
+
+        function initRevenueHqVillageReport() {
+            const dateInput = document.getElementById("revenue-hq-village-date");
+            const monthInput = document.getElementById("revenue-hq-village-month");
+            if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
+            if (monthInput && !monthInput.value) monthInput.value = getTodayIsoDate().slice(0, 7);
+            revenueHqVillageDrillPath = [];
+            setRevenueHqVillageMode(revenueHqVillageMode || "DAILY");
+        }
+
+        function setRevenueHqVillageMode(mode) {
+            revenueHqVillageMode = mode === "MONTHLY" ? "MONTHLY" : "DAILY";
+            const dateInput = document.getElementById("revenue-hq-village-date");
+            const monthInput = document.getElementById("revenue-hq-village-month");
+            const dateBtn = document.getElementById("revenue-hq-village-date-mode-btn");
+            const monthBtn = document.getElementById("revenue-hq-village-month-mode-btn");
+            if (dateInput) dateInput.style.display = revenueHqVillageMode === "DAILY" ? "block" : "none";
+            if (monthInput) monthInput.style.display = revenueHqVillageMode === "MONTHLY" ? "block" : "none";
+            if (dateBtn) {
+                dateBtn.style.background = revenueHqVillageMode === "DAILY" ? "#15803d" : "#dcfce7";
+                dateBtn.style.color = revenueHqVillageMode === "DAILY" ? "#ffffff" : "#15803d";
+            }
+            if (monthBtn) {
+                monthBtn.style.background = revenueHqVillageMode === "MONTHLY" ? "#15803d" : "#dcfce7";
+                monthBtn.style.color = revenueHqVillageMode === "MONTHLY" ? "#ffffff" : "#15803d";
+            }
+            revenueHqVillageDrillPath = [];
+            renderRevenueHqVillageReport();
+        }
+
+        function buildRevenueHqVillagePaidUnpaidTree(mode, filterValue) {
+            const paidInfoByDc = buildRevenueCategoryUploadedPaidInfo(mode, filterValue);
+
+            const leafTotals = (name) => ({ name, paidTotal: 0, unpaidTotal: 0, paidAmountTotal: 0, unpaidAmountTotal: 0, children: null });
+            const addTotals = (target, src) => {
+                target.paidTotal += Number(src.paidTotal || 0);
+                target.unpaidTotal += Number(src.unpaidTotal || 0);
+                target.paidAmountTotal += Number(src.paidAmountTotal || 0);
+                target.unpaidAmountTotal += Number(src.unpaidAmountTotal || 0);
+            };
+
+            const buildDcNode = (dcName) => {
+                const normalizedDc = normalizeDcName(dcName);
+                const paidInfo = paidInfoByDc[normalizedDc] || {};
+                const paidCountedIvrsSet = new Set();
+                const hqMap = {};
+                getRevenueMasterRowsForDc(dcName).forEach((row) => {
+                    const hqName = String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL";
+                    const village = String(row.village || "UNKNOWN").trim().toUpperCase() || "UNKNOWN";
+                    if (!hqMap[hqName]) hqMap[hqName] = {};
+                    if (!hqMap[hqName][village]) hqMap[hqName][village] = createRevenueCategoryGroup(village);
+                    addRevenueCategoryConsumer(hqMap[hqName][village], row, paidInfo, paidCountedIvrsSet);
+                });
+                const hqNodes = Object.keys(hqMap).sort((a, b) => a.localeCompare(b)).map((hqName) => {
+                    const villageMap = hqMap[hqName];
+                    const villageNodes = Object.keys(villageMap).sort((a, b) => a.localeCompare(b)).map((villageName) => {
+                        const g = villageMap[villageName];
+                        return { name: villageName, paidTotal: g.paidTotal, unpaidTotal: g.unpaidTotal, paidAmountTotal: g.paidAmountTotal, unpaidAmountTotal: g.unpaidAmountTotal, children: null };
+                    });
+                    const hqNode = leafTotals(hqName);
+                    villageNodes.forEach((v) => addTotals(hqNode, v));
+                    hqNode.children = villageNodes;
+                    return hqNode;
+                });
+                const dcNode = leafTotals(normalizedDc);
+                hqNodes.forEach((h) => addTotals(dcNode, h));
+                dcNode.children = hqNodes;
+                return dcNode;
+            };
+
+            if (activeViewLevel === "DC") {
+                const dcNode = buildDcNode(activeDC);
+                return dcNode.children || [];
+            }
+
+            if (activeViewLevel === "DIVISION") {
+                const rows = [];
+                getDivisionSubDnGroups(activeDiv).forEach((group) => {
+                    const dcNodes = group.dcs.map((dcName) => buildDcNode(dcName));
+                    rows.push(...dcNodes);
+                    const subTotal = leafTotals(`${group.subDn} SUB DIVISION SUB TOTAL`);
+                    subTotal.type = "SUBDN_TOTAL";
+                    dcNodes.forEach((d) => addTotals(subTotal, d));
+                    rows.push(subTotal);
+                });
+                return rows;
+            }
+
+            const rows = [];
+            Object.keys(divisionConfigs).forEach((divisionName) => {
+                const divisionRows = [];
+                getDivisionSubDnGroups(divisionName).forEach((group) => {
+                    const dcNodes = group.dcs.map((dcName) => buildDcNode(dcName));
+                    divisionRows.push(...dcNodes);
+                    rows.push(...dcNodes);
+                    const subTotal = leafTotals(`${group.subDn} SUB DIVISION SUB TOTAL`);
+                    subTotal.type = "SUBDN_TOTAL";
+                    dcNodes.forEach((d) => addTotals(subTotal, d));
+                    rows.push(subTotal);
+                });
+                const divTotal = leafTotals(getDivisionTotalLabel(divisionName));
+                divTotal.type = "SUB_TOTAL";
+                divisionRows.forEach((d) => addTotals(divTotal, d));
+                rows.push(divTotal);
+            });
+            return rows;
+        }
+
+        function findRevenueHqVillageNode(nodes, name) {
+            return (nodes || []).find((n) => n.name === name && n.type !== "SUB_TOTAL" && n.type !== "SUBDN_TOTAL");
+        }
+
+        function getRevenueHqVillageCurrentRows() {
+            let nodes = revenueHqVillageTree;
+            for (const step of revenueHqVillageDrillPath) {
+                const node = findRevenueHqVillageNode(nodes, step);
+                if (!node || !node.children) return [];
+                nodes = node.children;
+            }
+            return nodes;
+        }
+
+        function getRevenueHqVillageColumnLabel() {
+            const depth = revenueHqVillageDrillPath.length;
+            if (activeViewLevel === "DC") return depth === 0 ? "HQ NAME" : "VILLAGE";
+            if (depth === 0) return "DC NAME";
+            if (depth === 1) return "HQ NAME";
+            return "VILLAGE";
+        }
+
+        function pushRevenueHqVillageDrill(el) {
+            const name = el?.dataset?.drillName;
+            if (!name) return;
+            revenueHqVillageDrillPath.push(name);
+            const tableBox = document.getElementById("revenue-hq-village-table");
+            if (tableBox) tableBox.innerHTML = renderRevenueHqVillageTable();
+        }
+
+        function popRevenueHqVillageDrill() {
+            revenueHqVillageDrillPath.pop();
+            const tableBox = document.getElementById("revenue-hq-village-table");
+            if (tableBox) tableBox.innerHTML = renderRevenueHqVillageTable();
+        }
+
+        function renderRevenueHqVillageTable() {
+            const rows = getRevenueHqVillageCurrentRows();
+            const colLabel = getRevenueHqVillageColumnLabel();
+            const depth = revenueHqVillageDrillPath.length;
+            const canDrillDeeper = activeViewLevel === "DC" ? depth < 1 : depth < 2;
+
+            let breadcrumbHtml = "";
+            if (depth > 0) {
+                const crumbLabel = revenueHqVillageDrillPath.join(" › ");
+                breadcrumbHtml = `<div onclick="popRevenueHqVillageDrill()" style="display:flex; align-items:center; gap:6px; padding:9px 10px; margin-bottom:6px; background:#f0fdf4; border:1.2px solid #bbf7d0; border-radius:10px; font-size:0.68rem; font-weight:900; color:#15803d; cursor:pointer;">⬅ ${escapeHtml(crumbLabel)} - Back</div>`;
+            }
+
+            let html = `<div class="summary-wrapper">${breadcrumbHtml}<div class="summary-table-header" style="grid-template-columns: 1.3fr 0.8fr 0.9fr 0.8fr 0.9fr;"><div>${colLabel}</div><div>PAID</div><div>PAID AMT</div><div>UNPAID</div><div>UNPAID AMT</div></div>`;
+
+            if (!rows || !rows.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is scope me data nahi mila.</div></div>`;
+            } else {
+                rows.forEach((row) => {
+                    const rowClass = row.type === "SUB_TOTAL" ? " blue-bold" : (row.type === "SUBDN_TOTAL" ? " subdn-bold" : "");
+                    const clickable = canDrillDeeper && !row.type && row.children && row.children.length;
+                    const attrs = clickable ? ` data-drill-name="${escapeHtml(row.name)}" onclick="pushRevenueHqVillageDrill(this)" style="cursor:pointer;"` : "";
+                    const nameCell = clickable ? `${escapeHtml(row.name)} ›` : escapeHtml(row.name);
+                    html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: 1.3fr 0.8fr 0.9fr 0.8fr 0.9fr;"${attrs}><div>${nameCell}</div><div class="text-emerald-700 font-black">${row.paidTotal}</div><div class="text-emerald-700 font-black">${formatProgressReportAmount(row.paidAmountTotal)}</div><div class="text-rose-700 font-black">${row.unpaidTotal}</div><div class="text-rose-700 font-black">${formatProgressReportAmount(row.unpaidAmountTotal)}</div></div>`;
+                });
+            }
+
+            const totals = (rows || []).filter((row) => row.type !== "SUB_TOTAL" && row.type !== "SUBDN_TOTAL").reduce((acc, row) => {
+                acc.paidTotal += Number(row.paidTotal || 0);
+                acc.unpaidTotal += Number(row.unpaidTotal || 0);
+                acc.paidAmountTotal += Number(row.paidAmountTotal || 0);
+                acc.unpaidAmountTotal += Number(row.unpaidAmountTotal || 0);
+                return acc;
+            }, { paidTotal: 0, unpaidTotal: 0, paidAmountTotal: 0, unpaidAmountTotal: 0 });
+
+            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">GRAND TOTAL</div><div class="mt-2 grid grid-cols-2 gap-2 text-center text-[11px] font-black"><div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2">Paid: ${totals.paidTotal}<br>${formatProgressReportAmount(totals.paidAmountTotal)}</div><div class="rounded-xl bg-rose-50 border border-rose-200 p-2">Unpaid: ${totals.unpaidTotal}<br>${formatProgressReportAmount(totals.unpaidAmountTotal)}</div></div></div>`;
+            return html;
+        }
+
+        async function renderRevenueHqVillageReport() {
+            const tableBox = document.getElementById("revenue-hq-village-table");
+            const statusBox = document.getElementById("revenue-hq-village-download-status");
+            if (!tableBox) return;
+            const renderToken = ++revenueHqVillageRenderToken;
+            if (statusBox) statusBox.style.display = "none";
+            const isRenderValid = () => renderToken === revenueHqVillageRenderToken && document.getElementById("revenue-hq-village-view")?.classList.contains("active");
+            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
+            try {
+                const targetDcs = getRevenueCategoryTargetDcs();
+                await Promise.all([
+                    ensureRevenueCategoryMasterDataLoaded(targetDcs),
+                    ensureRevenueCategoryRawPaymentRowsLoaded(),
+                    warmRevenueCategoryUploadedPaidCache()
+                ]);
+                if (!isRenderValid()) { progress.stop(); return; }
+                const mode = revenueHqVillageMode === "MONTHLY" ? "MONTHLY" : "DAILY";
+                const filterValue = mode === "MONTHLY"
+                    ? (document.getElementById("revenue-hq-village-month")?.value || getTodayIsoDate().slice(0, 7))
+                    : (document.getElementById("revenue-hq-village-date")?.value || getTodayIsoDate());
+                revenueHqVillageTree = buildRevenueHqVillagePaidUnpaidTree(mode, filterValue);
+                revenueHqVillageDrillPath = [];
+                await progress.finish();
+                if (!isRenderValid()) return;
+                tableBox.innerHTML = renderRevenueHqVillageTable();
+            } catch (error) {
+                progress.stop();
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#fff1f2";
+                    statusBox.style.borderColor = "#fda4af";
+                    statusBox.style.color = "#991b1b";
+                    statusBox.innerText = "Report load nahi ho payi";
+                }
+            }
+        }
+
+        function flattenRevenueHqVillageRows() {
+            const output = [];
+            const walk = (nodes, path) => {
+                (nodes || []).forEach((node) => {
+                    if (node.type === "SUB_TOTAL" || node.type === "SUBDN_TOTAL") return;
+                    const currentPath = [...path, node.name];
+                    if (node.children && node.children.length) {
+                        walk(node.children, currentPath);
+                    } else {
+                        output.push({ path: currentPath, paidTotal: node.paidTotal, unpaidTotal: node.unpaidTotal, paidAmountTotal: node.paidAmountTotal, unpaidAmountTotal: node.unpaidAmountTotal });
+                    }
+                });
+            };
+            walk(revenueHqVillageTree, []);
+            return output;
+        }
+
+        function getRevenueHqVillageReportTitle() {
+            const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+            return `HQ Village Wise Paid-Unpaid Summary - ${scope}`;
+        }
+
+        function downloadRevenueHqVillageReport(type) {
+            const flatRows = flattenRevenueHqVillageRows();
+            if (!flatRows.length) return showToast("Report ke liye data nahi hai", false);
+            const headers = activeViewLevel === "DC"
+                ? ["HQ NAME", "VILLAGE", "PAID", "PAID AMT", "UNPAID", "UNPAID AMT"]
+                : ["DC NAME", "HQ NAME", "VILLAGE", "PAID", "PAID AMT", "UNPAID", "UNPAID AMT"];
+            const rows = flatRows.map((r) => [...r.path, r.paidTotal, formatProgressReportAmount(r.paidAmountTotal), r.unpaidTotal, formatProgressReportAmount(r.unpaidAmountTotal)]);
+            const reportTitle = getRevenueHqVillageReportTitle();
+            const suffix = revenueHqVillageMode === "MONTHLY"
+                ? (document.getElementById("revenue-hq-village-month")?.value || getTodayIsoDate().slice(0, 7))
+                : normalizeRevenueReportDate(document.getElementById("revenue-hq-village-date")?.value || getCurrentDateDDMMYYYY());
+            const fileName = `${reportTitle}-${suffix}`.replace(/[\\/:*?"<>|]+/g, "_");
+            if (type === "PDF") {
+                if (!window.jspdf?.jsPDF) return showToast("PDF library load nahi hui", false);
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation: "landscape" });
+                doc.setFontSize(13); doc.text(reportTitle, 148, 14, { align: "center" });
+                doc.setFontSize(8); doc.text(`Period: ${suffix}`, 148, 20, { align: "center" });
+                doc.autoTable({ startY: 26, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [21, 128, 61] } });
+                savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                return;
+            }
+            const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+            const csv = [[reportTitle], [`Period: ${suffix}`], [], headers, ...rows].map((row) => row.map(csvSafe).join(",")).join("\n");
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+            link.download = `${fileName}.csv`;
+            link.click();
+        }
+
         function switchView(id) {
             if (!suppressHistoryPush) {
                 try { history.pushState({ appView: id }, "", ""); } catch (_) {}
@@ -12227,6 +12509,9 @@
                 }
                 if (id === "revenue-cash-reconcile") {
                     initRevenueCashReconcile();
+                }
+                if (id === "revenue-hq-village") {
+                    initRevenueHqVillageReport();
                 }
                 if (id === "revenue-pending-list") {
                     initRevenuePendingList();
@@ -12283,6 +12568,7 @@
                 if (id === "revenue-live-progress") headerTitle = "LIVE PROGRESS";
                 if (id === "revenue-report-download") headerTitle = "REPORT DOWNLOAD";
                 if (id === "revenue-cash-reconcile") headerTitle = "PAID BY STAFF VS NGB CASH LIST";
+                if (id === "revenue-hq-village") headerTitle = "HQ / VILLAGE WISE PAID-UNPAID";
                 if (id === "revenue-pending-list") headerTitle = "PENDING DO LIST";
                 if (id === "revenue-paid-upload") headerTitle = "ADMIN UPLOAD CASH LIST";
                 if (id === "revenue-message-login") headerTitle = "SEND MESSAGE";
@@ -12297,7 +12583,7 @@
                 document.getElementById("main-header-title").innerText = headerTitle;
                 const header = document.getElementById("app-header");
                 const headerMenuWrap = document.getElementById("header-menu-wrap");
-                const revenueMenuVisible = (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload");
+                const revenueMenuVisible = (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload");
                 if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || id === "subdn-chhapara") ? "block" : "none";
                 document.querySelectorAll(".revenue-header-menu-item").forEach((item) => item.style.display = revenueMenuVisible ? "block" : "none");
                 const staffAdminMenuItem = document.getElementById("staff-admin-header-menu-item");
@@ -12312,7 +12598,7 @@
                 } else if (id === "mobile-update") {
                     header.className = "app-header bg-red-grad";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)";
-                } else if (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload" || id === "revenue-message-login") {
+                } else if (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload" || id === "revenue-message-login") {
                     header.className = "app-header bg-blue-grad";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #38bdf8 0%, #0369a1 100%)";
                 } else if (id === "staff-admin") {
@@ -12412,7 +12698,9 @@
             } else if (act === "revenue-message-login-view") {
                 revenueMessageSelectionMode = false;
                 switchView("revenue-collection");
-            } else if (act === "revenue-live-progress-view" || act === "revenue-report-download-view" || act === "revenue-cash-reconcile-view" || act === "revenue-pending-list-view" || act === "revenue-paid-upload-view") {
+            } else if (act === "revenue-hq-village-view" && revenueHqVillageDrillPath.length) {
+                popRevenueHqVillageDrill();
+            } else if (act === "revenue-live-progress-view" || act === "revenue-report-download-view" || act === "revenue-hq-village-view" || act === "revenue-cash-reconcile-view" || act === "revenue-pending-list-view" || act === "revenue-paid-upload-view") {
                 switchView("revenue-collection");
             } else if (act === "dc-dashboard-view" || act === "mobile-update-view" || act === "revenue-collection-view") {
                 if (act === "mobile-update-view") {

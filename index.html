@@ -909,6 +909,29 @@
             </div>
         </main>
 
+        <main id="revenue-hq-village-view" class="view">
+            <div class="search-panel" style="padding-top:10px;">
+                <div style="width:100%; max-width:360px; background:#ecfdf5; border:1.2px solid #86efac; border-radius:14px; padding:9px 12px; text-align:center;">
+                    <div style="font-size:0.78rem; font-weight:950; color:#166534; text-transform:uppercase;">HQ / Village Wise Paid-Unpaid</div>
+                    <div id="revenue-hq-village-scope-label" style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">Row par tap karke aage drill down karein</div>
+                </div>
+                <div style="display:flex; gap:8px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="revenue-hq-village-date-mode-btn" onclick="setRevenueHqVillageMode('DAILY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#15803d; color:#ffffff; font-size:0.62rem; font-weight:950;">DATE WISE</button>
+                    <button id="revenue-hq-village-month-mode-btn" onclick="setRevenueHqVillageMode('MONTHLY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#dcfce7; color:#15803d; font-size:0.62rem; font-weight:950;">MONTH WISE</button>
+                </div>
+                <div style="width:100%; max-width:360px; overflow:hidden; border-radius:12px; margin:8px auto 0;">
+                    <input id="revenue-hq-village-date" type="date" onchange="renderRevenueHqVillageReport()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; display:block; border:1.2px solid #86efac; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                    <input id="revenue-hq-village-month" type="month" onchange="renderRevenueHqVillageReport()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; display:none; border:1.2px solid #86efac; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                </div>
+                <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="revenue-hq-village-pdf-btn" onclick="downloadRevenueHqVillageReport('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF</button>
+                    <button id="revenue-hq-village-excel-btn" onclick="downloadRevenueHqVillageReport('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL</button>
+                </div>
+                <div id="revenue-hq-village-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#ecfdf5; border:1.2px solid #86efac; color:#166534; font-size:0.66rem; font-weight:950; text-align:center;">Loading...</div>
+                <div id="revenue-hq-village-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
+            </div>
+        </main>
+
         <main id="revenue-message-login-view" class="view">
             <div class="search-panel" style="padding-top:18px;">
                 <div style="width:100%; max-width:360px; background:#ecfdf5; border:1.5px solid #86efac; border-radius:18px; padding:14px; text-align:center;">
