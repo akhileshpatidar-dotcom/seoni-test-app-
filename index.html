@@ -923,12 +923,36 @@
                     <input id="revenue-hq-village-date" type="date" onchange="renderRevenueHqVillageReport()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; display:block; border:1.2px solid #86efac; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
                     <input id="revenue-hq-village-month" type="month" onchange="renderRevenueHqVillageReport()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; display:none; border:1.2px solid #86efac; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
                 </div>
+                <div id="revenue-hq-village-summary" style="width:100%; max-width:360px; margin:0 auto;"></div>
+                <div id="revenue-hq-village-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
                 <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
-                    <button id="revenue-hq-village-pdf-btn" onclick="downloadRevenueHqVillageReport('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF</button>
-                    <button id="revenue-hq-village-excel-btn" onclick="downloadRevenueHqVillageReport('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL</button>
+                    <button id="revenue-hq-village-pdf-btn" onclick="downloadRevenueHqVillageReport('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF (Full Summary)</button>
+                    <button id="revenue-hq-village-excel-btn" onclick="downloadRevenueHqVillageReport('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL (Full Summary)</button>
                 </div>
                 <div id="revenue-hq-village-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#ecfdf5; border:1.2px solid #86efac; color:#166534; font-size:0.66rem; font-weight:950; text-align:center;">Loading...</div>
-                <div id="revenue-hq-village-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
+
+                <div id="revenue-hq-village-list-section" style="display:none; width:100%; max-width:360px; margin:20px auto 0; border-top:1.5px dashed #86efac; padding-top:16px;">
+                    <div style="text-align:center;">
+                        <div style="font-size:0.78rem; font-weight:950; color:#166534; text-transform:uppercase;">Particular List Nikaale</div>
+                        <div style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">HQ, Village, Category aur Paid/Unpaid Status chuniye</div>
+                    </div>
+                    <select id="revenue-hq-village-list-hq" onchange="onRevenueHqVillageListHqChange()" style="width:100%; max-width:360px; height:48px; margin:10px auto 0; display:block; border:1.5px solid #86efac; border-radius:14px; padding:0 14px; font-size:0.8rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                        <option value="">All HQ</option>
+                    </select>
+                    <select id="revenue-hq-village-list-village" onchange="onRevenueHqVillageListVillageChange()" style="width:100%; max-width:360px; height:48px; margin:8px auto 0; display:block; border:1.5px solid #86efac; border-radius:14px; padding:0 14px; font-size:0.8rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                        <option value="">All Villages</option>
+                    </select>
+                    <select id="revenue-hq-village-list-category" onchange="renderRevenueHqVillageList()" style="width:100%; max-width:360px; height:48px; margin:8px auto 0; display:block; border:1.5px solid #86efac; border-radius:14px; padding:0 14px; font-size:0.8rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                        <option value="">All Categories</option>
+                    </select>
+                    <select id="revenue-hq-village-list-status" onchange="renderRevenueHqVillageList()" style="width:100%; max-width:360px; height:48px; margin:8px auto 0; display:block; border:1.5px solid #86efac; border-radius:14px; padding:0 14px; font-size:0.8rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                        <option value="ALL">All (Paid + Unpaid)</option>
+                        <option value="PAID">Paid Only</option>
+                        <option value="UNPAID">Unpaid Only</option>
+                    </select>
+                    <div id="revenue-hq-village-list-status-box" style="width:100%; max-width:360px; margin:12px auto 0; border-radius:14px; padding:10px; background:#f8fafc; border:1.2px dashed #86efac; color:#334155; font-size:0.72rem; font-weight:850; text-align:center;"></div>
+                    <div id="revenue-hq-village-list-box" style="width:100%; max-width:360px; margin:0 auto;"></div>
+                </div>
             </div>
         </main>
 

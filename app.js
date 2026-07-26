@@ -1635,7 +1635,53 @@
             }
         }
 
-        function renderRevenueProgressSummary(rows, label) {
+        function renderRevenueHqVillageStaticTableHtml(tree, colLabel) {
+            const rows = tree || [];
+            let html = `<div class="summary-wrapper" style="margin-top:6px;"><div class="summary-table-header" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"><div>${colLabel}</div><div>TOTAL</div><div>PAID</div><div>UNPAID</div></div>`;
+            if (!rows.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Data nahi mila.</div></div>`;
+            } else {
+                rows.forEach((row) => {
+                    const rowClass = row.type === "SUB_TOTAL" ? " blue-bold" : (row.type === "SUBDN_TOTAL" ? " subdn-bold" : "");
+                    const totalCount = Number(row.paidTotal || 0) + Number(row.unpaidTotal || 0);
+                    html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"><div>${escapeHtml(row.name)}</div><div class="font-black">${totalCount}</div><div class="text-emerald-700 font-black">${row.paidTotal}</div><div class="text-rose-700 font-black">${row.unpaidTotal}</div></div>`;
+                });
+            }
+            html += `</div>`;
+            return html;
+        }
+
+        // Daily Progress (DC/Division/Circle) me sirf summary dikhani hai - koi drill-down
+        // ya per-consumer list/download yahan nahi, sirf Total/Paid/Unpaid + category-wise +
+        // HQ ya DC-wise (level ke hisaab se) numbers. Poora consumer-level list/dropdown sirf
+        // dedicated "HQ / Village Wise Paid-Unpaid" report me hi hai.
+        function renderRevenueProgressHqVillageSummaryHtml(data) {
+            const t = data.totals;
+            const catRows = revenueCategoryList.map((cat) => {
+                const c = data.categoryGrand.categories[cat] || { paid: 0, unpaid: 0 };
+                const total = Number(c.paid || 0) + Number(c.unpaid || 0);
+                if (!total) return "";
+                return `<div class="summary-table-row" style="grid-template-columns: 1fr 1fr 1fr 1fr;"><div>${escapeHtml(getRevenueCategoryDisplayLabel(cat))}</div><div class="font-black">${total}</div><div class="text-emerald-700 font-black">${c.paid || 0}</div><div class="text-rose-700 font-black">${c.unpaid || 0}</div></div>`;
+            }).join("");
+            const colLabel = activeViewLevel === "DC" ? "HQ NAME" : "DC NAME";
+            return `
+                <div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Total / Paid / Unpaid Summary</div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; margin:10px auto 0;">
+                    <div style="background:#f1f5f9; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#64748b; text-transform:uppercase;">Total Consumer</div><div style="font-size:0.95rem; font-weight:950; color:#0f172a; margin-top:2px;">${t.totalConsumer}</div></div>
+                    <div style="background:#ecfdf5; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#166534; text-transform:uppercase;">Paid</div><div style="font-size:0.95rem; font-weight:950; color:#166534; margin-top:2px;">${t.paidTotal}</div></div>
+                    <div style="background:#fff1f2; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Unpaid</div><div style="font-size:0.95rem; font-weight:950; color:#9f1239; margin-top:2px;">${t.unpaidTotal}</div></div>
+                </div>
+                <div style="font-size:0.62rem; font-weight:900; color:#1d4ed8; text-align:center; margin-top:10px;">CATEGORY WISE</div>
+                <div class="summary-wrapper" style="margin-top:6px;">
+                    <div class="summary-table-header" style="grid-template-columns: 1fr 1fr 1fr 1fr;"><div>CATEGORY</div><div>TOTAL</div><div>PAID</div><div>UNPAID</div></div>
+                    ${catRows || `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Category data nahi mila.</div></div>`}
+                </div>
+                <div style="font-size:0.62rem; font-weight:900; color:#1d4ed8; text-align:center; margin-top:10px;">${colLabel} WISE</div>
+                ${renderRevenueHqVillageStaticTableHtml(data.tree, colLabel)}
+            `;
+        }
+
+        function renderRevenueProgressSummary(rows, label, hqVillageSummaryData = null) {
             const colLabel = getRevenueProgressColumnLabel();
             const totals = getRevenueProgressTotals(rows);
             let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.15fr 0.75fr 0.95fr 0.75fr 0.95fr;"><div>${colLabel}</div><div>PAID</div><div>PAID AMT</div><div>LINE TD</div><div>TD AMT</div></div>`;
@@ -1662,7 +1708,7 @@
                 </div>
                 <div id="progress-summary-download-status" style="display:none; text-align:center; font-weight:900; border-radius:16px; padding:10px 12px; width:100%; margin-top:12px;"></div>
                 <div id="progress-category-download-box" style="margin-top:12px; border:1.5px dashed #93c5fd; background:#eff6ff; border-radius:16px; padding:10px;">
-                    <div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Category Wise Paid/Unpaid Summary</div>
+                    ${hqVillageSummaryData ? renderRevenueProgressHqVillageSummaryHtml(hqVillageSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Category Wise Paid/Unpaid Summary</div>`}
                     <div class="btn-export-row" style="margin-top:8px;">
                         <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueCategorySummary('XLS')">Category Excel</button>
                         <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueCategorySummary('PDF')">Category PDF</button>
@@ -1684,8 +1730,7 @@
                 </div>
             `;
             let percent = 2;
-            let phase = "FAST";
-            let tickCount = 0;
+            let displayed = 2;
             let finished = false;
             let intervalId = setInterval(() => {
                 if (!isStillValid() || finished) {
@@ -1698,18 +1743,24 @@
                     clearInterval(intervalId);
                     return;
                 }
-                tickCount++;
-                if (phase === "FAST") {
-                    percent = Math.min(90, percent + Math.max(1, Math.round((90 - percent) / 8)));
-                    if (percent >= 90) phase = "SLOW";
-                } else if (tickCount % 3 === 0) {
-                    // 90% ke baad dhire-dhire 99% tak creep karo, apne aap kabhi 100% nahi hoga -
-                    // 100% sirf finish() call hone par (display aane ke thik pehle) dikhega.
-                    percent = Math.min(99, percent + 1);
+                if (percent < 90) {
+                    percent = Math.min(90, percent + Math.max(1, (90 - percent) / 8));
+                } else {
+                    // 90% ke baad kabhi na-ruke wali dhire-dhire creep - 99 ke jitna paas
+                    // jaate hain, step utna hi chhota hota jaata hai, isliye number hamesha
+                    // aage badhta hua dikhta hai, kabhi ek jagah "atka hua" nahi lagta.
+                    percent = Math.min(98.9, percent + (99 - percent) * 0.05);
                 }
-                fill.style.width = `${percent}%`;
-                text.innerText = `${percent}%`;
-            }, 220);
+                const nextDisplayed = Math.min(99, Math.round(percent));
+                if (nextDisplayed !== displayed) {
+                    displayed = nextDisplayed;
+                    fill.style.width = `${displayed}%`;
+                    text.innerText = `${displayed}%`;
+                }
+                const atCeiling = displayed >= 99;
+                fill.classList.toggle("sync-progress-pulse", atCeiling);
+                text.classList.toggle("sync-progress-pulse", atCeiling);
+            }, 200);
             // Caller ko finish() call karna chahiye jab actual data/display ready ho jaaye -
             // usi waqt 100% dikhega, uske baad content swap karo. stop() error/cancel case ke liye
             // hai (bina 100% dikhaye turant progress hata deta hai).
@@ -1721,6 +1772,8 @@
                     const fill = document.getElementById("summary-sync-progress-fill");
                     const text = document.getElementById("summary-sync-progress-text");
                     if (fill && text) {
+                        fill.classList.remove("sync-progress-pulse");
+                        text.classList.remove("sync-progress-pulse");
                         fill.style.width = "100%";
                         text.innerText = "100%";
                     }
@@ -1908,7 +1961,29 @@
                     const revenueTotals = getRevenueProgressTotals(uiListSummary);
                     grandTC = revenueTotals.paidCount + revenueTotals.tdCount;
                     grandTU = revenueTotals.paidAmount + revenueTotals.tdAmount;
-                    cont.innerHTML = renderRevenueProgressSummary(uiListSummary, label);
+
+                    // Total Consumer / Paid / Unpaid + category-wise + HQ/DC-wise summary
+                    // (sirf summary, list/dropdown/consumer-level download yahan nahi hai -
+                    // wo sirf dedicated "HQ / Village Wise Paid-Unpaid" report me hai).
+                    // Note: getRevenueProgressFilterValue() jo format deta hai (DAILY ->
+                    // DD-MM-YYYY, MONTHLY -> YYYY-MM), wahi buildRevenueCategoryUploadedPaidInfo
+                    // ke andar isRevenueUploadedPaidInCategoryPeriod() bhi expect karta hai -
+                    // isliye seedhe revenueFilterValue reuse kar sakte hain, alag se convert
+                    // karne ki zaroorat nahi.
+                    let hqVillageSummaryData = null;
+                    try {
+                        await Promise.all([
+                            ensureRevenueCategoryMasterDataLoaded(getRevenueCategoryTargetDcs()),
+                            ensureRevenueCategoryRawPaymentRowsLoaded(),
+                            warmRevenueCategoryUploadedPaidCache()
+                        ]);
+                        if (isStaleSummaryRefresh()) return;
+                        hqVillageSummaryData = buildRevenueHqVillageSummaryData(revenueMode, revenueFilterValue);
+                    } catch (_) {
+                        hqVillageSummaryData = null;
+                    }
+
+                    cont.innerHTML = renderRevenueProgressSummary(uiListSummary, label, hqVillageSummaryData);
                 } catch (error) {
                     cont.innerHTML = '<p class="text-center text-red-500 py-10 font-black">REVENUE REPORT LOAD NAHI HO PAYI</p>';
                 }
@@ -12097,8 +12172,7 @@
                 </div>
             `;
             let percent = 1;
-            let phase = "FAST";
-            let tickCount = 0;
+            let displayed = 1;
             let finished = false;
             let intervalId = setInterval(() => {
                 if (!isStillValid() || finished) {
@@ -12111,18 +12185,24 @@
                     clearInterval(intervalId);
                     return;
                 }
-                tickCount++;
-                if (phase === "FAST") {
-                    percent = Math.min(90, percent + Math.max(1, Math.round((90 - percent) / 8)));
-                    if (percent >= 90) phase = "SLOW";
-                } else if (tickCount % 3 === 0) {
-                    // Baaki reports jaisa hi flow: 90% ke baad dhire-dhire 99% tak creep, 100%
-                    // sirf finish() call hone par (display aane ke thik pehle) dikhega.
-                    percent = Math.min(99, percent + 1);
+                if (percent < 90) {
+                    percent = Math.min(90, percent + Math.max(1, (90 - percent) / 8));
+                } else {
+                    // Baaki reports jaisa hi flow: 90% ke baad kabhi na-ruke wali dhire-dhire
+                    // creep, 100% sirf finish() call hone par (display aane ke thik pehle)
+                    // dikhega - beech me kabhi "atka hua" nahi lagega.
+                    percent = Math.min(98.9, percent + (99 - percent) * 0.05);
                 }
-                fill.style.width = `${percent}%`;
-                text.innerText = `${percent}%`;
-            }, 220);
+                const nextDisplayed = Math.min(99, Math.round(percent));
+                if (nextDisplayed !== displayed) {
+                    displayed = nextDisplayed;
+                    fill.style.width = `${displayed}%`;
+                    text.innerText = `${displayed}%`;
+                }
+                const atCeiling = displayed >= 99;
+                fill.classList.toggle("sync-progress-pulse", atCeiling);
+                text.classList.toggle("sync-progress-pulse", atCeiling);
+            }, 200);
             return {
                 finish: () => new Promise((resolve) => {
                     finished = true;
@@ -12131,6 +12211,8 @@
                     const fill = document.getElementById("revenue-cash-sync-progress-fill");
                     const text = document.getElementById("revenue-cash-sync-progress-text");
                     if (fill && text) {
+                        fill.classList.remove("sync-progress-pulse");
+                        text.classList.remove("sync-progress-pulse");
                         fill.style.width = "100%";
                         text.innerText = "100%";
                     }
@@ -12372,7 +12454,9 @@
                 breadcrumbHtml = `<div onclick="popRevenueHqVillageDrill()" style="display:flex; align-items:center; gap:6px; padding:9px 10px; margin-bottom:6px; background:#f0fdf4; border:1.2px solid #bbf7d0; border-radius:10px; font-size:0.68rem; font-weight:900; color:#15803d; cursor:pointer;">⬅ ${escapeHtml(crumbLabel)} - Back</div>`;
             }
 
-            let html = `<div class="summary-wrapper">${breadcrumbHtml}<div class="summary-table-header" style="grid-template-columns: 1.3fr 0.8fr 0.9fr 0.8fr 0.9fr;"><div>${colLabel}</div><div>PAID</div><div>PAID AMT</div><div>UNPAID</div><div>UNPAID AMT</div></div>`;
+            // Counts-only (Total -> Paid -> Unpaid): amount wise detail summary cards +
+            // category table me pehle se hai, yahan sirf compact HQ/Village drill list hai.
+            let html = `<div class="summary-wrapper">${breadcrumbHtml}<div class="summary-table-header" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"><div>${colLabel}</div><div>TOTAL</div><div>PAID</div><div>UNPAID</div></div>`;
 
             if (!rows || !rows.length) {
                 html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is scope me data nahi mila.</div></div>`;
@@ -12382,28 +12466,80 @@
                     const clickable = canDrillDeeper && !row.type && row.children && row.children.length;
                     const attrs = clickable ? ` data-drill-name="${escapeHtml(row.name)}" onclick="pushRevenueHqVillageDrill(this)" style="cursor:pointer;"` : "";
                     const nameCell = clickable ? `${escapeHtml(row.name)} ›` : escapeHtml(row.name);
-                    html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: 1.3fr 0.8fr 0.9fr 0.8fr 0.9fr;"${attrs}><div>${nameCell}</div><div class="text-emerald-700 font-black">${row.paidTotal}</div><div class="text-emerald-700 font-black">${formatProgressReportAmount(row.paidAmountTotal)}</div><div class="text-rose-700 font-black">${row.unpaidTotal}</div><div class="text-rose-700 font-black">${formatProgressReportAmount(row.unpaidAmountTotal)}</div></div>`;
+                    const totalCount = Number(row.paidTotal || 0) + Number(row.unpaidTotal || 0);
+                    html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"${attrs}><div>${nameCell}</div><div class="font-black">${totalCount}</div><div class="text-emerald-700 font-black">${row.paidTotal}</div><div class="text-rose-700 font-black">${row.unpaidTotal}</div></div>`;
                 });
             }
 
             const totals = (rows || []).filter((row) => row.type !== "SUB_TOTAL" && row.type !== "SUBDN_TOTAL").reduce((acc, row) => {
                 acc.paidTotal += Number(row.paidTotal || 0);
                 acc.unpaidTotal += Number(row.unpaidTotal || 0);
+                return acc;
+            }, { paidTotal: 0, unpaidTotal: 0 });
+            const totalCount = totals.paidTotal + totals.unpaidTotal;
+
+            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL (${colLabel} SCOPE)</div><div class="mt-2 grid grid-cols-3 gap-2 text-center text-[11px] font-black"><div class="rounded-xl bg-slate-100 border border-slate-200 p-2">Total<br>${totalCount}</div><div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2">Paid<br>${totals.paidTotal}</div><div class="rounded-xl bg-rose-50 border border-rose-200 p-2">Unpaid<br>${totals.unpaidTotal}</div></div></div>`;
+            return html;
+        }
+
+        function buildRevenueHqVillageSummaryData(mode, filterValue) {
+            const tree = buildRevenueHqVillagePaidUnpaidTree(mode, filterValue);
+            const totals = (tree || []).filter((row) => row.type !== "SUB_TOTAL" && row.type !== "SUBDN_TOTAL").reduce((acc, row) => {
+                acc.paidTotal += Number(row.paidTotal || 0);
+                acc.unpaidTotal += Number(row.unpaidTotal || 0);
                 acc.paidAmountTotal += Number(row.paidAmountTotal || 0);
                 acc.unpaidAmountTotal += Number(row.unpaidAmountTotal || 0);
                 return acc;
             }, { paidTotal: 0, unpaidTotal: 0, paidAmountTotal: 0, unpaidAmountTotal: 0 });
+            totals.totalConsumer = totals.paidTotal + totals.unpaidTotal;
 
-            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">GRAND TOTAL</div><div class="mt-2 grid grid-cols-2 gap-2 text-center text-[11px] font-black"><div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2">Paid: ${totals.paidTotal}<br>${formatProgressReportAmount(totals.paidAmountTotal)}</div><div class="rounded-xl bg-rose-50 border border-rose-200 p-2">Unpaid: ${totals.unpaidTotal}<br>${formatProgressReportAmount(totals.unpaidAmountTotal)}</div></div></div>`;
-            return html;
+            // Category-wise bifurcation existing "Category Wise Paid/Unpaid Summary" ke
+            // proven functions se hi liya hai - alag se koi nayi classification nahi likhi.
+            const categoryRows = buildRevenueCategorySummaryRows(mode, filterValue);
+            const categoryGrand = getRevenueCategoryGrandTotals(categoryRows);
+
+            return { tree, totals, categoryGrand };
+        }
+
+        function renderRevenueHqVillageSummaryCardsHtml(data) {
+            const t = data.totals;
+            const catRows = revenueCategoryList.map((cat) => {
+                const c = data.categoryGrand.categories[cat] || { paid: 0, unpaid: 0 };
+                const total = Number(c.paid || 0) + Number(c.unpaid || 0);
+                if (!total) return "";
+                return `<div class="summary-table-row" style="grid-template-columns: 1fr 1fr 1fr 1fr;"><div>${escapeHtml(getRevenueCategoryDisplayLabel(cat))}</div><div class="font-black">${total}</div><div class="text-emerald-700 font-black">${c.paid || 0}</div><div class="text-rose-700 font-black">${c.unpaid || 0}</div></div>`;
+            }).join("");
+            return `
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; max-width:360px; margin:12px auto 0;">
+                    <div style="background:#f1f5f9; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#64748b; text-transform:uppercase;">Total Consumer</div><div style="font-size:1.05rem; font-weight:950; color:#0f172a; margin-top:3px;">${t.totalConsumer}</div></div>
+                    <div style="background:#ecfdf5; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#166534; text-transform:uppercase;">Paid</div><div style="font-size:1.05rem; font-weight:950; color:#166534; margin-top:3px;">${t.paidTotal}</div></div>
+                    <div style="background:#fff1f2; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Unpaid</div><div style="font-size:1.05rem; font-weight:950; color:#9f1239; margin-top:3px;">${t.unpaidTotal}</div></div>
+                </div>
+                <div style="font-size:0.6rem; font-weight:950; color:#166534; text-align:center; margin:12px auto 0; max-width:360px; text-transform:uppercase;">Category Wise</div>
+                <div class="summary-wrapper" style="max-width:360px; margin:6px auto 0;">
+                    <div class="summary-table-header" style="grid-template-columns: 1fr 1fr 1fr 1fr;"><div>CATEGORY</div><div>TOTAL</div><div>PAID</div><div>UNPAID</div></div>
+                    ${catRows || `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Category data nahi mila.</div></div>`}
+                </div>
+                <div style="font-size:0.6rem; font-weight:950; color:#166534; text-align:center; margin:14px auto 0; max-width:360px; text-transform:uppercase;">${activeViewLevel === "DC" ? "HQ Wise" : "DC Wise"} (tap karke aage drill down karein)</div>
+            `;
         }
 
         async function renderRevenueHqVillageReport() {
             const tableBox = document.getElementById("revenue-hq-village-table");
+            const summaryBox = document.getElementById("revenue-hq-village-summary");
             const statusBox = document.getElementById("revenue-hq-village-download-status");
+            const listSection = document.getElementById("revenue-hq-village-list-section");
             if (!tableBox) return;
             const renderToken = ++revenueHqVillageRenderToken;
             if (statusBox) statusBox.style.display = "none";
+            if (listSection) listSection.style.display = "none";
+            // Race-condition safety: activeViewLevel kabhi-kabhi stale ho sakta hai (jaise DC
+            // dashboard se seedhe is report par aane par), isliye activeDC/activeDiv se turant
+            // dobara confirm kar lo - warna DC ka report bhi Division/Circle ki tarah sabhi
+            // DC ka data dikhane lagta hai.
+            if (activeDC) activeViewLevel = "DC";
+            else if (activeDiv) activeViewLevel = "DIVISION";
+            else activeViewLevel = "CIRCLE";
             const isRenderValid = () => renderToken === revenueHqVillageRenderToken && document.getElementById("revenue-hq-village-view")?.classList.contains("active");
             const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
             try {
@@ -12418,11 +12554,16 @@
                 const filterValue = mode === "MONTHLY"
                     ? (document.getElementById("revenue-hq-village-month")?.value || getTodayIsoDate().slice(0, 7))
                     : (document.getElementById("revenue-hq-village-date")?.value || getTodayIsoDate());
-                revenueHqVillageTree = buildRevenueHqVillagePaidUnpaidTree(mode, filterValue);
+                const summaryData = buildRevenueHqVillageSummaryData(mode, filterValue);
+                revenueHqVillageTree = summaryData.tree;
                 revenueHqVillageDrillPath = [];
+                revenueHqVillageConsumerRows = buildRevenueHqVillageConsumerRows(mode, filterValue);
                 await progress.finish();
                 if (!isRenderValid()) return;
+                if (summaryBox) summaryBox.innerHTML = renderRevenueHqVillageSummaryCardsHtml(summaryData);
                 tableBox.innerHTML = renderRevenueHqVillageTable();
+                initRevenueHqVillageListDropdowns();
+                if (listSection) listSection.style.display = "block";
             } catch (error) {
                 progress.stop();
                 if (statusBox) {
@@ -12474,6 +12615,172 @@
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF({ orientation: "landscape" });
                 doc.setFontSize(13); doc.text(reportTitle, 148, 14, { align: "center" });
+                doc.setFontSize(8); doc.text(`Period: ${suffix}`, 148, 20, { align: "center" });
+                doc.autoTable({ startY: 26, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [21, 128, 61] } });
+                savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                return;
+            }
+            const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+            const csv = [[reportTitle], [`Period: ${suffix}`], [], headers, ...rows].map((row) => row.map(csvSafe).join(",")).join("\n");
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+            link.download = `${fileName}.csv`;
+            link.click();
+        }
+
+        // =====================================================================
+        // PARTICULAR LIST (HQ -> Village -> Category -> Paid/Unpaid dropdown pull)
+        // Same paid-detection data (buildRevenueCategoryUploadedPaidInfo) jo summary
+        // banata hai usi se ek flat per-consumer list bhi bana lete hain, taaki dropdown
+        // se select karke kisi bhi combination ka exact consumer list mil sake.
+        // =====================================================================
+        let revenueHqVillageConsumerRows = [];
+
+        function isRevenueMasterConsumerPaid(paidInfo) {
+            if (!paidInfo) return false;
+            const total = Number(paidInfo.normalCount || 0) + Number(paidInfo.agCount || 0) + Number(paidInfo.mixedCount || 0) + Number(paidInfo.unknownCount || 0);
+            return total > 0;
+        }
+
+        function getRevenueMasterConsumerPaidAmount(paidInfo) {
+            if (!paidInfo) return 0;
+            return Number(paidInfo.normalAmount || 0) + Number(paidInfo.agAmount || 0) + Number(paidInfo.mixedAmount || 0) + Number(paidInfo.unknownAmount || 0);
+        }
+
+        function buildRevenueHqVillageConsumerRows(mode, filterValue) {
+            const paidInfoByDc = buildRevenueCategoryUploadedPaidInfo(mode, filterValue);
+            const targetDcs = getRevenueCategoryTargetDcs();
+            const rows = [];
+            targetDcs.forEach((dcName) => {
+                const normalizedDc = normalizeDcName(dcName);
+                const paidInfoForDc = paidInfoByDc[normalizedDc] || {};
+                getRevenueMasterRowsForDc(dcName).forEach((row) => {
+                    const ivrs = normalizeRevenueIvrs(row.ivrsNo);
+                    if (!ivrs) return;
+                    const info = paidInfoForDc[ivrs];
+                    const paid = isRevenueMasterConsumerPaid(info);
+                    rows.push({
+                        ivrsNo: row.ivrsNo || "",
+                        consumerName: row.consumerName || "",
+                        fatherName: row.fatherName || "",
+                        village: String(row.village || "UNKNOWN").trim().toUpperCase() || "UNKNOWN",
+                        hqName: String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL",
+                        tariffCategory: normalizeRevenueCategory(row.tariffCategory || row.category || ""),
+                        mobileNo: row.mobileNo || "",
+                        netBill: row.netBill || "",
+                        dcName: normalizedDc,
+                        paid,
+                        paidAmount: paid ? getRevenueMasterConsumerPaidAmount(info) : 0
+                    });
+                });
+            });
+            return rows;
+        }
+
+        function initRevenueHqVillageListDropdowns() {
+            const hqSelect = document.getElementById("revenue-hq-village-list-hq");
+            const villageSelect = document.getElementById("revenue-hq-village-list-village");
+            const categorySelect = document.getElementById("revenue-hq-village-list-category");
+            const statusSelect = document.getElementById("revenue-hq-village-list-status");
+            populateRevenueSelect(hqSelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "hqName"), "All HQ");
+            populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "village"), "All Villages");
+            populateRevenueSelect(categorySelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "tariffCategory"), "All Categories");
+            if (hqSelect) hqSelect.value = "";
+            if (villageSelect) villageSelect.value = "";
+            if (categorySelect) categorySelect.value = "";
+            if (statusSelect) statusSelect.value = "ALL";
+            renderRevenueHqVillageList();
+        }
+
+        function onRevenueHqVillageListHqChange() {
+            const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "";
+            const scoped = revenueHqVillageConsumerRows.filter((row) => !hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue));
+            populateRevenueSelect(document.getElementById("revenue-hq-village-list-village"), getRevenueUniqueValues(scoped, "village"), "All Villages");
+            populateRevenueSelect(document.getElementById("revenue-hq-village-list-category"), getRevenueUniqueValues(scoped, "tariffCategory"), "All Categories");
+            renderRevenueHqVillageList();
+        }
+
+        function onRevenueHqVillageListVillageChange() {
+            const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "";
+            const villageValue = document.getElementById("revenue-hq-village-list-village")?.value || "";
+            const scoped = revenueHqVillageConsumerRows.filter((row) => (
+                (!hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue))
+                && (!villageValue || normalizeLookupValue(row.village) === normalizeLookupValue(villageValue))
+            ));
+            populateRevenueSelect(document.getElementById("revenue-hq-village-list-category"), getRevenueUniqueValues(scoped, "tariffCategory"), "All Categories");
+            renderRevenueHqVillageList();
+        }
+
+        function getRevenueHqVillageListFilteredRows() {
+            const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "";
+            const villageValue = document.getElementById("revenue-hq-village-list-village")?.value || "";
+            const categoryValue = document.getElementById("revenue-hq-village-list-category")?.value || "";
+            const statusValue = document.getElementById("revenue-hq-village-list-status")?.value || "ALL";
+            return revenueHqVillageConsumerRows.filter((row) => (
+                (!hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue))
+                && (!villageValue || normalizeLookupValue(row.village) === normalizeLookupValue(villageValue))
+                && (!categoryValue || normalizeLookupValue(row.tariffCategory) === normalizeLookupValue(categoryValue))
+                && (statusValue === "ALL" || (statusValue === "PAID" ? row.paid : !row.paid))
+            ));
+        }
+
+        function renderRevenueHqVillageList() {
+            const statusBox = document.getElementById("revenue-hq-village-list-status-box");
+            const listBox = document.getElementById("revenue-hq-village-list-box");
+            if (!statusBox || !listBox) return;
+            const rows = getRevenueHqVillageListFilteredRows();
+            const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "ALL";
+            const villageValue = document.getElementById("revenue-hq-village-list-village")?.value || "ALL";
+            const categoryValue = document.getElementById("revenue-hq-village-list-category")?.value || "ALL";
+            const statusValue = document.getElementById("revenue-hq-village-list-status")?.value || "ALL";
+            statusBox.innerHTML = `Consumer: <strong>${rows.length}</strong> | HQ: ${escapeHtml(hqValue)} | Village: ${escapeHtml(villageValue)} | Category: ${escapeHtml(categoryValue)} | Status: ${escapeHtml(statusValue)}`;
+            listBox.innerHTML = rows.length ? `
+                <div style="display:flex; gap:10px; width:100%; margin:10px auto 0;">
+                    <button onclick="downloadRevenueHqVillageList('PDF')" style="flex:1; height:44px; border:none; border-radius:14px; background:#ef4444; color:#ffffff; font-size:0.78rem; font-weight:950;">PDF</button>
+                    <button onclick="downloadRevenueHqVillageList('EXCEL')" style="flex:1; height:44px; border:none; border-radius:14px; background:#16a34a; color:#ffffff; font-size:0.78rem; font-weight:950;">EXCEL</button>
+                </div>
+            ` : `<div style="background:#ecfdf5; border:1.5px solid #86efac; border-radius:14px; padding:14px; color:#047857; font-size:0.8rem; font-weight:900; text-align:center; margin-top:10px;">Is filter me consumer nahi mila.</div>`;
+        }
+
+        function getRevenueHqVillageListExportHeaders() {
+            return ["STATUS", "IVRS NO", "CONSUMER NAME", "FATHER NAME", "VILLAGE", "HQ NAME", "CATEGORY", "MOBILE NO", "NET BILL", "PAID AMOUNT", "DC NAME"];
+        }
+
+        function getRevenueHqVillageListExportRows(rows) {
+            return (rows || []).map((row) => [
+                row.paid ? "PAID" : "UNPAID",
+                row.ivrsNo || "",
+                row.consumerName || "",
+                row.fatherName || "",
+                row.village || "",
+                row.hqName || "",
+                row.tariffCategory || "",
+                row.mobileNo || "",
+                row.netBill || "",
+                row.paid ? formatProgressReportAmount(row.paidAmount) : "",
+                row.dcName || ""
+            ]);
+        }
+
+        function downloadRevenueHqVillageList(type) {
+            const filteredRows = getRevenueHqVillageListFilteredRows();
+            if (!filteredRows.length) return showToast("List ke liye data nahi hai", false);
+            const headers = getRevenueHqVillageListExportHeaders();
+            const rows = getRevenueHqVillageListExportRows(filteredRows);
+            const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "ALL-HQ";
+            const villageValue = document.getElementById("revenue-hq-village-list-village")?.value || "ALL-VILLAGE";
+            const categoryValue = document.getElementById("revenue-hq-village-list-category")?.value || "ALL-CATEGORY";
+            const statusValue = document.getElementById("revenue-hq-village-list-status")?.value || "ALL";
+            const reportTitle = `Consumer List - ${hqValue} - ${villageValue} - ${categoryValue} - ${statusValue}`;
+            const suffix = revenueHqVillageMode === "MONTHLY"
+                ? (document.getElementById("revenue-hq-village-month")?.value || getTodayIsoDate().slice(0, 7))
+                : normalizeRevenueReportDate(document.getElementById("revenue-hq-village-date")?.value || getCurrentDateDDMMYYYY());
+            const fileName = `${reportTitle}-${suffix}`.replace(/[\\/:*?"<>|]+/g, "_");
+            if (type === "PDF") {
+                if (!window.jspdf?.jsPDF) return showToast("PDF library load nahi hui", false);
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation: "landscape" });
+                doc.setFontSize(11); doc.text(reportTitle, 148, 14, { align: "center" });
                 doc.setFontSize(8); doc.text(`Period: ${suffix}`, 148, 20, { align: "center" });
                 doc.autoTable({ startY: 26, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [21, 128, 61] } });
                 savePdfDocumentForDevice(doc, `${fileName}.pdf`);

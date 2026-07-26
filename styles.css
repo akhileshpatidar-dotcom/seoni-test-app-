@@ -710,3 +710,7 @@
         .progress-module-btn, .report-opt, .small-bottom-btn, .submit-sync-btn, .stock-submit {
             font-weight: 800;
         }
+        /* Syncing progress bar - jab 99% par pahunch kar lambe samay tak wait karna pade,
+           tab yeh halka pulse dikhata hai taaki "atka hua" na lage, kaam chal raha hai jaisa lage */
+        @keyframes syncProgressPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .sync-progress-pulse { animation: syncProgressPulse 1.1s ease-in-out infinite; }
