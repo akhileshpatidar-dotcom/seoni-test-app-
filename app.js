@@ -9361,6 +9361,13 @@
             switchView("revenue-pending-list");
         }
 
+        function openRevenueHqVillageReport() {
+            closeHeaderMenu();
+            // TODO: HQ/Village Wise Paid-Unpaid report abhi banna baaki hai - jab view/render
+            // function ready ho jaaye, yahan switchView("revenue-hq-village") kar dena.
+            showToast("HQ / Village Wise Paid-Unpaid report jald hi add hoga", true);
+        }
+
         function openRevenueCashReconcile() {
             closeHeaderMenu();
             switchView("revenue-cash-reconcile");

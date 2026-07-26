@@ -89,12 +89,13 @@
                 <button type="button" class="header-menu-btn" onclick="toggleHeaderMenu(event)">⋮</button>
                 <div id="header-menu-list" class="header-menu-list">
                     <button type="button" class="header-menu-item revenue-header-menu-item live-progress-menu-item" onclick="openRevenueLiveProgress()">⏱️ Live Progress</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueReportDownload()" style="margin-top:6px; text-align:center;">📄 Date/Month Report</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePendingList()" style="margin-top:6px; text-align:center;">⏳ Pending DO List</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueMessageCenter()" style="margin-top:6px; text-align:center;">💬 Send SMS / WhatsApp</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueCashReconcile()" style="margin-top:6px; text-align:center;">🧾 Paid by Staff vs NGB Cash List</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePaidUpload()" style="margin-top:10px; text-align:center; background:#fee2e2; color:#b91c1c; border:1.5px solid #fca5a5; border-top:2px solid #f87171; padding-top:10px;">🔒 Admin Upload Cash List</button>
-                    <button id="staff-admin-header-menu-item" type="button" class="header-menu-item" onclick="openStaffAdmin()" style="display:none; text-align:center; background:#fff7ed; color:#c2410c; border:1.5px solid #fdba74;">STAFF ADMIN</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueReportDownload()">📄 Paid by Staff Date/Month</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueHqVillageReport()">📊 HQ / Village Wise Paid-Unpaid</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePendingList()">⏳ Pending DO List</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueCashReconcile()">🧾 Paid by Staff vs NGB Cash List</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueMessageCenter()">💬 Send SMS / WhatsApp</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePaidUpload()" style="margin-top:10px; background:#fee2e2; color:#b91c1c; border:1.5px solid #fca5a5; border-top:2px solid #f87171; padding-top:10px;">🔒 Admin Upload Cash List</button>
+                    <button id="staff-admin-header-menu-item" type="button" class="header-menu-item" onclick="openStaffAdmin()" style="display:none; background:#fff7ed; color:#c2410c; border:1.5px solid #fdba74;">STAFF ADMIN</button>
                 </div>
             </div>
         </header>

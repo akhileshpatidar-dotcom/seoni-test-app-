@@ -120,8 +120,9 @@
         .header-info p { font-size: 8.5px !important; opacity: 0.95; font-weight: 400 !important; text-transform: uppercase; white-space: nowrap; letter-spacing: 0.4px; margin-top: 2px; color: #ffffff; }
         .header-menu-wrap { grid-column: 3; justify-self: end; position: relative; display: none; }
         .header-menu-btn { width: 34px; height: 34px; border: none; border-radius: 999px; background: rgba(255,255,255,0.18); color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 1.2rem; line-height: 1; }
-        .header-menu-list { position: absolute; right: 0; top: 40px; min-width: 138px; background: #ffffff; border: 1px solid #bfdbfe; border-radius: 14px; box-shadow: 0 12px 28px rgba(15,23,42,0.18); padding: 7px; display: none; z-index: 300; }
-        .header-menu-item { width: 100%; border: 1.5px solid #e2e8f0; background: #f8fafc; color: #1e293b; border-radius: 10px; padding: 10px 12px; font-size: 0.74rem; font-weight: 800; text-align: left; text-transform: none; letter-spacing: 0.01em; }
+        .header-menu-list { position: absolute; right: 0; top: 40px; min-width: 250px; width: max-content; max-width: calc(100vw - 24px); background: #ffffff; border: 1px solid #bfdbfe; border-radius: 14px; box-shadow: 0 12px 28px rgba(15,23,42,0.18); padding: 7px; display: none; z-index: 300; }
+        .header-menu-item { display: block; width: 100%; border: 1.5px solid #e2e8f0; background: #f8fafc; color: #1e293b; border-radius: 10px; padding: 11px 14px; font-size: 0.72rem; font-weight: 800; text-align: left; text-transform: none; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .header-menu-item + .header-menu-item { margin-top: 6px; }
         @keyframes liveProgressBlink {
             0%, 100% { background: #dcfce7; color: #166534; box-shadow: 0 0 0 rgba(34,197,94,0); }
             50% { background: #16a34a; color: #ffffff; box-shadow: 0 0 14px rgba(34,197,94,0.55); }
