@@ -6,14 +6,22 @@
 // no-network me bhi app khule (blank error page na aaye) — data submit/search
 // tab bhi network hi maangega, jaisa aaj hai.
 
-const CACHE_VERSION = "seoni-app-shell-v1";
+const CACHE_VERSION = "seoni-app-shell-v2";
 
 const SHELL_FILES = [
     "./index.html",
+    "./styles.css",
+    "./app.js",
     "./manifest.json",
     "./icon-192.png",
     "./icon-512.png"
 ];
+
+// index.html/styles.css/app.js — teeno hi app ka "core code" hain (pehle sab
+// index.html me hi inline the, ab teen files me split hain). In teeno ko
+// network-first rakha hai taaki deploy ke turant baad latest version mile,
+// CACHE_VERSION bump ka wait na karna pade.
+const NETWORK_FIRST_FILES = ["/index.html", "/styles.css", "/app.js"];
 
 // In-app CDN libraries (opaque/no-cors cache — cross-origin, cache-first hai
 // kyunki ye rarely change hote hain aur data nahi hain)
@@ -53,6 +61,10 @@ function isDataRequest(url) {
         url.includes("googleusercontent.com");
 }
 
+function isNetworkFirstFile(url) {
+    return NETWORK_FIRST_FILES.some((suffix) => url.endsWith(suffix));
+}
+
 self.addEventListener("fetch", (event) => {
     const url = event.request.url;
 
@@ -61,9 +73,9 @@ self.addEventListener("fetch", (event) => {
         return;
     }
 
-    // App shell / same-origin pages: network-first, taaki latest version hamesha mile;
-    // offline hone par hi cached (purani) copy dikhe.
-    if (event.request.mode === "navigate" || url.endsWith("/index.html") || url.endsWith("/")) {
+    // App shell code (HTML/CSS/JS) / same-origin navigations: network-first, taaki latest
+    // version hamesha mile; offline hone par hi cached (purani) copy dikhe.
+    if (event.request.mode === "navigate" || isNetworkFirstFile(url) || url.endsWith("/")) {
         event.respondWith(
             fetch(event.request)
                 .then((response) => {
