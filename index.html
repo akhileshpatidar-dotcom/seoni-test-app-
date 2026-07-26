@@ -19,6 +19,7 @@
 <body>
     <div id="toast-notif" role="status" aria-live="polite" aria-atomic="true"></div>
     <button id="dark-mode-toggle-btn" class="dark-mode-toggle-btn" type="button" onclick="toggleDarkMode()" aria-label="Dark mode on/off karein" title="Dark Mode">🌙</button>
+    <button id="app-refresh-btn" class="app-refresh-btn" type="button" onclick="refreshAppNow()" aria-label="App refresh karein" title="App Refresh (latest version)">🔄</button>
 
     <div id="pwa-install-banner" class="pwa-install-banner" style="display:none;" role="dialog" aria-label="App install karein">
         <div class="pwa-install-banner-inner">
@@ -920,8 +921,8 @@
                     <button id="revenue-hq-village-month-mode-btn" onclick="setRevenueHqVillageMode('MONTHLY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#dcfce7; color:#15803d; font-size:0.62rem; font-weight:950;">MONTH WISE</button>
                 </div>
                 <div style="width:100%; max-width:360px; overflow:hidden; border-radius:12px; margin:8px auto 0;">
-                    <input id="revenue-hq-village-date" type="date" onchange="renderRevenueHqVillageReport()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; display:block; border:1.2px solid #86efac; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
-                    <input id="revenue-hq-village-month" type="month" onchange="renderRevenueHqVillageReport()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; display:none; border:1.2px solid #86efac; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                    <input id="revenue-hq-village-date" type="date" onchange="renderRevenueHqVillageReport()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:block; border:1.2px solid #86efac; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                    <input id="revenue-hq-village-month" type="month" onchange="renderRevenueHqVillageReport()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:none; border:1.2px solid #86efac; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
                 </div>
                 <div id="revenue-hq-village-summary" style="width:100%; max-width:360px; margin:0 auto;"></div>
                 <div id="revenue-hq-village-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
@@ -952,6 +953,7 @@
                     </select>
                     <div id="revenue-hq-village-list-status-box" style="width:100%; max-width:360px; margin:12px auto 0; border-radius:14px; padding:10px; background:#f8fafc; border:1.2px dashed #86efac; color:#334155; font-size:0.72rem; font-weight:850; text-align:center;"></div>
                     <div id="revenue-hq-village-list-box" style="width:100%; max-width:360px; margin:0 auto;"></div>
+                    <div id="revenue-hq-village-list-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#ecfdf5; border:1.2px solid #86efac; color:#166534; font-size:0.66rem; font-weight:950; text-align:center;"></div>
                 </div>
             </div>
         </main>

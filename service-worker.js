@@ -54,6 +54,15 @@ self.addEventListener("activate", (event) => {
     self.clients.claim();
 });
 
+// In-app "Refresh" button (app.js ka refreshAppNow()) se aane wala message —
+// agar kabhi koi naya SW version "waiting" me atak jaye, to usko turant
+// activate karwa do taaki user ko dobara app band-open na karna pade.
+self.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "SKIP_WAITING") {
+        self.skipWaiting();
+    }
+});
+
 function isDataRequest(url) {
     // Google Sheets / Apps Script / any live data source — kabhi cache/intercept nahi karna
     return url.includes("docs.google.com") ||
