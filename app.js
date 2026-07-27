@@ -1479,14 +1479,8 @@
             });
             const headerA = [...firstCols, ...metricColsFor(groupACategories)];
             const headerB = [...firstCols, ...metricColsFor(groupBCategories), ...metricSubHeaders.map((h) => `TOTAL ${h}`)];
-            const diagnosticRows = diagnostic ? [
-                ["Uploaded Payment Rows", diagnostic.uploadedUnique],
-                ["Selected Month Payment Rows", diagnostic.selectedMonth],
-                ["Master Matched Payment Rows", diagnostic.matchedMaster],
-                ["Out of Selected Month Rows", diagnostic.outOfMonth],
-                ["Master Not Matched Rows", diagnostic.masterNotMatched],
-                ["Missing/Invalid Date", diagnostic.missingDate]
-            ] : [];
+            // Diagnostic table hata di gayi hai - isse report ek hi page me (bina extra
+            // diagnostic block ki jagah ghere) nikalti hai.
             const leadingCells = (row) => activeViewLevel === "CIRCLE" ? [row.divisionName || "", row.name] : [row.name];
             const categoryMetricCells = (category, row) => {
                 const c = row.categories?.[category] || {};
@@ -1533,7 +1527,6 @@
                     ["PERIOD", label],
                     ["SCOPE", getRevenueCategoryScopeLabel()],
                     ["GENERATED AT", generatedAt],
-                    ...(diagnosticRows.length ? [[], ["DIAGNOSTIC", "COUNT"], ...diagnosticRows] : []),
                     [],
                     ["TABLE 1: DOMESTIC / NON DOMESTIC / PUBLIC WATER WORKS AND STREET LIGHTS"],
                     headerA,
@@ -1566,20 +1559,7 @@
             doc.setFontSize(7);
             doc.setTextColor(100);
             doc.text(`Generated: ${generatedAt}`, 283, 10, { align: "right" });
-            let tableStartY = 32;
-            if (diagnosticRows.length) {
-                doc.autoTable({
-                    startY: 30,
-                    head: [["Diagnostic", "Count"]],
-                    body: diagnosticRows,
-                    theme: "grid",
-                    styles: { fontSize: 6, cellPadding: 1.1, lineWidth: 0.12, halign: "center" },
-                    headStyles: { fillColor: [15, 118, 110], fontSize: 6, halign: "center" },
-                    columnStyles: { 0: { halign: "left" } },
-                    margin: { left: 96, right: 96 }
-                });
-                tableStartY = (doc.lastAutoTable?.finalY || 48) + 5;
-            }
+            const tableStartY = 32;
             const groupedHeadFor = (categoriesWithLabels) => [
                 [
                     ...firstCols.map((col) => ({ content: col, rowSpan: 2, styles: { valign: "middle", halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } })),
@@ -1599,42 +1579,76 @@
                     }
                 }
             };
-            // TABLE 1: DOMESTIC / NON DOMESTIC / PUBLIC WATER WORKS AND STREET LIGHTS
-            doc.setFontSize(8.5);
-            doc.setTextColor(29, 78, 216);
-            doc.text("TABLE 1: DOMESTIC / NON DOMESTIC / PUBLIC WATER WORKS AND STREET LIGHTS", 14, tableStartY);
-            doc.autoTable({
-                startY: tableStartY + 3,
-                head: groupedHeadFor(groupACategories.map(getRevenueCategoryDisplayLabel)),
-                body: (rows || []).map(rowToArrayA),
-                foot: [grandRowA],
-                theme: "grid",
-                styles: { fontSize: 6.5, cellPadding: 1.3, overflow: "linebreak", halign: "center", lineWidth: 0.12 },
-                headStyles: { fillColor: [37, 99, 235], halign: "center", fontSize: 6.5, lineColor: [15, 23, 42], lineWidth: 0.25 },
-                columnStyles: { 0: { halign: "left" }, 1: { halign: activeViewLevel === "CIRCLE" ? "left" : "center" } },
-                footStyles: { fillColor: [241, 245, 249], textColor: [190, 18, 60], fontStyle: "bold", halign: "center" },
-                didParseCell: highlightTotalRows
-            });
-            // TABLE 2: LT INDUSTRIAL / AGRICULTURE / TOTAL (TOTAL block ab %  ke saath)
-            let table2StartY = (doc.lastAutoTable?.finalY || tableStartY + 3) + 10;
-            if (table2StartY > 180) {
-                doc.addPage();
-                table2StartY = 20;
-            }
-            doc.setFontSize(8.5);
-            doc.setTextColor(29, 78, 216);
-            doc.text("TABLE 2: LT INDUSTRIAL / AGRICULTURE AND ALLIED ACTIVITIES / TOTAL", 14, table2StartY);
-            doc.autoTable({
-                startY: table2StartY + 3,
-                head: groupedHeadFor([...groupBCategories.map(getRevenueCategoryDisplayLabel), "TOTAL"]),
-                body: (rows || []).map(rowToArrayB),
-                foot: [grandRowB],
-                theme: "grid",
-                styles: { fontSize: 6.5, cellPadding: 1.3, overflow: "linebreak", halign: "center", lineWidth: 0.12 },
-                headStyles: { fillColor: [37, 99, 235], halign: "center", fontSize: 6.5, lineColor: [15, 23, 42], lineWidth: 0.25 },
-                columnStyles: { 0: { halign: "left" }, 1: { halign: activeViewLevel === "CIRCLE" ? "left" : "center" } },
-                footStyles: { fillColor: [241, 245, 249], textColor: [190, 18, 60], fontStyle: "bold", halign: "center" },
-                didParseCell: highlightTotalRows
+            // Circle level par poori list ek lambi table me na chale, balki HAR DIVISION
+            // apne khud ke alag PDF page par dikhe - taaki dekhne me confusion na ho
+            // (pehle DC's random jagah page-break ho jaate the, ab hamesha division ki
+            // boundary par hi naya page shuru hota hai). DC/Division level par yeh split
+            // nahi hota, wahan sab kuch ek hi continuous flow me chalta hai (jaisa pehle).
+            const splitRowsByDivision = (allRows) => {
+                if (activeViewLevel !== "CIRCLE") return [{ divisionName: null, chunkRows: allRows || [] }];
+                const chunks = [];
+                let current = [];
+                (allRows || []).forEach((row) => {
+                    current.push(row);
+                    if (row.type === "SUB_TOTAL") {
+                        chunks.push({ divisionName: row.divisionName || "", chunkRows: current });
+                        current = [];
+                    }
+                });
+                if (current.length) chunks.push({ divisionName: current[0]?.divisionName || "", chunkRows: current });
+                return chunks;
+            };
+            const divisionChunks = splitRowsByDivision(rows);
+            divisionChunks.forEach((chunk, chunkIndex) => {
+                const isLastChunk = chunkIndex === divisionChunks.length - 1;
+                let startY = tableStartY;
+                if (activeViewLevel === "CIRCLE") {
+                    if (chunkIndex > 0) {
+                        doc.addPage();
+                        startY = 18;
+                    }
+                    doc.setFontSize(9.5);
+                    doc.setTextColor(29, 78, 216);
+                    doc.text(`DIVISION: ${chunk.divisionName || "-"}`, 14, startY);
+                    startY += 6;
+                }
+                // TABLE 1: DOMESTIC / NON DOMESTIC / PUBLIC WATER WORKS AND STREET LIGHTS
+                doc.setFontSize(8.5);
+                doc.setTextColor(29, 78, 216);
+                doc.text("TABLE 1: DOMESTIC / NON DOMESTIC / PUBLIC WATER WORKS AND STREET LIGHTS", 14, startY);
+                doc.autoTable({
+                    startY: startY + 3,
+                    head: groupedHeadFor(groupACategories.map(getRevenueCategoryDisplayLabel)),
+                    body: chunk.chunkRows.map(rowToArrayA),
+                    foot: isLastChunk ? [grandRowA] : undefined,
+                    theme: "grid",
+                    styles: { fontSize: 6.5, cellPadding: 1.3, overflow: "linebreak", halign: "center", lineWidth: 0.12 },
+                    headStyles: { fillColor: [37, 99, 235], halign: "center", fontSize: 6.5, lineColor: [15, 23, 42], lineWidth: 0.25 },
+                    columnStyles: { 0: { halign: "left" }, 1: { halign: activeViewLevel === "CIRCLE" ? "left" : "center" } },
+                    footStyles: { fillColor: [241, 245, 249], textColor: [190, 18, 60], fontStyle: "bold", halign: "center" },
+                    didParseCell: highlightTotalRows
+                });
+                // TABLE 2: LT INDUSTRIAL / AGRICULTURE / TOTAL (TOTAL block ab % ke saath)
+                let table2StartY = (doc.lastAutoTable?.finalY || startY + 3) + 10;
+                if (table2StartY > 180) {
+                    doc.addPage();
+                    table2StartY = 20;
+                }
+                doc.setFontSize(8.5);
+                doc.setTextColor(29, 78, 216);
+                doc.text("TABLE 2: LT INDUSTRIAL / AGRICULTURE AND ALLIED ACTIVITIES / TOTAL", 14, table2StartY);
+                doc.autoTable({
+                    startY: table2StartY + 3,
+                    head: groupedHeadFor([...groupBCategories.map(getRevenueCategoryDisplayLabel), "TOTAL"]),
+                    body: chunk.chunkRows.map(rowToArrayB),
+                    foot: isLastChunk ? [grandRowB] : undefined,
+                    theme: "grid",
+                    styles: { fontSize: 6.5, cellPadding: 1.3, overflow: "linebreak", halign: "center", lineWidth: 0.12 },
+                    headStyles: { fillColor: [37, 99, 235], halign: "center", fontSize: 6.5, lineColor: [15, 23, 42], lineWidth: 0.25 },
+                    columnStyles: { 0: { halign: "left" }, 1: { halign: activeViewLevel === "CIRCLE" ? "left" : "center" } },
+                    footStyles: { fillColor: [241, 245, 249], textColor: [190, 18, 60], fontStyle: "bold", halign: "center" },
+                    didParseCell: highlightTotalRows
+                });
             });
             savePdfDocumentForDevice(doc, `Revenue_Category_Summary_${levelT}_${reportType}.pdf`);
         }
@@ -2745,24 +2759,18 @@
         }
 
         let deferredPwaInstallPrompt = null;
-        const pwaInstallDismissKey = "seoni-pwa-install-dismissed-at";
 
-        function isPwaInstallDismissedRecently() {
-            try {
-                const raw = localStorage.getItem(pwaInstallDismissKey);
-                if (!raw) return false;
-                const dismissedAt = Number(raw);
-                const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
-                return Number.isFinite(dismissedAt) && (Date.now() - dismissedAt) < fourteenDaysMs;
-            } catch (_) { return false; }
-        }
-
+        // Pehle yahan 14-din ka "dismiss cooldown" tha - ek baar banner cross (✕) karne
+        // ke baad 14 din tak dobara nahi dikhta tha, chahe app install ho ya na ho. Ab
+        // sirf ek hi cheez check hoti hai: app installed hai ya nahi. Jab tak install
+        // nahi hota, har refresh/reopen par banner phir se dikhega; install ho jaane par
+        // (isRunningAsInstalledPwa() true) hamesha ke liye band ho jayega.
         function isRunningAsInstalledPwa() {
             return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
         }
 
         function showPwaInstallBanner(platform) {
-            if (isRunningAsInstalledPwa() || isPwaInstallDismissedRecently()) return;
+            if (isRunningAsInstalledPwa()) return;
             const banner = document.getElementById("pwa-install-banner");
             const title = document.getElementById("pwa-install-banner-title");
             const message = document.getElementById("pwa-install-banner-message");
@@ -2782,9 +2790,11 @@
         }
 
         function dismissPwaInstallBanner() {
+            // Sirf abhi ke liye (is session/page-view me) banner hata do - koi long-term
+            // "dismissed" flag save nahi karte, taaki agli baar refresh/reopen karne par
+            // (jab tak app install nahi hua) banner phir se dikhe.
             const banner = document.getElementById("pwa-install-banner");
             if (banner) banner.style.display = "none";
-            try { localStorage.setItem(pwaInstallDismissKey, String(Date.now())); } catch (_) {}
         }
 
         async function handlePwaInstallAction() {
