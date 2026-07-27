@@ -477,7 +477,6 @@
         #receiver-name { text-align: center !important; }
         .bg-red-grad { background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important; }
         .bg-cyan-grad { background: linear-gradient(135deg, #06b6d4 0%, #155e75 100%) !important; }
-        .bg-amber-grad { background: linear-gradient(135deg, #fbbf24 0%, #b45309 100%) !important; }
         .bg-indigo-grad { background: linear-gradient(135deg, #6366f1 0%, #312e81 100%) !important; }
         .summary-wrapper { width: 100%; background: white; border-radius: 16px; overflow: hidden; border: 1.5px solid #e2e8f0; margin-top: 10px; }
         .summary-table-header { display: grid; grid-template-columns: 1fr 1fr 1.2fr; background: var(--fixed-green) !important; color: #ffffff; font-size: 9px; font-weight: 900; text-transform: uppercase; padding: 14px 8px; text-align: center; }
@@ -518,55 +517,9 @@
         .bg-blue-grad { background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%); }
         .bg-orange-grad { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); }
         .stock-wrap { display: flex; flex-direction: column; gap: 14px; }
-        .stock-hero { background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%); border: 1px solid #fdba74; border-radius: 20px; padding: 18px; box-shadow: 0 10px 24px rgba(245, 158, 11, 0.12); }
-        .stock-hero h3 { margin: 0 0 6px; font-size: 1.1rem; font-weight: 900; color: #7c2d12; text-transform: uppercase; }
-        .stock-hero p { margin: 0; color: #9a3412; font-size: 0.86rem; line-height: 1.6; font-weight: 700; }
-        .stock-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        .stock-stat { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; padding: 16px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05); }
-        .stock-stat-label { font-size: 0.68rem; font-weight: 900; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; }
-        .stock-stat-value { margin-top: 8px; font-size: 1.3rem; font-weight: 900; color: #0f172a; }
-        .stock-action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        .stock-tile { border: none; border-radius: 18px; padding: 18px 14px; color: #ffffff; font-weight: 900; text-transform: uppercase; font-size: 0.8rem; text-align: left; box-shadow: 0 12px 22px rgba(15, 23, 42, 0.12); }
-        .stock-tile span { display: block; font-size: 0.65rem; margin-top: 6px; opacity: 0.92; line-height: 1.5; }
-        .tile-indigo { background: linear-gradient(135deg, #4338ca 0%, #312e81 100%); }
-        .tile-emerald { background: linear-gradient(135deg, #10b981 0%, #065f46 100%); }
-        .tile-rose { background: linear-gradient(135deg, #e11d48 0%, #881337 100%); }
-        .tile-slate { background: linear-gradient(135deg, #334155 0%, #0f172a 100%); }
-        .tile-violet { background: linear-gradient(135deg, #8b5cf6 0%, #5b21b6 100%); }
-        .tile-sky { background: linear-gradient(135deg, #0ea5e9 0%, #075985 100%); }
         .stock-section-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 20px; padding: 16px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05); }
         .stock-section-title { margin: 0 0 12px; font-size: 0.92rem; font-weight: 900; color: #0f172a; text-transform: uppercase; }
         .stock-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
-        .chhapara-calc-card { background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%); border: 1.5px solid #bae6fd; border-radius: 24px; padding: 18px 16px; box-shadow: 0 12px 28px rgba(8, 145, 178, 0.08); }
-        .chhapara-calc-title { margin: 0; font-size: 1rem; font-weight: 900; color: #0f172a; text-transform: uppercase; text-align: center; }
-        .chhapara-calc-subtitle { margin: 8px 0 0; font-size: 0.8rem; line-height: 1.55; color: #0f766e; font-weight: 700; text-align: center; }
-        .chhapara-calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
-        .chhapara-calc-grid.single { grid-template-columns: 1fr; }
-        .chhapara-calc-field { display: flex; flex-direction: column; gap: 6px; }
-        .chhapara-calc-field label { font-size: 0.68rem; font-weight: 900; color: #155e75; text-transform: uppercase; letter-spacing: 0.04em; }
-        .chhapara-calc-input { width: 100%; min-height: 46px; padding: 0 12px; border-radius: 14px; border: 1.6px solid #7dd3fc; background: #ffffff; color: #0f172a; font-size: 0.9rem; font-weight: 800; }
-        .chhapara-calc-input::placeholder { color: #94a3b8; }
-        .chhapara-calc-textarea { min-height: 78px; padding: 12px; resize: vertical; }
-        .chhapara-calc-preview { margin-top: 14px; background: #ecfeff; border: 1px solid #a5f3fc; border-radius: 18px; padding: 14px; }
-        .chhapara-calc-preview-line { font-size: 0.78rem; font-weight: 800; color: #0f172a; line-height: 1.55; margin-top: 4px; }
-        .chhapara-calc-preview-line:first-child { margin-top: 0; }
-        .chhapara-calc-preview-line strong { color: #0c4a6e; }
-        .chhapara-calc-action { width: 100%; margin-top: 14px; min-height: 48px; border: none; border-radius: 14px; background: linear-gradient(135deg, #0284c7 0%, #155e75 100%); color: #ffffff; font-size: 0.88rem; font-weight: 900; text-transform: uppercase; box-shadow: 0 10px 22px rgba(2, 132, 199, 0.2); }
-        .chhapara-summary-strip { margin-top: 14px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-        .chhapara-summary-box { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 18px; padding: 14px; text-align: center; }
-        .chhapara-summary-box span { display: block; font-size: 0.7rem; font-weight: 900; color: #475569; text-transform: uppercase; }
-        .chhapara-summary-box strong { display: block; margin-top: 8px; font-size: 1.1rem; color: #0f172a; }
-        .chhapara-entry-list { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
-        .chhapara-entry-card { background: #ffffff; border: 1px solid #dbeafe; border-radius: 18px; padding: 14px; box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05); }
-        .chhapara-entry-top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
-        .chhapara-entry-name { font-size: 0.86rem; font-weight: 900; color: #0f172a; text-transform: uppercase; }
-        .chhapara-entry-meta { margin-top: 2px; font-size: 0.68rem; font-weight: 800; color: #0f766e; }
-        .chhapara-entry-total { font-size: 0.82rem; font-weight: 900; color: #075985; white-space: nowrap; }
-        .chhapara-share-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-        .chhapara-share-row { display: flex; justify-content: space-between; gap: 10px; font-size: 0.74rem; font-weight: 800; color: #334155; background: #f8fafc; border-radius: 12px; padding: 8px 10px; }
-        .chhapara-entry-note { margin-top: 10px; font-size: 0.72rem; color: #64748b; font-weight: 700; line-height: 1.5; }
-        .chhapara-delete-btn { border: none; background: #fee2e2; color: #b91c1c; border-radius: 999px; padding: 6px 10px; font-size: 0.66rem; font-weight: 900; text-transform: uppercase; }
-        .chhapara-empty { margin-top: 14px; background: #fff7ed; border: 1px dashed #fdba74; border-radius: 16px; padding: 14px; font-size: 0.76rem; color: #9a3412; font-weight: 800; text-align: center; line-height: 1.6; }
         .feeder-status { width: 100%; max-width: 340px; margin: 4px auto 0; background: #dc2626; border: 1px solid #ef4444; color: #ffffff; border-radius: 14px; padding: 10px 12px; font-size: 0.72rem; font-weight: 800; text-align: center; line-height: 1.5; display: none; box-shadow: 0 10px 24px rgba(220, 38, 38, 0.18); }
         .feeder-status.is-success { background: #166534; border-color: #22c55e; color: #ffffff; box-shadow: 0 10px 24px rgba(22, 101, 52, 0.16); }
         .feeder-list-wrap { width: 100%; max-width: 340px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
@@ -584,9 +537,6 @@
         .feeder-reading-box[type=number] { -moz-appearance: textfield; appearance: textfield; }
         .feeder-consumption-box { margin-top: 12px; background: #fdf2f8; border: 1px solid #fbcfe8; border-radius: 14px; padding: 10px 12px; font-size: 0.72rem; font-weight: 800; color: #9d174d; line-height: 1.55; }
         .feeder-submit-btn { width: 100%; max-width: 340px; height: 52px; margin: 6px auto 0; border: none; border-radius: 14px; background: #000000; color: #ffffff; font-size: 15px; font-weight: 900; text-transform: uppercase; display: none; }
-        .chhapara-sheet-tip { margin-top: 16px; background: #f0fdf4; border: 1px solid #86efac; border-radius: 18px; padding: 14px; }
-        .chhapara-sheet-tip h4 { margin: 0 0 8px; font-size: 0.8rem; font-weight: 900; color: #166534; text-transform: uppercase; }
-        .chhapara-sheet-tip p { margin: 6px 0; font-size: 0.74rem; line-height: 1.55; color: #166534; font-weight: 700; }
         .stock-row:last-child { border-bottom: none; padding-bottom: 0; }
         .stock-row-main { font-weight: 800; color: #0f172a; font-size: 0.84rem; }
         .stock-row-sub { font-size: 0.72rem; color: #64748b; font-weight: 700; margin-top: 3px; }
@@ -715,20 +665,19 @@
         .header-menu-item:hover { background: #eef2f7; border-color: #cbd5e1; }
 
         /* Inputs: calmer borders, glowing focus ring instead of static thick borders */
-        .professional-trigger, .ivrs-input, .teal-boundary-input, .stock-input, .stock-select,
-        .stock-textarea, .chhapara-calc-input, .feeder-reading-box {
+        .professional-trigger, .ivrs-input, .teal-boundary-input, .stock-input,
+        .feeder-reading-box {
             border-width: 1.5px !important;
             transition: border-color 0.18s ease, box-shadow 0.18s ease;
         }
         .professional-trigger:focus-within, .ivrs-input:focus, .teal-boundary-input:focus,
-        .stock-input:focus, .stock-select:focus, .stock-textarea:focus,
-        .chhapara-calc-input:focus, .feeder-reading-box:focus {
+        .stock-input:focus, .feeder-reading-box:focus {
             box-shadow: 0 0 0 4px rgba(13,148,136,0.14);
         }
 
         /* Cards: consistent, softer elevation */
-        .main-card, .stock-stat, .stock-section-card, .feeder-card, .vehicle-reading-card,
-        .stock-ledger-item, .chhapara-entry-card, .summary-wrapper, .stock-mini-card,
+        .main-card, .stock-section-card, .feeder-card, .vehicle-reading-card,
+        .stock-ledger-item, .summary-wrapper, .stock-mini-card,
         .stock-summary-box, .gps-camera-card, .gps-camera-status-card, .pwd-card {
             box-shadow: 0 1px 2px rgba(15,23,42,0.04), 0 10px 28px -10px rgba(15,23,42,0.16);
         }

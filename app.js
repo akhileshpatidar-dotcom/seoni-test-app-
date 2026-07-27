@@ -212,7 +212,6 @@
         let shmsPendingTrackerRows = [];
         let shmsRecentSubmittedEntries = [];
         let summaryRefreshToken = 0;
-        let chhaparaFeederEntries = [];
         let activePeakLoadOperator = null;
         let selectedPeakLoadSubstation = "";
         let selectedPeakLoadFeeder = null;
@@ -226,16 +225,13 @@
         let selectedStmComplaintSubstation = "";
         const subDnChhaparaDcs = ["CHHAPARA-1", "CHHAPARA-2", "GANESHGANJ", "MAINTENANCE TEAM", "OTHER"];
         const courtServedStorageKey = "seoni-circle-lok-adalat-served";
-        const mobileUpdateStorageKey = "seoni-circle-mobile-updated";
         const courtCaseCacheStorageKey = "seoni-circle-lok-adalat-csv-cache";
         const dcCsvCacheStoragePrefix = "seoni-circle-dc-csv-";
-        const chhaparaFeederStorageKey = "seoni-circle-chhapara-feeder-output";
         const shmsRecentSubmittedStorageKey = "seoni-circle-shms-recent-submitted";
         const shmsRecentSubmittedTtlMs = 2 * 60 * 1000;
         const feederRecentSubmittedStorageKey = "seoni-circle-feeder-recent-submitted";
         const feederOperatorStorageKey = "feederOperatorProfile";
         const feederAlertStartDateKey = "2026-05-04";
-        let mobileSubmittedSheetMap = {};
         let lokServedSheetMap = {};
         let lokSheetMapLoadingStarted = false;
         let lokSheetMapLoadingPromise = null;
@@ -272,7 +268,6 @@
             loadCourtCaseData();
             loadStockMaterialsData();
             preloadDuplicateTrackingData();
-            initChhaparaFeederCalculator();
             renderStockDashboard();
             setupStockEntrySearch("receive");
             setupStockEntrySearch("issue");
@@ -406,69 +401,11 @@
             return String(value || "").replace(/\D/g, "");
         }
 
-        function getMobileUpdateStorageMap() {
-            try {
-                return JSON.parse(localStorage.getItem(mobileUpdateStorageKey) || "{}");
-            } catch (_) {
-                return {};
-            }
-        }
-
-        function getMobileUpdateKey(record) {
-            if (!record) return "";
-            const dc = normalizeLookupValue(activeDC || "");
-            const ivrs = normalizeLookupDigits(record.ivrs || "");
-            return `${dc}__${ivrs}`;
-        }
-
-        function isMobileAlreadySubmitted(record) {
-            const key = getMobileUpdateKey(record);
-            if (!key) return false;
-            const submittedMap = getMobileUpdateStorageMap();
-            return !!submittedMap[key] || !!mobileSubmittedSheetMap[key];
-        }
-
-        function isMobileAlreadySubmittedByIvrs(ivrsValue, dcName = activeDC) {
-            const dc = normalizeLookupValue(dcName || "");
-            const ivrs = normalizeLookupDigits(ivrsValue || "");
-            if (!dc || !ivrs) return false;
-            const key = `${dc}__${ivrs}`;
-            const submittedMap = getMobileUpdateStorageMap();
-            return !!submittedMap[key] || !!mobileSubmittedSheetMap[key];
-        }
-
-        function markMobileSubmitted(record, newMobile) {
-            const key = getMobileUpdateKey(record);
-            if (!key) return;
-            const submittedMap = getMobileUpdateStorageMap();
-            submittedMap[key] = {
-                submittedAt: new Date().toISOString(),
-                dc: activeDC || "",
-                ivrs: record.ivrs || "",
-                mobile: newMobile || ""
-            };
-            localStorage.setItem(mobileUpdateStorageKey, JSON.stringify(submittedMap));
-            mobileSubmittedSheetMap[key] = true;
-        }
-
-        async function loadSubmittedMobileSheetMap() {
-            try {
-                const res = await fetch(`${scriptURL}?action=getSummary&t=${Date.now()}`);
-                const cloudData = await res.json();
-                const nextMap = {};
-                (Array.isArray(cloudData) ? cloudData : []).forEach((entry) => {
-                    const dc = normalizeLookupValue(entry.dc || "");
-                    const ivrs = normalizeLookupDigits(entry.ivrs || "");
-                    if (!dc || !ivrs) return;
-                    nextMap[`${dc}__${ivrs}`] = true;
-                });
-                mobileSubmittedSheetMap = nextMap;
-                return nextMap;
-            } catch (_) {
-                return mobileSubmittedSheetMap;
-            }
-        }
-
+        // NOTE: "Mobile already submitted" tracking subsystem (getMobileUpdateStorageMap,
+        // getMobileUpdateKey, isMobileAlreadySubmitted, isMobileAlreadySubmittedByIvrs,
+        // markMobileSubmitted, loadSubmittedMobileSheetMap) hata diya gaya hai - poori
+        // codebase me kahi bhi call nahi ho raha tha (abandoned/superseded feature tha,
+        // ek live fetch() bhi bekaar me define thi).
         function getCourtRecordStorageKey(record) {
             if (!record) return "";
             const dc = normalizeLookupValue(record.dcName || activeDC || "");
@@ -2528,15 +2465,6 @@
             setFeederStatus(message, true, "alert");
         }
 
-        function fileToBase64(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-        }
-
         function doExport(fmt) {
             if (progressSummaryDownloadInProgress) {
                 showToast("Download process chal raha hai, kripya wait kijiye", false);
@@ -3298,10 +3226,6 @@
             return /iPhone|iPad|iPod/i.test(ua) || (ua.includes("Mac") && "ontouchend" in document);
         }
 
-        function isMobileDevice() {
-            return isIosLikeDevice() || /Android/i.test(navigator.userAgent || "");
-        }
-
         function hasRecentGpsCameraGeo() {
             return !!(gpsCameraGeoData && gpsCameraGeoData.latitude && (Date.now() - gpsCameraGeoCapturedAt) < 5 * 60 * 1000);
         }
@@ -3676,22 +3600,6 @@
                 reader.onerror = reject;
                 reader.readAsDataURL(file);
             });
-        }
-
-        function parseCourtCaseLine(line) {
-            const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map((item) => item.replace(/^"|"$/g, "").trim());
-            return {
-                caseNo: cols[0] || "",
-                dcName: (cols[1] || "").trim().toUpperCase(),
-                panchnamaNo: cols[2] || "",
-                consumerName: cols[3] || "",
-                section: cols[4] || "",
-                civilAmt: cols[5] || "",
-                compoundingAmt: cols[6] || "",
-                billedAmt: cols[7] || "",
-                rebate: cols[8] || "",
-                totalPayableAmount: cols[9] || ""
-            };
         }
 
         function parseCourtCaseCsv(csvText) {
@@ -5588,23 +5496,6 @@
             return buildShmsDateKeyFromDateObj_(submitted);
         }
 
-        function getShmsRowRelevantDateKeys_(row) {
-            const keys = new Set();
-            if (!row) return keys;
-
-            const directDateKey = String(row.dateKey || buildShmsDateKey_(row.date) || "").trim();
-            const submittedDateKey = String(getShmsSubmittedDateKey_(row.submittedAt || "") || "").trim();
-            const expectedDateKey = String(
-                row.expectedDateKey || getShmsExpectedDateKeyFromSubmittedAt_(row.submittedAt || "")
-            ).trim();
-
-            if (directDateKey) keys.add(directDateKey);
-            if (submittedDateKey) keys.add(submittedDateKey);
-            if (expectedDateKey) keys.add(expectedDateKey);
-
-            return keys;
-        }
-
         function getShmsPendingSubstations() {
             const source = shmsSubstations.length ? shmsSubstations : shmsRows.map((row) => row.substation).filter(Boolean);
             return Array.from(new Set(source.map((item) => String(item || "").trim()).filter(Boolean)));
@@ -5812,21 +5703,6 @@
             const label = getShmsProgressFilterLabel();
             summary.style.display = label ? "block" : "none";
             summary.innerText = label ? `${label} ke liye ${filtered.length} entries ready hain` : "";
-        }
-
-        function triggerShmsDownload(fileName, content, mimeType) {
-            const blob = new Blob([content], { type: mimeType });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = fileName;
-            link.style.display = "none";
-            document.body.appendChild(link);
-            link.click();
-            setTimeout(() => {
-                try { document.body.removeChild(link); } catch (_) {}
-                URL.revokeObjectURL(url);
-            }, 800);
         }
 
         async function saveShmsBlob(fileName, blob, mimeType) {
@@ -7610,198 +7486,15 @@
             }
         }
 
-        function initChhaparaFeederCalculator() {
-            const dateInput = document.getElementById("chhapara-reading-date");
-            if (dateInput && !dateInput.value) {
-                dateInput.value = getTodayIsoDate();
-            }
-            try {
-                const savedEntries = JSON.parse(localStorage.getItem(chhaparaFeederStorageKey) || "[]");
-                chhaparaFeederEntries = Array.isArray(savedEntries) ? savedEntries : [];
-            } catch (_) {
-                chhaparaFeederEntries = [];
-            }
-            previewChhaparaFeederCalc();
-            renderChhaparaFeederEntries();
-        }
-
-        function readChhaparaFeederForm() {
-            return {
-                date: document.getElementById("chhapara-reading-date")?.value || "",
-                feederType: document.getElementById("chhapara-feeder-type")?.value || "11 KV",
-                feederName: document.getElementById("chhapara-feeder-name")?.value.trim() || "",
-                mf: Number(document.getElementById("chhapara-mf")?.value || 0),
-                previousReading: Number(document.getElementById("chhapara-previous-reading")?.value || 0),
-                currentReading: Number(document.getElementById("chhapara-current-reading")?.value || 0),
-                dc1Name: document.getElementById("chhapara-dc1-name")?.value.trim() || "",
-                dc1Percent: Number(document.getElementById("chhapara-dc1-percent")?.value || 0),
-                dc2Name: document.getElementById("chhapara-dc2-name")?.value.trim() || "",
-                dc2Percent: Number(document.getElementById("chhapara-dc2-percent")?.value || 0),
-                note: document.getElementById("chhapara-reading-note")?.value.trim() || ""
-            };
-        }
-
-        function calculateChhaparaFeederData(formData) {
-            const difference = Number((formData.currentReading - formData.previousReading).toFixed(2));
-            const totalConsumption = Number((difference * formData.mf).toFixed(2));
-            const shares = [];
-            const totalPercent = Number((formData.dc1Percent + formData.dc2Percent).toFixed(2));
-
-            if (formData.dc1Name && formData.dc1Percent > 0) {
-                shares.push({
-                    name: formData.dc1Name,
-                    percent: formData.dc1Percent,
-                    output: Number((totalConsumption * formData.dc1Percent / 100).toFixed(2))
-                });
-            }
-            if (formData.dc2Name && formData.dc2Percent > 0) {
-                shares.push({
-                    name: formData.dc2Name,
-                    percent: formData.dc2Percent,
-                    output: Number((totalConsumption * formData.dc2Percent / 100).toFixed(2))
-                });
-            }
-            if (!shares.length && totalConsumption >= 0) {
-                shares.push({
-                    name: "Single Output",
-                    percent: 100,
-                    output: totalConsumption
-                });
-            }
-
-            return { difference, totalConsumption, totalPercent, shares };
-        }
-
-        function previewChhaparaFeederCalc() {
-            const previewBox = document.getElementById("chhapara-calc-preview");
-            if (!previewBox) return;
-            const formData = readChhaparaFeederForm();
-            const calc = calculateChhaparaFeederData(formData);
-            const hasValues = formData.previousReading || formData.currentReading || formData.mf;
-
-            if (!hasValues) {
-                previewBox.innerHTML = `
-                    <div class="chhapara-calc-preview-line"><strong>Preview:</strong> Previous reading, current reading aur MF dalte hi total output yahan dikh jayega.</div>
-                    <div class="chhapara-calc-preview-line">Agar feeder 2 DC ko feed karta hai to dono DC ka % daliyey.</div>
-                `;
-                return;
-            }
-            if (calc.difference < 0) {
-                previewBox.innerHTML = `<div class="chhapara-calc-preview-line"><strong>Check:</strong> Current reading previous reading se chhoti hai. Reading dobara verify kijiye.</div>`;
-                return;
-            }
-            if (calc.totalPercent > 100) {
-                previewBox.innerHTML = `<div class="chhapara-calc-preview-line"><strong>Check:</strong> DC percentage total 100 se zyada ho raha hai. Isko sahi kariye.</div>`;
-                return;
-            }
-
-            const shareHtml = calc.shares.map((item) => `
-                <div class="chhapara-calc-preview-line">${escapeHtml(item.name)}: ${formatChhaparaNumber(item.output)} units (${formatChhaparaNumber(item.percent)}%)</div>
-            `).join("");
-
-            previewBox.innerHTML = `
-                <div class="chhapara-calc-preview-line"><strong>Difference:</strong> ${formatChhaparaNumber(calc.difference)}</div>
-                <div class="chhapara-calc-preview-line"><strong>Total Consumption:</strong> ${formatChhaparaNumber(calc.totalConsumption)} units</div>
-                <div class="chhapara-calc-preview-line"><strong>Formula:</strong> (${formatChhaparaNumber(formData.currentReading)} - ${formatChhaparaNumber(formData.previousReading)}) x ${formatChhaparaNumber(formData.mf)}</div>
-                ${shareHtml}
-            `;
-        }
-
-        function addChhaparaFeederEntry() {
-            const formData = readChhaparaFeederForm();
-            if (!formData.date) return showToast("Date select kijiye", false);
-            if (!formData.feederName) return showToast("Feeder name likhiye", false);
-            if (!(formData.mf > 0)) return showToast("Valid MF dijiye", false);
-            if (formData.currentReading < formData.previousReading) return showToast("Current reading previous se chhoti nahi ho sakti", false);
-            if ((formData.dc1Name && !(formData.dc1Percent > 0)) || (formData.dc2Name && !(formData.dc2Percent > 0))) {
-                return showToast("DC name ke saath uska percentage bhi dijiye", false);
-            }
-            if ((!formData.dc1Name && formData.dc1Percent > 0) || (!formData.dc2Name && formData.dc2Percent > 0)) {
-                return showToast("Percentage ke saath DC name bhi dijiye", false);
-            }
-
-            const calc = calculateChhaparaFeederData(formData);
-            if (calc.totalPercent > 100) return showToast("DC percentage total 100 se zyada hai", false);
-
-            chhaparaFeederEntries.unshift({
-                id: `chhapara-${Date.now()}`,
-                ...formData,
-                ...calc
-            });
-            persistChhaparaFeederEntries();
-            renderChhaparaFeederEntries();
-            clearChhaparaFeederForm();
-            showToast("Feeder output add ho gaya", true);
-        }
-
-        function persistChhaparaFeederEntries() {
-            try {
-                localStorage.setItem(chhaparaFeederStorageKey, JSON.stringify(chhaparaFeederEntries));
-            } catch (_) {}
-        }
-
-        function clearChhaparaFeederForm() {
-            document.getElementById("chhapara-feeder-name").value = "";
-            document.getElementById("chhapara-mf").value = "";
-            document.getElementById("chhapara-previous-reading").value = "";
-            document.getElementById("chhapara-current-reading").value = "";
-            document.getElementById("chhapara-dc1-name").value = "";
-            document.getElementById("chhapara-dc1-percent").value = "";
-            document.getElementById("chhapara-dc2-name").value = "";
-            document.getElementById("chhapara-dc2-percent").value = "";
-            document.getElementById("chhapara-reading-note").value = "";
-            previewChhaparaFeederCalc();
-        }
-
-        function renderChhaparaFeederEntries() {
-            const listBox = document.getElementById("chhapara-entry-list");
-            const countBox = document.getElementById("chhapara-entry-count");
-            const totalBox = document.getElementById("chhapara-total-consumption");
-            if (!listBox || !countBox || !totalBox) return;
-
-            countBox.innerText = String(chhaparaFeederEntries.length);
-            const totalConsumption = chhaparaFeederEntries.reduce((sum, item) => sum + Number(item.totalConsumption || 0), 0);
-            totalBox.innerText = formatChhaparaNumber(totalConsumption);
-
-            if (!chhaparaFeederEntries.length) {
-                listBox.innerHTML = `<div class="chhapara-empty">Abhi koi feeder output add nahi hai. Ek ek feeder ki daily reading dalke output list bana sakte hain.</div>`;
-                return;
-            }
-
-            listBox.innerHTML = chhaparaFeederEntries.map((item) => {
-                const shares = Array.isArray(item.shares) ? item.shares : [];
-                const shareRows = shares.map((share) => `
-                    <div class="chhapara-share-row">
-                        <span>${escapeHtml(share.name)} (${formatChhaparaNumber(share.percent)}%)</span>
-                        <span>${formatChhaparaNumber(share.output)} units</span>
-                    </div>
-                `).join("");
-                return `
-                    <div class="chhapara-entry-card">
-                        <div class="chhapara-entry-top">
-                            <div>
-                                <div class="chhapara-entry-name">${escapeHtml(item.feederName)}</div>
-                                <div class="chhapara-entry-meta">${escapeHtml(item.feederType)} | ${escapeHtml(item.date)}</div>
-                            </div>
-                            <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
-                                <div class="chhapara-entry-total">${formatChhaparaNumber(item.totalConsumption)} units</div>
-                                <button class="chhapara-delete-btn" onclick="deleteChhaparaFeederEntry('${item.id}')">Delete</button>
-                            </div>
-                        </div>
-                        <div class="chhapara-share-list">${shareRows}</div>
-                        <div class="chhapara-entry-note">Reading Diff: ${formatChhaparaNumber(item.difference)} | MF: ${formatChhaparaNumber(item.mf)}${item.note ? ` | ${escapeHtml(item.note)}` : ""}</div>
-                    </div>
-                `;
-            }).join("");
-        }
-
-        function deleteChhaparaFeederEntry(entryId) {
-            chhaparaFeederEntries = chhaparaFeederEntries.filter((item) => item.id !== entryId);
-            persistChhaparaFeederEntries();
-            renderChhaparaFeederEntries();
-            showToast("Feeder output remove ho gaya", true);
-        }
-
+        // NOTE: "Chhapara Feeder Calculator" (add/list/delete feeder-output entries with
+        // 2-DC percentage split, localStorage-persisted) - initChhaparaFeederCalculator,
+        // readChhaparaFeederForm, calculateChhaparaFeederData, previewChhaparaFeederCalc,
+        // addChhaparaFeederEntry, persistChhaparaFeederEntries, clearChhaparaFeederForm,
+        // renderChhaparaFeederEntries, deleteChhaparaFeederEntry - hata diya gaya hai. Iski
+        // koi HTML UI (button/page) index.html me kabhi thi hi nahi, isliye yeh dead code
+        // tha (har app-load par bekaar init hota tha). formatChhaparaNumber() alag hai -
+        // wo "Feeder Reading" (updateFeederConsumptionPreview) ke live feature me abhi bhi
+        // use ho raha hai, isliye wahi ek function yahan rakha gaya hai.
         function formatChhaparaNumber(value) {
             const num = Number(value || 0);
             if (Number.isNaN(num)) return "0";
@@ -7845,10 +7538,6 @@
             if (selectedVehicleNo) {
                 selectVehicleNo(selectedVehicleNo);
             }
-        }
-
-        function getVehicleTypeText(vehicleNo) {
-            return String(vehicleNo || "").split("-")[0].trim();
         }
 
         function getVehicleDisplayHtml(vehicleNo) {
@@ -10051,17 +9740,6 @@
             }
         }
 
-        function confirmRevenueMessageSentAndNext() {
-            const row = getCurrentRevenueMessageConsumer();
-            if (!row) return finishRevenueMessageQueue();
-            if (!revenueMessageCurrentOpened) return showToast("Pehle OPEN karke Messages/WhatsApp me Send kijiye", false);
-            logRevenueMessageActivity(row, "STAFF CONFIRMED SENT", buildRevenueConsumerMessage(row)).catch(() => {});
-            revenueMessageQueueIndex += 1;
-            revenueMessageCurrentOpened = false;
-            if (revenueMessageQueueIndex >= revenueMessageQueue.length) return finishRevenueMessageQueue();
-            renderRevenuePendingList();
-        }
-
         function skipRevenueMessageConsumer(status = "SKIPPED") {
             const row = getCurrentRevenueMessageConsumer();
             if (row) logRevenueMessageActivity(row, status, buildRevenueConsumerMessage(row)).catch(() => {});
@@ -10113,9 +9791,13 @@
             const listBox = document.getElementById("revenue-pending-list-box");
             const hqSelect = document.getElementById("revenue-pending-hq");
             const refreshToken = ++revenuePendingPaidRefreshToken;
+            // Baaki reports (Live Progress, HQ/Village, Cash Reconcile) jaisa hi animated
+            // syncing bar - pehle yahan sirf static "load ho rahi hai..." text tha.
+            const isPendingRenderValid = () => refreshToken === revenuePendingPaidRefreshToken && document.getElementById("revenue-pending-list-view")?.classList.contains("active");
+            let pendingListProgress = null;
             if (statusBox) {
                 statusBox.style.display = "block";
-                statusBox.innerHTML = "Pending list load ho rahi hai...";
+                pendingListProgress = renderSyncingProgress(statusBox, isPendingRenderValid, "PENDING LIST LOAD HO RAHI HAI...");
             }
             if (listBox) listBox.innerHTML = "";
             populateRevenueSelect(hqSelect, [], "All HQ Names");
@@ -10150,10 +9832,14 @@
                 if (slabSelect) slabSelect.value = "";
                 const ivrsSearch = document.getElementById("revenue-pending-ivrs-search");
                 if (ivrsSearch) ivrsSearch.value = "";
+                if (pendingListProgress) await pendingListProgress.finish();
+                if (refreshToken !== revenuePendingPaidRefreshToken) return;
                 renderRevenuePendingList();
                 refreshRevenuePendingPaidSetInBackground(refreshToken);
             } catch (_) {
+                if (pendingListProgress) pendingListProgress.stop();
                 if (statusBox) {
+                    statusBox.style.display = "block";
                     statusBox.innerHTML = "Pending list load nahi ho payi. Internet/check karke dobara try kijiye.";
                 }
             }
@@ -10235,17 +9921,6 @@
                 revenuePendingRenderTimer = 0;
                 renderRevenuePendingList();
             }, delay);
-        }
-
-        function getRevenuePendingArrearsAmount(row) {
-            const raw = String(row?.arrears ?? row?.arrear ?? row?.["ARREARS"] ?? "").trim();
-            if (!raw) return 0;
-            const cleaned = raw.replace(/,/g, "").replace(/[^0-9.+-]/g, "");
-            let amount = Number(cleaned);
-            if (!Number.isFinite(amount)) return 0;
-            if (/^\s*\(.*\)\s*$/.test(raw) && amount > 0) amount = -amount;
-            if (/\bCR\b/i.test(raw) && amount > 0) amount = -amount;
-            return amount;
         }
 
         function isRevenuePendingNetBillInSlab(row, slabValue) {
@@ -11148,23 +10823,6 @@
             };
         }
 
-        function isLikelyRevenuePaidDateColumn_(rows, headerIndex, columnIndex) {
-            if (columnIndex < 0) return false;
-            const headerText = normalizeLookupValue((rows[headerIndex] || [])[columnIndex]);
-            if (headerText.includes("PAYMENTDATE") || headerText.includes("PAIDDATE") || headerText.includes("COLLECTIONDATE") || headerText === "DATE") {
-                return true;
-            }
-            let dateLikeCount = 0;
-            for (let i = headerIndex + 1; i < Math.min(rows.length, headerIndex + 25); i++) {
-                const raw = (rows[i] || [])[columnIndex];
-                const parsed = normalizeRevenuePaidDate(raw, getRevenueMonthKey(getCurrentDateDDMMYYYY()));
-                if (/^\d{2}\/\d{2}\/\d{4}$/.test(String(parsed || ""))) {
-                    dateLikeCount += 1;
-                }
-            }
-            return dateLikeCount >= 3;
-        }
-
         function buildRevenuePaidUploadEntries(rows, dcName) {
             const grouped = {};
             rows.forEach((row) => {
@@ -11713,32 +11371,6 @@
             `;
         }
 
-        function renderRevenueConsumerList(rows) {
-            if (!rows.length) return "";
-            const listRows = rows.map((row) => `
-                <div style="background:#ffffff; border:1px solid #dbeafe; border-radius:14px; padding:10px; margin-bottom:8px; font-size:0.7rem; font-weight:850; color:#1e293b;">
-                    <div style="display:flex; justify-content:space-between; gap:8px; color:#1d4ed8; font-weight:950;">
-                        <span>IVRS: ${escapeHtml(row.ivrsNo || "-")}</span>
-                        <span>${escapeHtml(formatRevenueAmount(row.paidAmount || "-"))}</span>
-                    </div>
-                    <div style="margin-top:5px; font-weight:950; color:#0f172a;">${escapeHtml(row.consumerName || "-")}</div>
-                    <div style="margin-top:3px;">S/o ${escapeHtml(row.fatherName || "-")}</div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-top:6px;">
-                        <div><strong>DC:</strong> ${escapeHtml(row.dcName || "-")}</div>
-                        <div><strong>HQ:</strong> ${escapeHtml(row.hqName || "-")}</div>
-                        <div><strong>Date:</strong> ${escapeHtml(row.paidDate || "-")}</div>
-                        <div><strong>Time:</strong> ${escapeHtml(formatRevenuePaidTime(row.paidTime))}</div>
-                        <div><strong>Mobile:</strong> ${escapeHtml(row.mobileNo || "-")}</div>
-                        <div><strong>Category:</strong> ${escapeHtml(row.tariffCategory || "-")}</div>
-                    </div>
-                </div>
-            `).join("");
-            return `
-                <div style="font-size:0.78rem; font-weight:950; color:#1d4ed8; text-align:center; text-transform:uppercase; margin:4px 0 8px;">Consumer List</div>
-                ${listRows}
-            `;
-        }
-
         function renderRevenueReportHtml(rows, emptyMessage) {
             if (!rows.length) {
                 return `
@@ -12260,70 +11892,6 @@
             return `<div style="background:#ffffff; border:1.5px solid #fdba74; border-radius:16px; padding:10px; overflow:hidden;"><div style="font-size:0.72rem; font-weight:950; color:#c2410c; text-align:center; margin-bottom:8px;">IVRS Matching Only | DC: ${escapeHtml(activeDC || "-")}</div><table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:0.55rem; font-weight:850; color:#1e293b; text-align:center;"><thead><tr style="background:#fed7aa; color:#7c2d12;"><th style="border:1px solid #fdba74; padding:5px;">HQ Name</th><th style="border:1px solid #fdba74; padding:5px;">Paid by Staff</th><th style="border:1px solid #fdba74; padding:5px;">NGB Update</th><th style="border:1px solid #fdba74; padding:5px;">Balance</th></tr></thead><tbody>${body}</tbody><tfoot><tr style="background:#fff7ed; font-weight:950;"><td style="border:1px solid #fdba74; padding:5px;">TOTAL</td><td style="border:1px solid #fdba74; padding:5px;">${totals.staffCount}<br>${escapeHtml(formatRevenueAmount(totals.staffAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#047857;">${totals.ngbCount}<br>${escapeHtml(formatRevenueAmount(totals.ngbAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#b91c1c;">${totals.balanceCount}<br>${escapeHtml(formatRevenueAmount(totals.balanceAmount))}</td></tr></tfoot></table></div>`;
         }
 
-        function renderRevenueCashSyncingProgress(cont, isStillValid) {
-            cont.innerHTML = `
-                <div style="background:#fff7ed; border:1.5px solid #fdba74; border-radius:16px; padding:18px 14px; text-align:center;">
-                    <div style="font-size:0.78rem; font-weight:950; color:#c2410c; text-transform:uppercase;">SYNCING LATEST REPORT...</div>
-                    <div style="max-width:240px; margin:14px auto 0; background:#fed7aa; border-radius:999px; height:9px; overflow:hidden;">
-                        <div id="revenue-cash-sync-progress-fill" style="height:100%; width:1%; background:linear-gradient(90deg,#ea580c,#c2410c); border-radius:999px; transition:width 0.18s ease;"></div>
-                    </div>
-                    <div id="revenue-cash-sync-progress-text" style="font-size:0.78rem; font-weight:950; color:#9a3412; margin-top:7px;">1%</div>
-                </div>
-            `;
-            let percent = 1;
-            let displayed = 1;
-            let finished = false;
-            let intervalId = setInterval(() => {
-                if (!isStillValid() || finished) {
-                    clearInterval(intervalId);
-                    return;
-                }
-                const fill = document.getElementById("revenue-cash-sync-progress-fill");
-                const text = document.getElementById("revenue-cash-sync-progress-text");
-                if (!fill || !text) {
-                    clearInterval(intervalId);
-                    return;
-                }
-                if (percent < 90) {
-                    percent = Math.min(90, percent + Math.max(1, (90 - percent) / 8));
-                } else {
-                    // Baaki reports jaisa hi flow: 90% ke baad kabhi na-ruke wali dhire-dhire
-                    // creep, 100% sirf finish() call hone par (display aane ke thik pehle)
-                    // dikhega - beech me kabhi "atka hua" nahi lagega.
-                    percent = Math.min(98.9, percent + (99 - percent) * 0.05);
-                }
-                const nextDisplayed = Math.min(99, Math.round(percent));
-                if (nextDisplayed !== displayed) {
-                    displayed = nextDisplayed;
-                    fill.style.width = `${displayed}%`;
-                    text.innerText = `${displayed}%`;
-                }
-                const atCeiling = displayed >= 99;
-                fill.classList.toggle("sync-progress-pulse", atCeiling);
-                text.classList.toggle("sync-progress-pulse", atCeiling);
-            }, 200);
-            return {
-                finish: () => new Promise((resolve) => {
-                    finished = true;
-                    clearInterval(intervalId);
-                    if (!isStillValid()) return resolve();
-                    const fill = document.getElementById("revenue-cash-sync-progress-fill");
-                    const text = document.getElementById("revenue-cash-sync-progress-text");
-                    if (fill && text) {
-                        fill.classList.remove("sync-progress-pulse");
-                        text.classList.remove("sync-progress-pulse");
-                        fill.style.width = "100%";
-                        text.innerText = "100%";
-                    }
-                    setTimeout(resolve, 220);
-                }),
-                stop: () => {
-                    finished = true;
-                    clearInterval(intervalId);
-                }
-            };
-        }
-
         async function renderRevenueCashReconcile() {
             const tableBox = document.getElementById("revenue-cash-table");
             const statusBox = document.getElementById("revenue-cash-download-status");
@@ -12331,7 +11899,10 @@
             const renderToken = ++revenueCashReconcileRenderToken;
             if (statusBox) statusBox.style.display = "none";
             const isRenderValid = () => renderToken === revenueCashReconcileRenderToken && document.getElementById("revenue-cash-reconcile-view")?.classList.contains("active");
-            const progress = renderRevenueCashSyncingProgress(tableBox, isRenderValid);
+            // Ab baaki sabhi reports jaisa hi shared renderSyncingProgress use karte hain
+            // (pehle iski apni alag copy-paste ki hui orange-themed progress bar thi -
+            // renderRevenueCashSyncingProgress - jo hata di gayi hai).
+            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
             try {
                 await Promise.all([syncRevenueLiveEntriesFromSheet(), getRevenueUploadedPaidMasterRows()]);
                 if (renderToken !== revenueCashReconcileRenderToken) { progress.stop(); return; }
@@ -12359,29 +11930,63 @@
             return `"Paid by staff" Amount All Paid/Balance in NGB Cash List-${dcName}`;
         }
 
+        function setRevenueCashDownloadState(isLoading, message = "", ok = true) {
+            const pdfBtn = document.getElementById("revenue-cash-pdf-btn");
+            const excelBtn = document.getElementById("revenue-cash-excel-btn");
+            const statusBox = document.getElementById("revenue-cash-download-status");
+            const statusMessage = normalizeActionStatusMessage(message, isLoading, ok);
+            [pdfBtn, excelBtn].forEach((btn) => {
+                if (!btn) return;
+                btn.disabled = isLoading;
+                btn.style.opacity = isLoading ? "0.65" : "1";
+                btn.style.pointerEvents = isLoading ? "none" : "auto";
+            });
+            if (!statusBox) return;
+            statusBox.style.display = statusMessage ? "block" : "none";
+            statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
+            statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
+            statusBox.style.color = ok ? "#166534" : "#991b1b";
+            statusBox.innerHTML = escapeHtml(statusMessage);
+        }
+
         function downloadRevenueCashReconcile(type) {
             const rows = getRevenueCashExportRows();
             if (!rows.length) return showToast("Report ke liye data nahi hai", false);
-            const headers = ["STATUS", "IVRS NO", "CONSUMER NAME", "FATHER NAME", "VILLAGE", "HQ NAME", "CATEGORY", "MOBILE NO", "STAFF PAID DATE", "STAFF PAID TIME", "STAFF PAID AMOUNT", "DC NAME"];
-            const suffix = revenueCashReconcileMode === "MONTHLY" ? (document.getElementById("revenue-cash-month")?.value || getTodayIsoDate().slice(0, 7)) : normalizeRevenueReportDate(document.getElementById("revenue-cash-date")?.value || getCurrentDateDDMMYYYY());
-            const reportTitle = getRevenueCashReportTitle();
-            const fileName = `${reportTitle}-${suffix}`.replace(/[\\/:*?"<>|]+/g, "_");
-            if (type === "PDF") {
-                if (!window.jspdf?.jsPDF) return showToast("PDF library load nahi hui", false);
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF({ orientation: "landscape" });
-                doc.setFontSize(13); doc.text(reportTitle, 148, 14, { align: "center" });
-                doc.setFontSize(8); doc.text(`Matching: IVRS only | ${suffix}`, 148, 20, { align: "center" });
-                doc.autoTable({ startY: 26, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [194, 65, 12] } });
-                savePdfDocumentForDevice(doc, `${fileName}.pdf`);
-                return;
+            setRevenueCashDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
+            try {
+                const headers = ["STATUS", "IVRS NO", "CONSUMER NAME", "FATHER NAME", "VILLAGE", "HQ NAME", "CATEGORY", "MOBILE NO", "STAFF PAID DATE", "STAFF PAID TIME", "STAFF PAID AMOUNT", "DC NAME"];
+                // Baaki reports jaisa hi Indian/readable period label - monthly me
+                // "YYYY-MM" raw ISO ki jagah ab formatRevenueMonthYear se "Month YYYY" banta hai.
+                const periodDisplay = revenueCashReconcileMode === "MONTHLY"
+                    ? formatRevenueMonthYear(document.getElementById("revenue-cash-month")?.value || getTodayIsoDate().slice(0, 7))
+                    : formatRevenueDateIndian(normalizeRevenueReportDate(document.getElementById("revenue-cash-date")?.value || getCurrentDateDDMMYYYY()));
+                const fileSuffix = revenueCashReconcileMode === "MONTHLY"
+                    ? (document.getElementById("revenue-cash-month")?.value || getTodayIsoDate().slice(0, 7))
+                    : normalizeRevenueReportDate(document.getElementById("revenue-cash-date")?.value || getCurrentDateDDMMYYYY());
+                const reportTitle = getRevenueCashReportTitle();
+                const fileName = `${reportTitle}-${fileSuffix}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (type === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setRevenueCashDownloadState(false, "PDF library load nahi hui", false); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(13); doc.text(reportTitle, 148, 14, { align: "center" });
+                    doc.setFontSize(8); doc.text(`Matching: IVRS only | ${periodDisplay}`, 148, 20, { align: "center" });
+                    doc.autoTable({ startY: 26, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [194, 65, 12] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                    setRevenueCashDownloadState(false, "PDF download ho chuki hai", true);
+                    return;
+                }
+                const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                const csv = [[reportTitle], [`Matching: IVRS only | ${periodDisplay}`], [], headers, ...rows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = `${fileName}.csv`;
+                link.click();
+                setRevenueCashDownloadState(false, "Excel download ho chuki hai", true);
+            } catch (error) {
+                setRevenueCashDownloadState(false, "Download nahi ho paya", false);
+                showToast(error?.message || "Report download nahi ho payi", false);
             }
-            const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
-            const csv = [[reportTitle], [`Matching: IVRS only | ${suffix}`], [], headers, ...rows].map((row) => row.map(csvSafe).join(",")).join("\n");
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-            link.download = `${fileName}.csv`;
-            link.click();
         }
 
         // =====================================================================
