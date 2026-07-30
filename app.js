@@ -401,11 +401,66 @@
             return String(value || "").replace(/\D/g, "");
         }
 
-        // NOTE: "Mobile already submitted" tracking subsystem (getMobileUpdateStorageMap,
-        // getMobileUpdateKey, isMobileAlreadySubmitted, isMobileAlreadySubmittedByIvrs,
-        // markMobileSubmitted, loadSubmittedMobileSheetMap) hata diya gaya hai - poori
-        // codebase me kahi bhi call nahi ho raha tha (abandoned/superseded feature tha,
-        // ek live fetch() bhi bekaar me define thi).
+        // "Mobile already submitted" duplicate-check: agar kisi consumer (DC + IVRS) ka
+        // mobile number pehle hi backend sheet me submit ho chuka hai, to Update Mobile
+        // No form usko dobara submit nahi hone deta - result me साफ़ बता देता hai ki pehle
+        // kaunsa number/kab submit hua tha. Data usi "getSummary" endpoint se aata hai jo
+        // Daily Progress ke mobile-update summary count me bhi use hota hai.
+        let mobileAlreadySubmittedMap = {};
+        let mobileAlreadySubmittedMapLoadedAt = 0;
+        const mobileAlreadySubmittedTtlMs = 60 * 1000;
+
+        async function loadMobileAlreadySubmittedMap(forceRefresh = false) {
+            if (!forceRefresh && mobileAlreadySubmittedMapLoadedAt && (Date.now() - mobileAlreadySubmittedMapLoadedAt) < mobileAlreadySubmittedTtlMs) {
+                return mobileAlreadySubmittedMap;
+            }
+            try {
+                const cloudData = await loadRemoteJson(`${scriptURL}?action=getSummary&t=${Date.now()}`);
+                const nextMap = {};
+                (Array.isArray(cloudData) ? cloudData : []).forEach((entry) => {
+                    const dc = normalizeLookupValue(entry.dc || "");
+                    const ivrs = normalizeLookupDigits(entry.ivrs || "");
+                    if (!dc || !ivrs) return;
+                    const key = `${dc}__${ivrs}`;
+                    const mobile = String(entry.correct_mobile || "").trim();
+                    const date = String(entry.date || entry.timestamp || "").trim();
+                    if (!nextMap[key] || date >= (nextMap[key].date || "")) {
+                        nextMap[key] = { mobile, date };
+                    }
+                });
+                mobileAlreadySubmittedMap = nextMap;
+                mobileAlreadySubmittedMapLoadedAt = Date.now();
+            } catch (_) {}
+            return mobileAlreadySubmittedMap;
+        }
+
+        function getMobileAlreadySubmittedEntry(dcName, ivrsNo) {
+            const dc = normalizeLookupValue(dcName || "");
+            const ivrs = normalizeLookupDigits(ivrsNo || "");
+            if (!dc || !ivrs) return null;
+            return mobileAlreadySubmittedMap[`${dc}__${ivrs}`] || null;
+        }
+
+        function applyMobileAlreadySubmittedUi(entry) {
+            const alreadyBox = document.getElementById("mobile-already-submitted-box");
+            const entryBox = document.getElementById("mobile-entry-box");
+            const submitBtn = document.getElementById("submit-btn");
+            if (entry) {
+                if (alreadyBox) {
+                    const mobileText = entry.mobile ? ` (${escapeHtml(entry.mobile)})` : "";
+                    const dateText = entry.date ? ` - ${escapeHtml(entry.date)}` : "";
+                    alreadyBox.innerHTML = `Is consumer ka mobile number pehle hi update ho chuka hai${mobileText}${dateText}. Dobara submit nahi ho sakta.`;
+                    alreadyBox.style.display = "block";
+                }
+                if (entryBox) entryBox.style.display = "none";
+                if (submitBtn) submitBtn.style.display = "none";
+            } else {
+                if (alreadyBox) alreadyBox.style.display = "none";
+                if (entryBox) entryBox.style.display = "block";
+                if (submitBtn) submitBtn.style.display = "block";
+            }
+        }
+
         function getCourtRecordStorageKey(record) {
             if (!record) return "";
             const dc = normalizeLookupValue(record.dcName || activeDC || "");
@@ -500,6 +555,8 @@
             currentData = null;
             document.getElementById("result-box").style.display = "none";
             document.getElementById("submit-btn").style.display = "none";
+            const alreadyBoxReset = document.getElementById("mobile-already-submitted-box");
+            if (alreadyBoxReset) alreadyBoxReset.style.display = "none";
             if (v.length !== 10) return showToast("Enter 10 digit IVRS", false);
             let rows = getConsumerRows(activeDC);
             if (!rows.length) {
@@ -530,12 +587,24 @@
             document.getElementById("res-old").innerText = currentData.old || "N/A";
             document.getElementById("res-addr").innerText = currentData.addr;
             document.getElementById("result-box").style.display = "block";
-            document.getElementById("submit-btn").style.display = "block";
+            // Is consumer (DC + IVRS) ka mobile number pehle hi submit ho chuka hai to
+            // dobara submit karne ka option hi na dikhe - "Enter Correct Mobile" input
+            // aur Submit button chhup jayenge, uski jagah ek clear message dikhega.
+            await loadMobileAlreadySubmittedMap();
+            applyMobileAlreadySubmittedUi(getMobileAlreadySubmittedEntry(activeDC, currentData.ivrs));
         }
 
         async function submitToSheet() {
             const n = document.getElementById("new-mobile").value;
             if (n.length !== 10) return showToast("Enter 10 Digit No", false);
+            // Safety re-check: agar isi beech (dusre device/tab se) yeh consumer already
+            // submit ho chuka ho, to yahan bhi block ho jaye - sirf UI par bharosa na rahe.
+            const alreadyEntry = getMobileAlreadySubmittedEntry(activeDC, currentData?.ivrs);
+            if (alreadyEntry) {
+                applyMobileAlreadySubmittedUi(alreadyEntry);
+                showToast("Is consumer ka mobile number pehle hi submit ho chuka hai", false);
+                return;
+            }
             const p = new URLSearchParams();
             p.append("ivrs", currentData.ivrs);
             p.append("name", currentData.name);
@@ -580,6 +649,12 @@
                     return;
                 }
                 setActionButtonState(btn, "done", "Submit");
+                // Local map turant update kar do (60-second cache wait na karna pade) taaki
+                // agar ye hi IVRS turant dobara search ho, to "already submitted" sahi dikhe.
+                const submittedKey = `${normalizeLookupValue(activeDC || "")}__${normalizeLookupDigits(currentData?.ivrs || "")}`;
+                if (submittedKey !== "__") {
+                    mobileAlreadySubmittedMap[submittedKey] = { mobile: n, date: new Date().toLocaleDateString("en-GB") };
+                }
                 resetForm(true);
                 const searchInput = document.getElementById("search-ivrs");
                 if (searchInput) searchInput.focus();
@@ -9803,12 +9878,23 @@
             populateRevenueSelect(hqSelect, [], "All HQ Names");
             populateRevenueSelect(document.getElementById("revenue-pending-village"), [], "All Villages");
             populateRevenueSelect(document.getElementById("revenue-pending-category"), [], "All Categories");
-            revenuePendingPaidIvrsSet = getRevenuePendingPaidIvrsSetLocal();
-
+            // NOTE: pehle yahan turant local/purana paid-set (getRevenuePendingPaidIvrsSetLocal)
+            // laga ke list render kar dete the, aur sahi (uploaded cash list wala) paid-set
+            // background me chhup ke baad me update hota tha - isse "Pending Consumer: ..."
+            // wala number pehle GALAT dikhta tha, phir kisi dropdown ko chhedne par hi sahi
+            // hota tha (jaisa aapne report kiya). Ab Daily Progress jaisa hi strict flow hai:
+            // jab tak dono - base consumer rows AUR sahi paid-set (uploaded cash list) - fetch
+            // hoke ready nahi ho jaate, tab tak syncing bar hi dikhta rahega (1 se 99 dhire
+            // dhire, 99 par pahunch ke blink), display kabhi bhi galat number nahi dikhayega.
             try {
                 const dcKey = getRevenueCollectionDcKey(activeDC);
                 const fallbackRows = revenueCollectionRowsByDc[dcKey] || getConsumerRows(activeDC).map(mapRevenueConsumerRow).filter((row) => normalizeRevenueIvrs(row.ivrsNo));
-                const freshRows = await withTimeout(loadRevenueCollectionData(activeDC, true), 30000, []);
+                const [freshRows, paidSet] = await Promise.all([
+                    withTimeout(loadRevenueCollectionData(activeDC, true), 30000, []),
+                    getRevenuePendingPaidIvrsSet()
+                ]);
+                if (refreshToken !== revenuePendingPaidRefreshToken) { if (pendingListProgress) pendingListProgress.stop(); return; }
+                revenuePendingPaidIvrsSet = paidSet;
                 const loadedRows = freshRows.length ? freshRows : fallbackRows;
                 const assignedHq = revenueMessageSelectionMode ? String(revenueMessageSession?.staff?.hq_name || "").trim() : "";
                 revenuePendingBaseRows = loadedRows.filter((row) => (
@@ -9835,7 +9921,6 @@
                 if (pendingListProgress) await pendingListProgress.finish();
                 if (refreshToken !== revenuePendingPaidRefreshToken) return;
                 renderRevenuePendingList();
-                refreshRevenuePendingPaidSetInBackground(refreshToken);
             } catch (_) {
                 if (pendingListProgress) pendingListProgress.stop();
                 if (statusBox) {
@@ -10120,23 +10205,17 @@
                 });
             } catch (_) {}
 
-            const uploadedRows = await withTimeout(getRevenueUploadedPaidMasterRows(), 3500, getRevenueUploadedPaidMasterRowsLocal());
+            // NOTE: pehle yahan uploaded-paid-entries fetch ko sirf 3.5 second ka
+            // withTimeout diya hua tha (bina retry ke) - chhoti DC ke liye theek chal
+            // jaata tha, lekin bade DC (jaise KURAI - 7700+ rows) me Apps Script se itna
+            // bada sheet padhne me 3.5 second se zyada time lagta hai, isliye timeout ho
+            // jaata tha aur purana/khali local cache use hota tha - matlab Cash List
+            // upload karne ke baad bhi Pending DO List me wahi consumer "pending" dikhte
+            // rehte the jo asal me pehle hi paid ho chuke the. Ab yahan bhi Category
+            // Wise/HQ-Village report jaisa hi robust fetch (45 second + 2 retry) use
+            // karte hain, taaki bade DC ke liye bhi latest uploaded paid data sahi mile.
+            const uploadedRows = await getRevenueUploadedPaidMasterRows();
             uploadedRows.forEach((row) => {
-                const ivrsNo = normalizeRevenueIvrs(row.ivrs_no || row.ivrsNo || row.consumerNo);
-                if (ivrsNo) paidSet.add(ivrsNo);
-            });
-            return paidSet;
-        }
-
-        function getRevenuePendingPaidIvrsSetLocal() {
-            const paidSet = new Set();
-            getRevenueLiveEntries().forEach((row) => {
-                if (normalizeLookupValue(row.dcName || "") === normalizeLookupValue(activeDC || "")) {
-                    const ivrsNo = normalizeRevenueIvrs(row.ivrsNo);
-                    if (ivrsNo) paidSet.add(ivrsNo);
-                }
-            });
-            getRevenueUploadedPaidMasterRowsLocal().forEach((row) => {
                 const ivrsNo = normalizeRevenueIvrs(row.ivrs_no || row.ivrsNo || row.consumerNo);
                 if (ivrsNo) paidSet.add(ivrsNo);
             });
@@ -10146,15 +10225,6 @@
         function getRevenueUploadedPaidMasterRowsLocal() {
             const cache = getRevenueUploadedPaidCache();
             return Object.values(cache).filter((row) => normalizeLookupValue(row.dcName || row.dc_name || "") === normalizeLookupValue(activeDC || ""));
-        }
-
-        async function refreshRevenuePendingPaidSetInBackground(refreshToken) {
-            try {
-                const paidSet = await getRevenuePendingPaidIvrsSet();
-                if (refreshToken !== revenuePendingPaidRefreshToken || !document.getElementById("revenue-pending-list-view")?.classList.contains("active")) return;
-                revenuePendingPaidIvrsSet = paidSet;
-                renderRevenuePendingList();
-            } catch (_) {}
         }
 
         function withTimeout(promise, ms, fallbackValue) {
@@ -10182,8 +10252,10 @@
         async function getRevenueUploadedPaidMasterRows() {
             if (revenueCollectionSubmitScriptUrl) {
                 try {
-                    const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidEntries&dc_name=${encodeURIComponent(activeDC || "")}&t=${Date.now()}`);
-                    const parsed = await response.json();
+                    // fetchUploadedPaidEntriesWithRetry_ (45s timeout + 2 retry) - same
+                    // robust fetch Category Wise/HQ-Village report already use, taaki bade
+                    // DC (jaise KURAI - hazaaron rows) ke liye bhi fetch timeout na ho.
+                    const parsed = await fetchUploadedPaidEntriesWithRetry_(activeDC || "");
                     const rows = Array.isArray(parsed?.entries) ? parsed.entries : (Array.isArray(parsed?.data) ? parsed.data : []);
                     if (parsed && parsed.status === "success" && rows.length) {
                         saveRevenueUploadedPaidEntriesLocalBulk(rows, activeDC || "", true);
@@ -12590,6 +12662,710 @@
             }
         }
 
+        // ===== VR Calculation (Voltage Regulation Calculator) =====
+        const vrConductorOptionsByLine = {
+            lt: [
+                { key: "squirrel_09", label: "Squirrel (0.9 PF)", cc: 1.19 },
+                { key: "weasel_09", label: "Weasel (0.9 PF)", cc: 1.94 },
+                { key: "rabbit_09", label: "Rabbit (0.9 PF)", cc: 3.00 }
+            ],
+            "11kv": [
+                { key: "weasel_08", label: "Weasel (0.8 PF)", cc: 1020 },
+                { key: "rabbit_08", label: "Rabbit (0.8 PF)", cc: 1576 },
+                { key: "raccoon_08", label: "Raccoon (0.8 PF)", cc: 2380 },
+                { key: "dog_08", label: "Dog (0.8 PF)", cc: 3150 }
+            ],
+            "33kv": [
+                { key: "raccoon_09", label: "Raccoon (0.9 PF)", cc: 19121 },
+                { key: "dog_09", label: "Dog (0.9 PF)", cc: 22951 }
+            ]
+        };
+        const vrDfValues = { urban: 1.5, rural: 2.0 };
+        const vrLimits = { lt: 6, "11kv": 9, "33kv": 9 };
+        const vrLineTypeLabels = { lt: "LT", "11kv": "11 kV", "33kv": "33 kV" };
+        const vrDesignationOptions = ["Chief Engineer (Jr)", "Superintending Engineer (O&M)", "Executive Engineer (O&M)", "Assistant Engineer (O&M)", "Junior Engineer"];
+
+        let vrCalcState = {
+            initialized: false,
+            lineStatus: "EXISTING",
+            headerDescription: "",
+            lineType: "33kv",
+            conductorType: "dog_09",
+            dfType: "urban",
+            nodes: [],
+            seals: [],
+            showReferenceInfo: false
+        };
+
+        function vrNextLabel(n) {
+            let s = "";
+            n = n + 1;
+            while (n > 0) {
+                const rem = (n - 1) % 26;
+                s = String.fromCharCode(65 + rem) + s;
+                n = Math.floor((n - 1) / 26);
+            }
+            return s;
+        }
+
+        function vrRoundRect(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+        }
+
+        function vrWrapText(ctx, text, cx, y, maxWidth, lineHeight) {
+            const words = String(text || "").split(" ");
+            let line = "";
+            let lines = [];
+            for (const w of words) {
+                const test = line + w + " ";
+                if (ctx.measureText(test).width > maxWidth && line !== "") {
+                    lines.push(line);
+                    line = w + " ";
+                } else {
+                    line = test;
+                }
+            }
+            lines.push(line);
+            const startY = y - ((lines.length - 1) * lineHeight) / 2;
+            lines.forEach((l, i) => ctx.fillText(l.trim(), cx, startY + i * lineHeight));
+        }
+
+        function vrDrawSLD(nodes) {
+            const canvas = document.getElementById("vrSldCanvas");
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+
+            const cols = 7;
+            const canvasW = 1300;
+            const numRows = Math.max(1, Math.ceil(nodes.length / cols));
+            const boxH = 88, rowGapY = 92;
+            const marginX = 20, marginY = 40, bottomLabelSpace = 50;
+            const gapX = 40;
+            const availW = canvasW - 2 * marginX;
+            const boxW = (availW - (cols - 1) * gapX) / cols;
+            const canvasH = marginY + numRows * boxH + (numRows - 1) * rowGapY + bottomLabelSpace + 10;
+
+            const RES = 2;
+            canvas.width = canvasW * RES;
+            canvas.height = canvasH * RES;
+            canvas.style.width = "100%";
+            canvas.style.height = "auto";
+            ctx.setTransform(RES, 0, 0, RES, 0, 0);
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(0, 0, canvasW, canvasH);
+
+            if (!nodes.length) return;
+
+            const rowStarts = [];
+            for (let r = 0; r < numRows; r++) rowStarts.push(marginX);
+
+            const positions = nodes.map((node, i) => {
+                const r = Math.floor(i / cols);
+                const c = i % cols;
+                const x = rowStarts[r] + c * (boxW + gapX);
+                const y = marginY + r * (boxH + rowGapY);
+                return { x, y };
+            });
+
+            nodes.forEach((node, i) => {
+                const { x, y } = positions[i];
+                const c = i % cols;
+
+                if (c > 0) {
+                    const prev = positions[i - 1];
+                    const prevRight = prev.x + boxW;
+                    const midY = y + boxH / 2;
+                    ctx.strokeStyle = "#1e40af";
+                    ctx.lineWidth = 2.2;
+                    ctx.beginPath();
+                    ctx.moveTo(prevRight, midY);
+                    ctx.lineTo(x, midY);
+                    ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(prevRight, midY - 5); ctx.lineTo(prevRight, midY + 5);
+                    ctx.moveTo(x, midY - 5); ctx.lineTo(x, midY + 5);
+                    ctx.stroke();
+
+                    const midX = prevRight + (x - prevRight) / 2;
+                    ctx.textAlign = "center";
+                    ctx.fillStyle = "#1e40af";
+                    ctx.font = "bold 13px Arial";
+                    ctx.fillText(String(node.distance), Math.round(midX), Math.round(midY - 10));
+                    ctx.font = "600 11px Arial";
+                    ctx.fillStyle = "#64748b";
+                    ctx.fillText("KM", Math.round(midX), Math.round(midY + 20));
+                } else if (i > 0) {
+                    const prev = positions[i - 1];
+                    const prevRight = prev.x + boxW;
+                    const prevMidY = prev.y + boxH / 2;
+                    const curMidY = y + boxH / 2;
+                    const gapMidY = prev.y + boxH + 66;
+                    ctx.strokeStyle = "#1e40af";
+                    ctx.lineWidth = 2.2;
+                    ctx.beginPath();
+                    ctx.moveTo(prevRight, prevMidY);
+                    ctx.lineTo(prevRight, gapMidY);
+                    ctx.lineTo(x - 14, gapMidY);
+                    ctx.lineTo(x - 14, curMidY);
+                    ctx.lineTo(x, curMidY);
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(x - 8, curMidY - 5);
+                    ctx.lineTo(x, curMidY);
+                    ctx.lineTo(x - 8, curMidY + 5);
+                    ctx.stroke();
+
+                    ctx.textAlign = "center";
+                    ctx.fillStyle = "#1e40af";
+                    ctx.font = "bold 11px Arial";
+                    ctx.fillText(node.distance + " KM", (prevRight + x - 14) / 2, gapMidY - 6);
+                }
+
+                const proposedNode = !!node.isProposed;
+                const nodeColor = proposedNode ? "#ea580c" : "#1e40af";
+
+                ctx.save();
+                ctx.shadowColor = proposedNode ? "rgba(234,88,12,0.2)" : "rgba(30,64,175,0.15)";
+                ctx.shadowBlur = 7;
+                ctx.shadowOffsetY = 2;
+                ctx.fillStyle = proposedNode ? "#fff7ed" : "#fff";
+                vrRoundRect(ctx, x, y, boxW, boxH, 7);
+                ctx.fill();
+                ctx.restore();
+
+                ctx.strokeStyle = nodeColor;
+                ctx.lineWidth = proposedNode ? 2.4 : 1.8;
+                vrRoundRect(ctx, x, y, boxW, boxH, 7);
+                ctx.stroke();
+
+                if (proposedNode) {
+                    ctx.fillStyle = "#ea580c";
+                    ctx.font = "bold 9px Arial";
+                    ctx.textAlign = "center";
+                    ctx.fillText("PROPOSED", x + boxW / 2, y - 6);
+                }
+
+                ctx.fillStyle = "#111";
+                ctx.font = "600 12px Arial";
+                ctx.textAlign = "center";
+                vrWrapText(ctx, node.name, x + boxW / 2, y + boxH / 2 - 8, boxW - 16, 14);
+
+                ctx.beginPath();
+                ctx.strokeStyle = "#e5e7eb";
+                ctx.lineWidth = 1;
+                ctx.moveTo(x + 12, y + boxH - 24);
+                ctx.lineTo(x + boxW - 12, y + boxH - 24);
+                ctx.stroke();
+
+                ctx.font = "600 11px Arial";
+                ctx.fillStyle = nodeColor;
+                ctx.fillText(node.kva + " KVA", x + boxW / 2, y + boxH - 8);
+
+                ctx.font = "bold 12px Arial";
+                ctx.fillStyle = nodeColor;
+                ctx.fillText("(" + node.label + ")", x + boxW / 2, y + boxH + 20);
+
+                if (proposedNode && node.proposedNote) {
+                    ctx.font = "9px Arial";
+                    ctx.fillStyle = "#9a3412";
+                    vrWrapText(ctx, '"' + node.proposedNote + '"', x + boxW / 2, y + boxH + 36, boxW - 10, 11);
+                }
+            });
+            ctx.textAlign = "left";
+        }
+
+        function vrDrawFlatSLD(nodes) {
+            const canvas = document.getElementById("vrFlatSldCanvas");
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            if (!nodes.length) {
+                canvas.width = 1300; canvas.height = 200;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                return;
+            }
+
+            const subBoxW = 175, subBoxH = 74, tickGap = 88, marginX = 20, gapAfterSub = 40;
+            const hasProposed = nodes.some((n) => n.isProposed);
+            const lineY = 92;
+            const canvasW = marginX * 2 + subBoxW + gapAfterSub + Math.max(0, nodes.length - 1) * tickGap + 60;
+            const canvasH = lineY + (hasProposed ? 110 : 55);
+
+            const RES = 2;
+            canvas.width = canvasW * RES;
+            canvas.height = canvasH * RES;
+            canvas.style.width = canvasW + "px";
+            canvas.style.height = "auto";
+            ctx.setTransform(RES, 0, 0, RES, 0, 0);
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(0, 0, canvasW, canvasH);
+
+            const subX = marginX, subY = lineY - subBoxH / 2;
+            ctx.save();
+            ctx.shadowColor = "rgba(30,64,175,0.15)";
+            ctx.shadowBlur = 6;
+            ctx.fillStyle = "#fff";
+            vrRoundRect(ctx, subX, subY, subBoxW, subBoxH, 6);
+            ctx.fill();
+            ctx.restore();
+            ctx.strokeStyle = "#1e40af";
+            ctx.lineWidth = 1.8;
+            vrRoundRect(ctx, subX, subY, subBoxW, subBoxH, 6);
+            ctx.stroke();
+            ctx.fillStyle = "#111";
+            ctx.font = "600 11px Arial";
+            ctx.textAlign = "center";
+            vrWrapText(ctx, nodes[0].name, subX + subBoxW / 2, subY + subBoxH / 2, subBoxW - 16, 13);
+
+            const lineStartX = subX + subBoxW;
+            const lastTickX = lineStartX + gapAfterSub + Math.max(0, nodes.length - 2) * tickGap;
+            ctx.strokeStyle = "#1e40af";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(lineStartX, lineY);
+            ctx.lineTo(nodes.length > 1 ? lastTickX : lineStartX + 20, lineY);
+            ctx.stroke();
+
+            for (let i = 1; i < nodes.length; i++) {
+                const node = nodes[i];
+                const tickX = lineStartX + gapAfterSub + (i - 1) * tickGap;
+                const proposed = !!node.isProposed;
+                ctx.strokeStyle = proposed ? "#ea580c" : "#1e40af";
+                ctx.lineWidth = proposed ? 2.6 : 2;
+                ctx.beginPath();
+                ctx.moveTo(tickX, lineY - 9);
+                ctx.lineTo(tickX, lineY + 9);
+                ctx.stroke();
+
+                ctx.textAlign = "center";
+                ctx.fillStyle = proposed ? "#ea580c" : "#1e40af";
+                ctx.font = "bold 13px Arial";
+                ctx.fillText(node.label, Math.round(tickX), Math.round(lineY - 42));
+                ctx.font = "600 11px Arial";
+                ctx.fillStyle = "#555";
+                ctx.fillText(node.distance + " KM", Math.round(tickX), Math.round(lineY - 20));
+
+                ctx.font = "600 11px Arial";
+                ctx.fillStyle = proposed ? "#ea580c" : "#1e40af";
+                ctx.fillText(node.kva + " KVA", Math.round(tickX), Math.round(lineY + 26));
+
+                if (proposed) {
+                    const calloutY = lineY + 46;
+                    ctx.strokeStyle = "#ea580c";
+                    ctx.setLineDash([3, 3]);
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(tickX, lineY + 34);
+                    ctx.lineTo(tickX, calloutY);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    const boxW = 200, boxH = 54;
+                    const boxX = Math.max(4, tickX - boxW / 2);
+                    ctx.strokeStyle = "#ea580c";
+                    ctx.lineWidth = 1.4;
+                    ctx.strokeRect(boxX, calloutY, boxW, boxH);
+                    ctx.fillStyle = "#7c2d12";
+                    ctx.font = "600 10px Arial";
+                    const label = 'INCLUDING PROPOSED LOAD OF "' + (node.proposedNote || node.name) + '" (' + node.kva + " KVA)";
+                    vrWrapText(ctx, label, boxX + boxW / 2, calloutY + boxH / 2, boxW - 12, 12);
+                }
+            }
+            ctx.textAlign = "left";
+        }
+
+        function vrComputeCalc() {
+            const { lineStatus, lineType, conductorType, dfType, nodes } = vrCalcState;
+            const conductorOptions = vrConductorOptionsByLine[lineType] || vrConductorOptionsByLine["33kv"];
+            const conductorObj = conductorOptions.find((c) => c.key === conductorType) || conductorOptions[0];
+            const cc = conductorObj.cc;
+            const isHT = lineType === "11kv" || lineType === "33kv";
+            const df = isHT ? 1.0 : (vrDfValues[dfType] || 1.5);
+            const dfNote = isHT ? "HT Connection — DF fixed at 1.0" : (dfType === "urban" ? "Urban area — DF = 1.5" : "Rural area — DF = 2.0");
+
+            const sectionRows = [];
+            let totalKvaKm = 0;
+            for (let i = 0; i < nodes.length - 1; i++) {
+                const length = nodes[i + 1].distance;
+                let downstreamKva = 0;
+                for (let j = i + 1; j < nodes.length; j++) downstreamKva += nodes[j].kva;
+                const kvakm = length * downstreamKva;
+                const vr = (cc * df) > 0 ? kvakm / (cc * df) : 0;
+                totalKvaKm += kvakm;
+                sectionRows.push({
+                    no: i + 1,
+                    label: nodes[i].label + "-" + nodes[i + 1].label,
+                    length: length,
+                    kva: downstreamKva,
+                    df: df.toFixed(1),
+                    cc: cc,
+                    kvakm: kvakm.toFixed(0),
+                    vr: vr.toFixed(2)
+                });
+            }
+
+            const totalVr = (cc * df) > 0 ? (totalKvaKm / (cc * df)) : 0;
+            const limit = vrLimits[lineType] || 6;
+            const exceedsLimit = totalVr > limit;
+            const totalRowLabel = nodes.length > 0 ? ("TOTAL (" + nodes[0].label + "-" + nodes[nodes.length - 1].label + ")") : "TOTAL";
+            const sectionCombosCaption = sectionRows.map((r) => "(" + r.label + ")").join("") +
+                (nodes.length > 2 ? "(" + nodes[0].label + "-" + nodes[nodes.length - 1].label + ")" : "");
+            const reportTitleLine1 = lineStatus + " " + (vrLineTypeLabels[lineType] || "33 kV") + " LINE";
+
+            return { conductorOptions, conductorObj, cc, isHT, df, dfNote, sectionRows, totalKvaKm, totalVr, limit, exceedsLimit, totalRowLabel, sectionCombosCaption, reportTitleLine1 };
+        }
+
+        function vrRenderNodeList() {
+            const container = document.getElementById("vr-node-list");
+            if (!container) return;
+            const nodes = vrCalcState.nodes;
+            const isProposedStatus = vrCalcState.lineStatus === "PROPOSED";
+            const nameLabelEl = document.getElementById("vr-draft-name-label");
+            const kvaWrap = document.getElementById("vr-draft-kva-wrap");
+            const distWrap = document.getElementById("vr-draft-dist-wrap");
+            if (nameLabelEl) nameLabelEl.innerText = nodes.length > 0 ? "Point Name" : "First Point Name";
+            if (kvaWrap) kvaWrap.style.display = nodes.length > 0 ? "flex" : "none";
+            if (distWrap) distWrap.style.display = nodes.length > 0 ? "flex" : "none";
+
+            if (!nodes.length) {
+                container.innerHTML = '<div style="text-align:center; padding:20px; color:#888; font-size:13px;">No points added yet — add the first point using the form above.</div>';
+                return;
+            }
+
+            container.innerHTML = nodes.map((node, i) => {
+                const showDistance = i > 0;
+                let html = '<div class="vr-calc-node-row">';
+                html += `<span class="vr-calc-node-label">${escapeHtml(node.label)}</span>`;
+                html += `<div class="vr-calc-field name"><label>Point Name</label><input type="text" value="${escapeHtml(node.name)}" data-index="${i}" data-field="name" onchange="vrHandleNodeChange(this)"></div>`;
+                if (showDistance) {
+                    html += `<div class="vr-calc-field kva"><label>Load (KVA)</label><input type="number" value="${node.kva}" data-index="${i}" data-field="kva" onchange="vrHandleNodeChange(this)"></div>`;
+                    html += `<div class="vr-calc-field dist"><label>Distance (Km)</label><input type="number" step="0.1" value="${node.distance}" data-index="${i}" data-field="distance" onchange="vrHandleNodeChange(this)"></div>`;
+                }
+                if (isProposedStatus) {
+                    html += `<label class="vr-calc-proposed-check"><input type="checkbox" ${node.isProposed ? "checked" : ""} data-index="${i}" data-field="isProposed" onchange="vrHandleNodeChange(this)"> Proposed Load</label>`;
+                }
+                if (node.isProposed) {
+                    html += `<div class="vr-calc-field name"><label>Proposed Description</label><input type="text" placeholder="e.g. Rice Mill" value="${escapeHtml(node.proposedNote || "")}" data-index="${i}" data-field="proposedNote" onchange="vrHandleNodeChange(this)"></div>`;
+                }
+                html += `<button class="vr-calc-remove-btn" onclick="vrRemoveNode(${i})">✕ Remove</button>`;
+                html += "</div>";
+                return html;
+            }).join("");
+        }
+
+        function vrRenderSeals() {
+            const container = document.getElementById("vr-seal-list");
+            if (!container) return;
+            const seals = vrCalcState.seals;
+            if (!seals.length) {
+                container.innerHTML = '<div style="font-size:12px; color:#888; margin-bottom:10px;">No seal added yet — click "+ Add Seal" below.</div>';
+                return;
+            }
+            container.innerHTML = seals.map((seal, i) => {
+                const options = vrDesignationOptions.map((opt) => `<option value="${escapeHtml(opt)}" ${seal.designation === opt ? "selected" : ""}>${escapeHtml(opt)}</option>`).join("");
+                return `
+                <div class="vr-calc-seal-row">
+                    <div style="display:flex; flex-direction:column; gap:4px; flex:1 1 200px;">
+                        <label style="font-size:10px; font-weight:800; text-transform:uppercase; color:#555;">Designation</label>
+                        <select data-index="${i}" data-field="designation" onchange="vrUpdateSeal(this)">${options}</select>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:4px; flex:1 1 180px;">
+                        <label style="font-size:10px; font-weight:800; text-transform:uppercase; color:#555;">Location</label>
+                        <input type="text" placeholder="e.g. Narsinghpur" value="${escapeHtml(seal.location || "")}" data-index="${i}" data-field="location" onchange="vrUpdateSeal(this)">
+                    </div>
+                    <button class="vr-calc-seal-remove" onclick="vrRemoveSeal(${i})">✕ Remove</button>
+                </div>`;
+            }).join("");
+        }
+
+        function vrRenderCalc() {
+            const calc = vrComputeCalc();
+            const { lineStatus, headerDescription, lineType, conductorType, nodes } = vrCalcState;
+
+            const conductorSelect = document.getElementById("vr-conductor-type");
+            if (conductorSelect) {
+                conductorSelect.innerHTML = calc.conductorOptions.map((opt) => `<option value="${opt.key}" ${opt.key === conductorType ? "selected" : ""}>${escapeHtml(opt.label)} (CC ${opt.cc})</option>`).join("");
+            }
+
+            const dfRow = document.getElementById("vr-df-row");
+            if (dfRow) dfRow.style.display = calc.isHT ? "none" : "block";
+
+            const title1 = document.getElementById("vr-report-title-1");
+            const title2 = document.getElementById("vr-report-title-2");
+            if (title1) title1.innerText = "VOLTAGE REGULATION CALCULATION – " + calc.reportTitleLine1;
+            if (title2) title2.innerText = headerDescription || "";
+
+            const rowsBody = document.getElementById("vr-section-rows");
+            if (rowsBody) {
+                let html = calc.sectionRows.map((row) => `
+                    <tr>
+                        <td>${row.no}</td>
+                        <td class="vr-section-name">${escapeHtml(row.label)}</td>
+                        <td>${row.length}</td>
+                        <td>${row.kva}</td>
+                        <td>${row.df}</td>
+                        <td>${row.cc}</td>
+                        <td>${row.kvakm}</td>
+                        <td>${row.vr}</td>
+                    </tr>`).join("");
+                html += `<tr class="vr-total-row"><td colspan="6">${escapeHtml(calc.totalRowLabel)}</td><td>${calc.totalKvaKm.toFixed(0)}</td><td>${calc.totalVr.toFixed(2)}</td></tr>`;
+                rowsBody.innerHTML = html;
+            }
+
+            const dfValueEl = document.getElementById("vr-df-value");
+            const dfNoteEl = document.getElementById("vr-df-note");
+            if (dfValueEl) dfValueEl.innerText = calc.df.toFixed(1);
+            if (dfNoteEl) dfNoteEl.innerText = calc.dfNote;
+
+            const captionEl = document.getElementById("vr-caption");
+            if (captionEl) captionEl.innerHTML = `Voltage Regulation as per Section ${escapeHtml(calc.sectionCombosCaption)} — <strong>${escapeHtml(calc.conductorObj.label)}</strong> conductor.`;
+
+            const formulaValuesEl = document.getElementById("vr-formula-values");
+            if (formulaValuesEl) formulaValuesEl.innerHTML = `<span class="num">${calc.totalKvaKm.toFixed(0)}</span><span class="den">${calc.cc} × ${calc.df.toFixed(1)}</span>`;
+
+            const finalVrEl = document.getElementById("vr-final-vr");
+            if (finalVrEl) finalVrEl.innerText = `% VR = ${calc.totalVr.toFixed(2)}%`;
+
+            const nodesWithFlag = nodes.map((n, i) => ({ ...n, showDistance: i > 0 }));
+            vrDrawSLD(nodesWithFlag);
+            vrDrawFlatSLD(nodes);
+        }
+
+        function vrSetLineStatus(value) {
+            vrCalcState.lineStatus = value;
+            if (value !== "PROPOSED") {
+                vrCalcState.nodes = vrCalcState.nodes.map((n) => ({ ...n, isProposed: false }));
+            }
+            vrRenderNodeList();
+            vrRenderCalc();
+        }
+
+        function vrSetHeaderDescription(value) {
+            vrCalcState.headerDescription = value;
+            vrRenderCalc();
+        }
+
+        function vrSetLineType(value) {
+            vrCalcState.lineType = value;
+            const opts = vrConductorOptionsByLine[value] || vrConductorOptionsByLine["33kv"];
+            vrCalcState.conductorType = opts[0].key;
+            vrRenderCalc();
+        }
+
+        function vrSetConductorType(value) {
+            vrCalcState.conductorType = value;
+            vrRenderCalc();
+        }
+
+        function vrSetDFType(value) {
+            vrCalcState.dfType = value;
+            vrRenderCalc();
+        }
+
+        function vrAddNodeFromDraft() {
+            const nameEl = document.getElementById("vr-draft-name");
+            const kvaEl = document.getElementById("vr-draft-kva");
+            const distEl = document.getElementById("vr-draft-dist");
+            const name = (nameEl && nameEl.value ? nameEl.value.trim() : "") || "New Point";
+            const kva = parseFloat(kvaEl && kvaEl.value) || 0;
+            const distance = parseFloat(distEl && distEl.value) || 0;
+            vrCalcState.nodes.push({
+                label: vrNextLabel(vrCalcState.nodes.length),
+                name,
+                kva,
+                distance,
+                isProposed: false,
+                proposedNote: ""
+            });
+            if (nameEl) nameEl.value = "";
+            if (kvaEl) kvaEl.value = "";
+            if (distEl) distEl.value = "";
+            vrRenderNodeList();
+            vrRenderCalc();
+        }
+
+        function vrHandleNodeChange(el) {
+            const index = parseInt(el.dataset.index, 10);
+            const field = el.dataset.field;
+            const node = vrCalcState.nodes[index];
+            if (!node) return;
+            let value;
+            if (field === "name" || field === "proposedNote") value = el.value;
+            else if (field === "isProposed") value = el.checked;
+            else value = parseFloat(el.value) || 0;
+            node[field] = value;
+            if (field === "isProposed" && value && !node.proposedNote) node.proposedNote = node.name;
+            vrRenderNodeList();
+            vrRenderCalc();
+        }
+
+        function vrRemoveNode(index) {
+            vrCalcState.nodes.splice(index, 1);
+            vrCalcState.nodes.forEach((n, i) => { n.label = vrNextLabel(i); });
+            vrRenderNodeList();
+            vrRenderCalc();
+        }
+
+        function vrAddSeal() {
+            vrCalcState.seals.unshift({ designation: "Assistant Engineer (O&M)", location: "" });
+            vrRenderSeals();
+        }
+
+        function vrUpdateSeal(el) {
+            const index = parseInt(el.dataset.index, 10);
+            const field = el.dataset.field;
+            if (!vrCalcState.seals[index]) return;
+            vrCalcState.seals[index][field] = el.value;
+        }
+
+        function vrRemoveSeal(index) {
+            vrCalcState.seals.splice(index, 1);
+            vrRenderSeals();
+        }
+
+        function vrToggleReferenceInfo() {
+            vrCalcState.showReferenceInfo = !vrCalcState.showReferenceInfo;
+            const box = document.getElementById("vr-reference-info");
+            if (box) box.style.display = vrCalcState.showReferenceInfo ? "block" : "none";
+        }
+
+        function initVrCalculation() {
+            const statusSel = document.getElementById("vr-line-status");
+            const typeSel = document.getElementById("vr-line-type");
+            const dfSel = document.getElementById("vr-df-type");
+            const headerEl = document.getElementById("vr-header-desc");
+            if (statusSel) statusSel.value = vrCalcState.lineStatus;
+            if (typeSel) typeSel.value = vrCalcState.lineType;
+            if (dfSel) dfSel.value = vrCalcState.dfType;
+            if (headerEl) headerEl.value = vrCalcState.headerDescription;
+            vrRenderNodeList();
+            vrRenderSeals();
+            vrRenderCalc();
+        }
+
+        function vrSetDownloadStatus(message, ok) {
+            const box = document.getElementById("vr-download-status");
+            if (!box) return;
+            if (!message) { box.style.display = "none"; return; }
+            box.style.display = "block";
+            box.style.color = ok ? "#166534" : "#b91c1c";
+            box.innerText = message;
+        }
+
+        function vrDownloadPDF() {
+            try {
+                const calc = vrComputeCalc();
+                const { headerDescription, nodes } = vrCalcState;
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation: "landscape" });
+                const pageW = doc.internal.pageSize.getWidth();
+
+                doc.setFontSize(14);
+                doc.setFont(undefined, "bold");
+                doc.text("VOLTAGE REGULATION CALCULATION – " + calc.reportTitleLine1, pageW / 2, 14, { align: "center" });
+                doc.setFontSize(10);
+                doc.setFont(undefined, "normal");
+                if (headerDescription) doc.text(headerDescription, pageW / 2, 20, { align: "center" });
+
+                let y = 26;
+                const flatCanvas = document.getElementById("vrFlatSldCanvas");
+                if (flatCanvas && nodes.length) {
+                    const imgW = Math.min(260, pageW - 20);
+                    const imgH = (flatCanvas.height / flatCanvas.width) * imgW;
+                    doc.addImage(flatCanvas.toDataURL("image/png"), "PNG", (pageW - imgW) / 2, y, imgW, imgH);
+                    y += imgH + 6;
+                }
+                const sldCanvas = document.getElementById("vrSldCanvas");
+                if (sldCanvas && nodes.length) {
+                    const imgW = Math.min(260, pageW - 20);
+                    const imgH = (sldCanvas.height / sldCanvas.width) * imgW;
+                    doc.addImage(sldCanvas.toDataURL("image/png"), "PNG", (pageW - imgW) / 2, y, imgW, imgH);
+                    y += imgH + 8;
+                }
+
+                doc.autoTable({
+                    startY: y,
+                    head: [["S.No", "Section", "Length (Km)", "KVA", "DF", "Conductor Constant", "KVA x Km", "VR (%)"]],
+                    body: calc.sectionRows.map((row) => [row.no, row.label, row.length, row.kva, row.df, row.cc, row.kvakm, row.vr]),
+                    foot: [["", calc.totalRowLabel, "", "", "", "", calc.totalKvaKm.toFixed(0), calc.totalVr.toFixed(2)]],
+                    theme: "grid",
+                    headStyles: { fillColor: [30, 64, 175], halign: "center" },
+                    footStyles: { fillColor: [219, 234, 254], textColor: [17, 17, 17], fontStyle: "bold" },
+                    styles: { fontSize: 8, halign: "center" }
+                });
+
+                let afterTableY = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : y) + 10;
+                doc.setFontSize(10);
+                doc.setFont(undefined, "bold");
+                doc.text(`% VR = ${calc.totalKvaKm.toFixed(0)} / (${calc.cc} x ${calc.df.toFixed(1)}) = ${calc.totalVr.toFixed(2)}%`, 14, afterTableY);
+                afterTableY += 6;
+                doc.setFont(undefined, "normal");
+                doc.text(`Diversity Factor Used: ${calc.df.toFixed(1)} (${calc.dfNote})`, 14, afterTableY);
+                afterTableY += 6;
+                doc.text(`Conductor: ${calc.conductorObj.label}`, 14, afterTableY);
+
+                if (vrCalcState.seals.length) {
+                    let sealX = pageW - 14;
+                    doc.setFontSize(9);
+                    vrCalcState.seals.forEach((seal) => {
+                        doc.text(String(seal.designation || ""), sealX, afterTableY, { align: "right" });
+                        doc.text("M.P.P.K.V.V. CO. LTD.", sealX, afterTableY + 5, { align: "right" });
+                        doc.text(String(seal.location || ""), sealX, afterTableY + 10, { align: "right" });
+                        sealX -= 60;
+                    });
+                }
+
+                doc.save(`Voltage_Regulation_${vrCalcState.lineType.toUpperCase()}.pdf`);
+                vrSetDownloadStatus("PDF download ho gaya", true);
+            } catch (err) {
+                showToast(err?.message || "PDF download nahi ho paya", false);
+                vrSetDownloadStatus("PDF download nahi ho paya", false);
+            }
+        }
+
+        function vrDownloadExcel() {
+            try {
+                const calc = vrComputeCalc();
+                const { headerDescription, lineStatus, lineType, nodes } = vrCalcState;
+                const csvSafe = (value) => {
+                    const text = String(value ?? "");
+                    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+                };
+                const rows = [];
+                rows.push(["VOLTAGE REGULATION CALCULATION - " + lineStatus + " " + (vrLineTypeLabels[lineType] || "") + " LINE"]);
+                rows.push([headerDescription || ""]);
+                rows.push([]);
+                rows.push(["S.No", "Section", "Length in Km", "KVA", "DF", "Conductor Constant", "KVA x Km", "VR (%)"]);
+                calc.sectionRows.forEach((row) => {
+                    rows.push([row.no, row.label, row.length, row.kva, row.df, row.cc, row.kvakm, row.vr]);
+                });
+                rows.push(["", calc.totalRowLabel, "", "", "", "", calc.totalKvaKm.toFixed(0), calc.totalVr.toFixed(2)]);
+                rows.push([]);
+                rows.push(["Conductor", calc.conductorObj.label]);
+                rows.push(["Diversity Factor (DF)", calc.df.toFixed(1)]);
+                rows.push(["% VR", calc.totalVr.toFixed(2) + "%"]);
+
+                const csv = rows.map((r) => r.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+                link.download = `Voltage_Regulation_${lineType.toUpperCase()}.csv`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showToast("Excel download ho gaya", true);
+                vrSetDownloadStatus("Excel download ho gaya", true);
+            } catch (err) {
+                showToast(err?.message || "Excel download nahi ho paya", false);
+                vrSetDownloadStatus("Excel download nahi ho paya", false);
+            }
+        }
+
         function switchView(id) {
             if (!suppressHistoryPush) {
                 try { history.pushState({ appView: id }, "", ""); } catch (_) {}
@@ -12643,6 +13419,9 @@
                 if (id === "stm-complaint") {
                     initStmComplaintSignup();
                 }
+                if (id === "vr-calculation") {
+                    initVrCalculation();
+                }
                 if (id === "shms-progress") {
                     initShmsProgressDashboard();
                 }
@@ -12662,6 +13441,7 @@
                 if (id === "daily-hourly-peak-load") headerTitle = "DAILY HOURLY PEAK LOAD";
                 if (id === "vehicle-reading") headerTitle = "VEHICLE READING";
                 if (id === "stm-complaint") headerTitle = "STM COMPLAINT";
+                if (id === "vr-calculation") headerTitle = "VR CALCULATION";
                 if (id === "stock-material") headerTitle = "STOCK MATERIAL";
                 if (id === "shms-entry") headerTitle = "SHMS ENTRY";
                 if (id === "shms-progress") headerTitle = "DAILY PROGRESS";
@@ -12741,6 +13521,11 @@
                     document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #fca5a5 0%, #ef4444 100%)");
                     header.className = "app-header btn-vehicle-reading";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #fca5a5 0%, #ef4444 100%)";
+                } else if (id === "vr-calculation") {
+                    document.documentElement.style.setProperty("--theme-color", "#1e40af");
+                    document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%)");
+                    header.className = "app-header btn-vr-calculation";
+                    if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%)";
                 } else if (id === "court-case") {
                     header.className = "app-header btn-court-case";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)";

@@ -149,6 +149,7 @@
                 <button class="dashboard-btn btn-revenue-blue" onclick="switchView('revenue-collection')">Revenue Collection</button>
                 <div id="revenue-upload-freshness-ticker" class="ticker-wrap" style="display:none; margin-top:6px;"><span class="ticker-text" style="color:#ffffff;"></span></div>
           <button class="dashboard-btn btn-court-case" onclick="switchView('court-case')" style="display:none;">Lok Adalat Notice</button>
+                <button class="dashboard-btn btn-vr-calculation" onclick="switchView('vr-calculation')">VR Calculation</button>
                 <button class="dashboard-btn btn-progress-black" onclick="askPassword('DC')">Daily Progress</button>
             </div>
         </main>
@@ -234,6 +235,149 @@
                         <div style="font-size:13px; font-weight:900; color:#b91c1c; text-align:center; margin-bottom:8px;">TODAY ADDED READINGS</div>
                         <div id="vehicle-list-content" style="display:flex; flex-direction:column; gap:8px;"></div>
                     </div>
+                </div>
+            </div>
+        </main>
+
+        <main id="vr-calculation-view" class="view">
+            <div class="search-panel" style="padding-top:12px;">
+                <div class="vr-calc-wrap">
+
+                    <div class="vr-calc-card">
+                        <label class="vr-calc-label">Header Description</label>
+                        <input id="vr-header-desc" type="text" class="ivrs-input vr-calc-input" placeholder="e.g. 220 kV EHV Substation Seoni to 33/11 kV Substation Chhapara" oninput="vrSetHeaderDescription(this.value)">
+                        <div class="vr-calc-config-row">
+                            <div>
+                                <label class="vr-calc-label">Status</label>
+                                <select id="vr-line-status" class="ivrs-input vr-calc-input" onchange="vrSetLineStatus(this.value)">
+                                    <option value="EXISTING">Existing</option>
+                                    <option value="NEW">New</option>
+                                    <option value="PROPOSED">Proposed</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="vr-calc-label">Line Type</label>
+                                <select id="vr-line-type" class="ivrs-input vr-calc-input" onchange="vrSetLineType(this.value)">
+                                    <option value="lt">LT</option>
+                                    <option value="11kv">11 kV</option>
+                                    <option value="33kv" selected>33 kV</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="vr-calc-label">Conductor</label>
+                                <select id="vr-conductor-type" class="ivrs-input vr-calc-input" onchange="vrSetConductorType(this.value)"></select>
+                            </div>
+                        </div>
+                        <div id="vr-df-row" style="display:none; margin-top:12px;">
+                            <label class="vr-calc-label">Area Type (Diversity Factor)</label>
+                            <select id="vr-df-type" class="ivrs-input vr-calc-input" onchange="vrSetDFType(this.value)">
+                                <option value="urban">Urban (DF 1.5)</option>
+                                <option value="rural">Rural (DF 2.0)</option>
+                            </select>
+                        </div>
+                        <div class="vr-calc-report-title">
+                            <h2 id="vr-report-title-1">VOLTAGE REGULATION CALCULATION</h2>
+                            <h3 id="vr-report-title-2"></h3>
+                        </div>
+                    </div>
+
+                    <div class="vr-calc-card">
+                        <h2 class="vr-calc-heading">Network Points (Single Line Diagram Input)</h2>
+                        <div class="vr-calc-add-form">
+                            <div class="vr-calc-field name">
+                                <label id="vr-draft-name-label">First Point Name</label>
+                                <input id="vr-draft-name" type="text" class="ivrs-input vr-calc-input" placeholder="e.g. 33/11 KV S/S Barra">
+                            </div>
+                            <div id="vr-draft-kva-wrap" class="vr-calc-field kva" style="display:none;">
+                                <label>Load / Capacity (KVA)</label>
+                                <input id="vr-draft-kva" type="number" class="ivrs-input vr-calc-input" placeholder="0">
+                            </div>
+                            <div id="vr-draft-dist-wrap" class="vr-calc-field dist" style="display:none;">
+                                <label>Distance from previous (Km)</label>
+                                <input id="vr-draft-dist" type="number" step="0.1" class="ivrs-input vr-calc-input" placeholder="0">
+                            </div>
+                            <button class="btn vr-btn-primary" onclick="vrAddNodeFromDraft()">+ Add to List</button>
+                        </div>
+                        <div id="vr-node-list" class="vr-calc-node-inputs"></div>
+
+                        <h2 class="vr-calc-heading" style="margin-top:24px;">Single Line Diagram — Overview</h2>
+                        <div class="vr-calc-sld-container" style="overflow-x:auto;">
+                            <canvas id="vrFlatSldCanvas" width="1300" height="200"></canvas>
+                        </div>
+                        <h2 class="vr-calc-heading">Single Line Diagram (SLD)</h2>
+                        <div class="vr-calc-sld-container" style="overflow-x:auto;">
+                            <canvas id="vrSldCanvas" width="1300" height="230"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="vr-calc-card">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+                            <h2 class="vr-calc-heading" style="margin:0;">Calculation of Voltage Regulation</h2>
+                            <button class="vr-calc-menu-btn" onclick="vrToggleReferenceInfo()">ℹ️ Limits &amp; CC</button>
+                        </div>
+                        <div style="overflow-x:auto;">
+                            <table class="vr-table">
+                                <thead>
+                                    <tr><th>S.No</th><th>Section</th><th>Length in Km</th><th>KVA</th><th>DF</th><th>Conductor Constant</th><th>KVA × Km</th><th>VR (%)</th></tr>
+                                </thead>
+                                <tbody id="vr-section-rows"></tbody>
+                            </table>
+                        </div>
+                        <div class="vr-calc-df-strip">
+                            <span class="vr-calc-df-label">Diversity Factor Used</span>
+                            <span id="vr-df-value" class="vr-calc-df-value"></span>
+                            <span id="vr-df-note" style="font-size:12px; color:#555;"></span>
+                        </div>
+                        <p id="vr-caption" class="vr-calc-caption"></p>
+
+                        <div class="vr-calc-formula-block">
+                            <div class="vr-calc-formula-row">
+                                <span class="vr-calc-fname">% VR =</span>
+                                <span class="vr-calc-frac"><span class="num">Total (KVA × Km)</span><span class="den">CC × DF</span></span>
+                            </div>
+                            <div class="vr-calc-formula-row">
+                                <span class="vr-calc-fname">=</span>
+                                <span id="vr-formula-values" class="vr-calc-frac"></span>
+                            </div>
+                            <div id="vr-final-vr" class="vr-calc-final-vr"></div>
+                        </div>
+
+                        <div id="vr-reference-info" style="display:none;">
+                            <div class="vr-calc-footer-note">
+                                <strong>MPERC / MP Electricity Rules के अनुसार Limits:</strong><br>
+                                • LT (Three Phase, 400V): ± 6%<br>
+                                • 11 kV: +6% / -9%<br>
+                                • 33 kV: +6% / -9%
+                            </div>
+                            <table class="vr-calc-cc-table">
+                                <tr><td colspan="2" style="text-align:center; font-weight:bold; padding:12px 8px; background:#f0f0f0;">LT Line — Conductor Constants</td></tr>
+                                <tr><td>Squirrel (0.9 PF)</td><td style="text-align:right;">1.19</td></tr>
+                                <tr><td>Weasel (0.9 PF)</td><td style="text-align:right;">1.94</td></tr>
+                                <tr><td>Rabbit (0.9 PF)</td><td style="text-align:right;">3.00</td></tr>
+                                <tr><td colspan="2" style="text-align:center; font-weight:bold; padding:12px 8px; background:#f0f0f0;">11 kV Line — Conductor Constants</td></tr>
+                                <tr><td>Weasel (0.8 PF)</td><td style="text-align:right;">1020</td></tr>
+                                <tr><td>Rabbit (0.8 PF)</td><td style="text-align:right;">1576</td></tr>
+                                <tr><td>Raccoon (0.8 PF)</td><td style="text-align:right;">2380</td></tr>
+                                <tr><td>Dog (0.8 PF)</td><td style="text-align:right;">3150</td></tr>
+                                <tr><td colspan="2" style="text-align:center; font-weight:bold; padding:12px 8px; background:#f0f0f0;">33 kV Line — Conductor Constants</td></tr>
+                                <tr><td>Raccoon (0.9 PF)</td><td style="text-align:right;">19121</td></tr>
+                                <tr><td>Dog (0.9 PF)</td><td style="text-align:right;">22951</td></tr>
+                            </table>
+                        </div>
+
+                        <div class="vr-calc-seal-box">
+                            <h3 style="margin:0 0 12px; font-size:14px; color:#333;">Seal / Signature (shown on PDF)</h3>
+                            <div id="vr-seal-list"></div>
+                            <button class="btn vr-btn-primary" onclick="vrAddSeal()">+ Add Seal</button>
+                        </div>
+
+                        <div style="display:flex; gap:10px; margin-top:22px; justify-content:center; flex-wrap:wrap;">
+                            <button class="btn vr-btn-primary" style="background:#dc2626;" onclick="vrDownloadPDF()">📄 Download PDF</button>
+                            <button class="btn vr-btn-primary" style="background:#059669;" onclick="vrDownloadExcel()">📊 Download Excel</button>
+                        </div>
+                        <div id="vr-download-status" style="display:none; margin-top:12px; text-align:center; font-size:12px; font-weight:800;"></div>
+                    </div>
+
                 </div>
             </div>
         </main>
@@ -719,8 +863,12 @@
                     <div class="res-row"><span class="res-label">Old Mobile No</span><span id="res-old" class="res-val"></span></div>
                     <div class="res-row border-none"><span class="res-label">Address</span><span id="res-addr" class="res-val"></span></div>
 
-                    <div class="title-box-container" style="padding-top: 15px;"><div class="title-box" style="background-color: #fee2e2;"><span class="title-text-bold" style="color: #991b1b;">Enter Correct Mobile No</span></div></div>
-                    <input type="tel" id="new-mobile" class="teal-boundary-input" placeholder="Enter 10 Digit No..." oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
+                    <div id="mobile-already-submitted-box" style="display:none; margin-top:15px; background:#fff7ed; border:1.5px solid #fdba74; border-radius:14px; padding:12px 14px; font-size:0.78rem; font-weight:850; color:#9a3412; text-align:center; line-height:1.55;"></div>
+
+                    <div id="mobile-entry-box">
+                        <div class="title-box-container" style="padding-top: 15px;"><div class="title-box" style="background-color: #fee2e2;"><span class="title-text-bold" style="color: #991b1b;">Enter Correct Mobile No</span></div></div>
+                        <input type="tel" id="new-mobile" class="teal-boundary-input" placeholder="Enter 10 Digit No..." oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
+                    </div>
                 </div>
                 <button id="submit-btn" class="submit-sync-btn" onclick="submitToSheet()">Submit</button>
             </div>
