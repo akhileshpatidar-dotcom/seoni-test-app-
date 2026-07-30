@@ -13041,25 +13041,35 @@
                 return;
             }
 
-            container.innerHTML = nodes.map((node, i) => {
+            const gridCols = isProposedStatus ? "34px 1fr 1fr 60px 34px" : "34px 1fr 1fr 34px";
+
+            let html = `<div class="vr-calc-node-thead" style="grid-template-columns:${gridCols};">`;
+            html += `<span></span><span>KVA</span><span>KM</span>`;
+            if (isProposedStatus) html += `<span>Proposed</span>`;
+            html += `<span></span></div>`;
+
+            html += nodes.map((node, i) => {
                 const showDistance = i > 0;
-                let html = '<div class="vr-calc-node-row">';
-                html += `<span class="vr-calc-node-label">${escapeHtml(node.label)}</span>`;
-                html += `<div class="vr-calc-field name"><label>Point Name</label><input type="text" value="${escapeHtml(node.name)}" disabled style="background:#f0f0f0; color:#444; cursor:not-allowed;"></div>`;
+                let row = `<div class="vr-calc-node-trow" style="grid-template-columns:${gridCols};">`;
+                row += `<span class="vr-calc-node-label" title="${escapeHtml(node.name)}">${escapeHtml(node.label)}</span>`;
                 if (showDistance) {
-                    html += `<div class="vr-calc-field kva"><label>Load (KVA)</label><input type="number" value="${node.kva}" data-index="${i}" data-field="kva" onchange="vrHandleNodeChange(this)"></div>`;
-                    html += `<div class="vr-calc-field dist"><label>Distance (Km)</label><input type="number" step="0.1" value="${node.distance}" data-index="${i}" data-field="distance" onchange="vrHandleNodeChange(this)"></div>`;
+                    row += `<input type="number" value="${node.kva}" data-index="${i}" data-field="kva" onchange="vrHandleNodeChange(this)">`;
+                    row += `<input type="number" step="0.1" value="${node.distance}" data-index="${i}" data-field="distance" onchange="vrHandleNodeChange(this)">`;
+                } else {
+                    row += `<span class="vr-calc-node-dash">—</span><span class="vr-calc-node-dash">—</span>`;
                 }
                 if (isProposedStatus) {
-                    html += `<label class="vr-calc-proposed-check"><input type="checkbox" ${node.isProposed ? "checked" : ""} data-index="${i}" data-field="isProposed" onchange="vrHandleNodeChange(this)"> Proposed</label>`;
+                    row += `<input type="checkbox" ${node.isProposed ? "checked" : ""} data-index="${i}" data-field="isProposed" onchange="vrHandleNodeChange(this)" style="width:18px; height:18px; justify-self:center;">`;
                 }
+                row += `<button class="vr-calc-remove-btn" onclick="vrRemoveNode(${i})" title="Remove">✕</button>`;
+                row += `</div>`;
                 if (node.isProposed) {
-                    html += `<div class="vr-calc-field name"><label>Proposed Description</label><input type="text" placeholder="e.g. Rice Mill" value="${escapeHtml(node.proposedNote || "")}" data-index="${i}" data-field="proposedNote" onchange="vrHandleNodeChange(this)"></div>`;
+                    row += `<div class="vr-calc-node-note-row"><input type="text" placeholder="Proposed description e.g. Rice Mill" value="${escapeHtml(node.proposedNote || "")}" data-index="${i}" data-field="proposedNote" onchange="vrHandleNodeChange(this)"></div>`;
                 }
-                html += `<button class="vr-calc-remove-btn" onclick="vrRemoveNode(${i})" title="Remove">✕</button>`;
-                html += "</div>";
-                return html;
+                return row;
             }).join("");
+
+            container.innerHTML = html;
         }
 
         function vrRenderSeals() {
