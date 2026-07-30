@@ -243,7 +243,7 @@
             <div class="search-panel" style="padding-top:12px;">
                 <div class="vr-calc-wrap">
 
-                    <div class="vr-calc-card">
+                    <div class="vr-calc-card vr-no-print">
                         <label class="vr-calc-label">Header Description</label>
                         <input id="vr-header-desc" type="text" class="ivrs-input vr-calc-input" placeholder="e.g. 220 kV EHV Substation Seoni to 33/11 kV Substation Chhapara" oninput="vrSetHeaderDescription(this.value)">
                         <div class="vr-calc-config-row">
@@ -268,22 +268,19 @@
                                 <select id="vr-conductor-type" class="ivrs-input vr-calc-input" onchange="vrSetConductorType(this.value)"></select>
                             </div>
                         </div>
-                        <div id="vr-df-row" style="display:none; margin-top:12px;">
-                            <label class="vr-calc-label">Area Type (Diversity Factor)</label>
-                            <select id="vr-df-type" class="ivrs-input vr-calc-input" onchange="vrSetDFType(this.value)">
-                                <option value="urban">Urban (DF 1.5)</option>
-                                <option value="rural">Rural (DF 2.0)</option>
-                            </select>
-                        </div>
                         <div class="vr-calc-report-title">
                             <h2 id="vr-report-title-1">VOLTAGE REGULATION CALCULATION</h2>
                             <h3 id="vr-report-title-2"></h3>
                         </div>
                     </div>
 
-                    <div class="vr-calc-card">
-                        <h2 class="vr-calc-heading">Network Points (Single Line Diagram Input)</h2>
-                        <div class="vr-calc-add-form">
+                    <div class="vr-calc-card" id="vr-panel-sld">
+                        <div class="vr-print-only vr-calc-print-banner">
+                            <h2 id="vr-print-title-1a">SINGLE LINE DIAGRAM</h2>
+                            <h3 id="vr-print-title-1b"></h3>
+                        </div>
+                        <h2 class="vr-calc-heading vr-no-print">Network Points (Single Line Diagram Input)</h2>
+                        <div class="vr-calc-add-form vr-no-print">
                             <div class="vr-calc-field name">
                                 <label id="vr-draft-name-label">First Point Name</label>
                                 <input id="vr-draft-name" type="text" class="ivrs-input vr-calc-input" placeholder="e.g. 33/11 KV S/S Barra">
@@ -298,7 +295,7 @@
                             </div>
                             <button class="btn vr-btn-primary" onclick="vrAddNodeFromDraft()">+ Add to List</button>
                         </div>
-                        <div id="vr-node-list" class="vr-calc-node-inputs"></div>
+                        <div id="vr-node-list" class="vr-calc-node-inputs vr-no-print"></div>
 
                         <h2 class="vr-calc-heading" style="margin-top:24px;">Single Line Diagram — Overview</h2>
                         <div class="vr-calc-sld-container" style="overflow-x:auto;">
@@ -308,12 +305,22 @@
                         <div class="vr-calc-sld-container" style="overflow-x:auto;">
                             <canvas id="vrSldCanvas" width="1300" height="230"></canvas>
                         </div>
+                        <div id="vr-seal-print-1" class="vr-print-only vr-calc-seal-print-row"></div>
                     </div>
 
-                    <div class="vr-calc-card">
+                    <div class="vr-calc-card" id="vr-panel-calc">
+                        <div class="vr-print-only vr-calc-print-banner">
+                            <h2 id="vr-print-title-2a">VOLTAGE REGULATION CALCULATION</h2>
+                            <h3 id="vr-print-title-2b"></h3>
+                        </div>
                         <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
                             <h2 class="vr-calc-heading" style="margin:0;">Calculation of Voltage Regulation</h2>
-                            <button class="vr-calc-menu-btn" onclick="vrToggleReferenceInfo()">ℹ️ Limits &amp; CC</button>
+                            <div class="vr-no-print" style="position:relative;">
+                                <button class="vr-calc-menu-btn" onclick="vrToggleMenu()">⋮</button>
+                                <div id="vr-menu-dropdown" style="display:none; position:absolute; right:0; top:40px; background:#fff; border:1px solid #ddd; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.12); z-index:10; width:220px;">
+                                    <button id="vr-menu-toggle-ref-btn" onclick="vrToggleReferenceInfo()" style="width:100%; text-align:left; padding:10px 14px; background:none; border:none; cursor:pointer; font-size:13px; color:#333;">Show Limits &amp; CC Reference Table</button>
+                                </div>
+                            </div>
                         </div>
                         <div style="overflow-x:auto;">
                             <table class="vr-table">
@@ -342,7 +349,7 @@
                             <div id="vr-final-vr" class="vr-calc-final-vr"></div>
                         </div>
 
-                        <div id="vr-reference-info" style="display:none;">
+                        <div id="vr-reference-info" class="vr-no-print" style="display:none;">
                             <div class="vr-calc-footer-note">
                                 <strong>MPERC / MP Electricity Rules के अनुसार Limits:</strong><br>
                                 • LT (Three Phase, 400V): ± 6%<br>
@@ -365,16 +372,18 @@
                             </table>
                         </div>
 
-                        <div class="vr-calc-seal-box">
-                            <h3 style="margin:0 0 12px; font-size:14px; color:#333;">Seal / Signature (shown on PDF)</h3>
+                        <div id="vr-seal-print-2" class="vr-print-only vr-calc-seal-print-row"></div>
+
+                        <div class="vr-calc-seal-box vr-no-print">
+                            <h3 style="margin:0 0 12px; font-size:14px; color:#333;">Seal / Signature (shown on both printed pages)</h3>
                             <div id="vr-seal-list"></div>
                         </div>
 
-                        <div style="display:flex; gap:10px; margin-top:22px; justify-content:center; flex-wrap:wrap;">
+                        <div class="vr-no-print" style="display:flex; gap:10px; margin-top:22px; justify-content:center; flex-wrap:wrap;">
                             <button class="btn vr-btn-primary" style="background:#dc2626;" onclick="vrDownloadPDF()">📄 Download PDF</button>
                             <button class="btn vr-btn-primary" style="background:#059669;" onclick="vrDownloadExcel()">📊 Download Excel</button>
                         </div>
-                        <div id="vr-download-status" style="display:none; margin-top:12px; text-align:center; font-size:12px; font-weight:800;"></div>
+                        <div id="vr-download-status" class="vr-no-print" style="display:none; margin-top:12px; text-align:center; font-size:12px; font-weight:800;"></div>
                     </div>
 
                 </div>

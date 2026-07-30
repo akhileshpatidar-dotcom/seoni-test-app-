@@ -12696,7 +12696,8 @@
             seals: [],
             draftSealDesignation: "Assistant Engineer (O&M)",
             draftSealLocation: "",
-            showReferenceInfo: false
+            showReferenceInfo: false,
+            menuOpen: false
         };
 
         function vrNextLabel(n) {
@@ -13093,6 +13094,21 @@
                 </div>`;
 
             container.innerHTML = html;
+            vrRenderSealPrintRows();
+        }
+
+        function vrRenderSealPrintRows() {
+            const seals = vrCalcState.seals;
+            const rowsHtml = seals.map((seal) => `
+                <div style="text-align:center; font-size:10px; line-height:1.5; flex:0 0 140px; width:140px;">
+                    <div style="font-weight:700;">${escapeHtml(seal.designation || "")}</div>
+                    <div>M.P.P.K.V.V. CO. LTD.</div>
+                    <div>${escapeHtml(seal.location || "")}</div>
+                </div>`).join("");
+            const print1 = document.getElementById("vr-seal-print-1");
+            const print2 = document.getElementById("vr-seal-print-2");
+            if (print1) print1.innerHTML = rowsHtml;
+            if (print2) print2.innerHTML = rowsHtml;
         }
 
         function vrRenderCalc() {
@@ -13104,13 +13120,19 @@
                 conductorSelect.innerHTML = calc.conductorOptions.map((opt) => `<option value="${opt.key}" ${opt.key === conductorType ? "selected" : ""}>${escapeHtml(opt.label)} (CC ${opt.cc})</option>`).join("");
             }
 
-            const dfRow = document.getElementById("vr-df-row");
-            if (dfRow) dfRow.style.display = calc.isHT ? "none" : "block";
-
             const title1 = document.getElementById("vr-report-title-1");
             const title2 = document.getElementById("vr-report-title-2");
             if (title1) title1.innerText = "VOLTAGE REGULATION CALCULATION – " + calc.reportTitleLine1;
             if (title2) title2.innerText = headerDescription || "";
+
+            const printTitle1a = document.getElementById("vr-print-title-1a");
+            const printTitle1b = document.getElementById("vr-print-title-1b");
+            const printTitle2a = document.getElementById("vr-print-title-2a");
+            const printTitle2b = document.getElementById("vr-print-title-2b");
+            if (printTitle1a) printTitle1a.innerText = "SINGLE LINE DIAGRAM – " + calc.reportTitleLine1;
+            if (printTitle1b) printTitle1b.innerText = headerDescription || "";
+            if (printTitle2a) printTitle2a.innerText = "VOLTAGE REGULATION CALCULATION – " + calc.reportTitleLine1;
+            if (printTitle2b) printTitle2b.innerText = headerDescription || "";
 
             const rowsBody = document.getElementById("vr-section-rows");
             if (rowsBody) {
@@ -13244,20 +13266,29 @@
             vrRenderSeals();
         }
 
+        function vrToggleMenu() {
+            vrCalcState.menuOpen = !vrCalcState.menuOpen;
+            const dd = document.getElementById("vr-menu-dropdown");
+            if (dd) dd.style.display = vrCalcState.menuOpen ? "block" : "none";
+        }
+
         function vrToggleReferenceInfo() {
             vrCalcState.showReferenceInfo = !vrCalcState.showReferenceInfo;
+            vrCalcState.menuOpen = false;
             const box = document.getElementById("vr-reference-info");
             if (box) box.style.display = vrCalcState.showReferenceInfo ? "block" : "none";
+            const dd = document.getElementById("vr-menu-dropdown");
+            if (dd) dd.style.display = "none";
+            const btn = document.getElementById("vr-menu-toggle-ref-btn");
+            if (btn) btn.innerText = vrCalcState.showReferenceInfo ? "Hide Limits & CC Reference Table" : "Show Limits & CC Reference Table";
         }
 
         function initVrCalculation() {
             const statusSel = document.getElementById("vr-line-status");
             const typeSel = document.getElementById("vr-line-type");
-            const dfSel = document.getElementById("vr-df-type");
             const headerEl = document.getElementById("vr-header-desc");
             if (statusSel) statusSel.value = vrCalcState.lineStatus;
             if (typeSel) typeSel.value = vrCalcState.lineType;
-            if (dfSel) dfSel.value = vrCalcState.dfType;
             if (headerEl) headerEl.value = vrCalcState.headerDescription;
             vrRenderNodeList();
             vrRenderSeals();
@@ -13274,74 +13305,7 @@
         }
 
         function vrDownloadPDF() {
-            try {
-                const calc = vrComputeCalc();
-                const { headerDescription, nodes } = vrCalcState;
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF({ orientation: "landscape" });
-                const pageW = doc.internal.pageSize.getWidth();
-
-                doc.setFontSize(14);
-                doc.setFont(undefined, "bold");
-                doc.text("VOLTAGE REGULATION CALCULATION – " + calc.reportTitleLine1, pageW / 2, 14, { align: "center" });
-                doc.setFontSize(10);
-                doc.setFont(undefined, "normal");
-                if (headerDescription) doc.text(headerDescription, pageW / 2, 20, { align: "center" });
-
-                let y = 26;
-                const flatCanvas = document.getElementById("vrFlatSldCanvas");
-                if (flatCanvas && nodes.length) {
-                    const imgW = Math.min(260, pageW - 20);
-                    const imgH = (flatCanvas.height / flatCanvas.width) * imgW;
-                    doc.addImage(flatCanvas.toDataURL("image/png"), "PNG", (pageW - imgW) / 2, y, imgW, imgH);
-                    y += imgH + 6;
-                }
-                const sldCanvas = document.getElementById("vrSldCanvas");
-                if (sldCanvas && nodes.length) {
-                    const imgW = Math.min(260, pageW - 20);
-                    const imgH = (sldCanvas.height / sldCanvas.width) * imgW;
-                    doc.addImage(sldCanvas.toDataURL("image/png"), "PNG", (pageW - imgW) / 2, y, imgW, imgH);
-                    y += imgH + 8;
-                }
-
-                doc.autoTable({
-                    startY: y,
-                    head: [["S.No", "Section", "Length (Km)", "KVA", "DF", "Conductor Constant", "KVA x Km", "VR (%)"]],
-                    body: calc.sectionRows.map((row) => [row.no, row.label, row.length, row.kva, row.df, row.cc, row.kvakm, row.vr]),
-                    foot: [["", calc.totalRowLabel, "", "", "", "", calc.totalKvaKm.toFixed(0), calc.totalVr.toFixed(2)]],
-                    theme: "grid",
-                    headStyles: { fillColor: [30, 64, 175], halign: "center" },
-                    footStyles: { fillColor: [219, 234, 254], textColor: [17, 17, 17], fontStyle: "bold" },
-                    styles: { fontSize: 8, halign: "center" }
-                });
-
-                let afterTableY = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : y) + 10;
-                doc.setFontSize(10);
-                doc.setFont(undefined, "bold");
-                doc.text(`% VR = ${calc.totalKvaKm.toFixed(0)} / (${calc.cc} x ${calc.df.toFixed(1)}) = ${calc.totalVr.toFixed(2)}%`, 14, afterTableY);
-                afterTableY += 6;
-                doc.setFont(undefined, "normal");
-                doc.text(`Diversity Factor Used: ${calc.df.toFixed(1)} (${calc.dfNote})`, 14, afterTableY);
-                afterTableY += 6;
-                doc.text(`Conductor: ${calc.conductorObj.label}`, 14, afterTableY);
-
-                if (vrCalcState.seals.length) {
-                    let sealX = pageW - 14;
-                    doc.setFontSize(9);
-                    vrCalcState.seals.forEach((seal) => {
-                        doc.text(String(seal.designation || ""), sealX, afterTableY, { align: "right" });
-                        doc.text("M.P.P.K.V.V. CO. LTD.", sealX, afterTableY + 5, { align: "right" });
-                        doc.text(String(seal.location || ""), sealX, afterTableY + 10, { align: "right" });
-                        sealX -= 60;
-                    });
-                }
-
-                doc.save(`Voltage_Regulation_${vrCalcState.lineType.toUpperCase()}.pdf`);
-                vrSetDownloadStatus("PDF download ho gaya", true);
-            } catch (err) {
-                showToast(err?.message || "PDF download nahi ho paya", false);
-                vrSetDownloadStatus("PDF download nahi ho paya", false);
-            }
+            window.print();
         }
 
         function vrDownloadExcel() {
