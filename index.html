@@ -244,6 +244,10 @@
                 <div class="vr-calc-wrap">
 
                     <div class="vr-calc-card vr-no-print">
+                        <div class="vr-calc-report-title">
+                            <h2 id="vr-report-title-1">VOLTAGE REGULATION CALCULATION</h2>
+                            <h3 id="vr-report-title-2"></h3>
+                        </div>
                         <label class="vr-calc-label">Header Description</label>
                         <input id="vr-header-desc" type="text" class="ivrs-input vr-calc-input" placeholder="e.g. 220 kV EHV Substation Seoni to 33/11 kV Substation Chhapara" oninput="vrSetHeaderDescription(this.value)">
                         <div class="vr-calc-config-row">
@@ -267,10 +271,6 @@
                                 <label class="vr-calc-label">Conductor</label>
                                 <select id="vr-conductor-type" class="ivrs-input vr-calc-input" onchange="vrSetConductorType(this.value)"></select>
                             </div>
-                        </div>
-                        <div class="vr-calc-report-title">
-                            <h2 id="vr-report-title-1">VOLTAGE REGULATION CALCULATION</h2>
-                            <h3 id="vr-report-title-2"></h3>
                         </div>
                     </div>
 
@@ -375,7 +375,7 @@
                         <div id="vr-seal-print-2" class="vr-print-only vr-calc-seal-print-row"></div>
 
                         <div class="vr-calc-seal-box vr-no-print">
-                            <h3 style="margin:0 0 12px; font-size:14px; color:#333;">Seal / Signature (shown on both printed pages)</h3>
+                            <h3 style="margin:0 0 12px; font-size:14px; color:#1e40af; font-weight:800;">Seal / Signature (shown on both printed pages)</h3>
                             <div id="vr-seal-list"></div>
                         </div>
 
