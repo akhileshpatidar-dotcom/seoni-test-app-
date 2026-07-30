@@ -255,7 +255,7 @@
         .vr-print-only { display: none; }
         @media print {
             html, body { height: auto !important; min-height: 0 !important; max-height: none !important; overflow: visible !important; display: block !important; }
-            .app-shell { height: auto !important; min-height: 0 !important; max-height: none !important; display: block !important; overflow: visible !important; }
+            .app-shell { width: 100% !important; max-width: none !important; height: auto !important; min-height: 0 !important; max-height: none !important; display: block !important; overflow: visible !important; box-shadow: none !important; }
             .view { display: none !important; }
             .view.active { display: block !important; overflow: visible !important; height: auto !important; min-height: 0 !important; max-height: none !important; flex: none !important; padding: 0 !important; }
             body * { visibility: hidden; }
@@ -275,9 +275,11 @@
             table.vr-table th, table.vr-table td { padding: 4px 6px !important; font-size: 11px !important; }
             .vr-calc-formula-block, .vr-calc-df-strip { page-break-inside: avoid; }
             .vr-calc-heading { margin: 4px 0 !important; font-size: 13px !important; }
-            .vr-calc-sld-container { padding: 2px 0 !important; }
-            #vrSldCanvas { max-height: 42vh !important; width: auto !important; max-width: 100% !important; }
-            #vrFlatSldCanvas { max-height: 20vh !important; width: auto !important; max-width: 55% !important; }
+            #vr-calculation-view [style*="overflow-x"] { overflow: visible !important; overflow-x: visible !important; }
+            .vr-calc-sld-container { padding: 2px 0 !important; overflow: visible !important; overflow-x: visible !important; }
+            #vrSldCanvas, #vrFlatSldCanvas { min-width: 0 !important; }
+            #vrSldCanvas { max-height: 42vh !important; width: 100% !important; max-width: 100% !important; }
+            #vrFlatSldCanvas { max-height: 20vh !important; width: 60% !important; max-width: 60% !important; }
             .vr-no-print, .vr-calc-card.vr-no-print { display: none !important; }
         }
         .vr-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
