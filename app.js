@@ -12694,7 +12694,9 @@
             dfType: "urban",
             nodes: [],
             seals: [],
-            showReferenceInfo: false
+            showReferenceInfo: false,
+            expandedNodeIndex: null,
+            addFormOpen: false
         };
 
         function vrNextLabel(n) {
@@ -13013,19 +13015,50 @@
             const totalVr = (cc * df) > 0 ? (totalKvaKm / (cc * df)) : 0;
             const limit = vrLimits[lineType] || 6;
             const exceedsLimit = totalVr > limit;
+            const limitText = lineType === "lt" ? ("± " + limit + "%") : ("+6% / -" + limit + "%");
             const totalRowLabel = nodes.length > 0 ? ("TOTAL (" + nodes[0].label + "-" + nodes[nodes.length - 1].label + ")") : "TOTAL";
             const sectionCombosCaption = sectionRows.map((r) => "(" + r.label + ")").join("") +
                 (nodes.length > 2 ? "(" + nodes[0].label + "-" + nodes[nodes.length - 1].label + ")" : "");
             const reportTitleLine1 = lineStatus + " " + (vrLineTypeLabels[lineType] || "33 kV") + " LINE";
 
-            return { conductorOptions, conductorObj, cc, isHT, df, dfNote, sectionRows, totalKvaKm, totalVr, limit, exceedsLimit, totalRowLabel, sectionCombosCaption, reportTitleLine1 };
+            return { conductorOptions, conductorObj, cc, isHT, df, dfNote, sectionRows, totalKvaKm, totalVr, limit, exceedsLimit, limitText, totalRowLabel, sectionCombosCaption, reportTitleLine1 };
+        }
+
+        function vrToggleAddNodeForm() {
+            vrCalcState.addFormOpen = !vrCalcState.addFormOpen;
+            vrCalcState.expandedNodeIndex = null;
+            vrRenderNodeList();
+        }
+
+        function vrExpandNode(index) {
+            vrCalcState.expandedNodeIndex = vrCalcState.expandedNodeIndex === index ? null : index;
+            vrCalcState.addFormOpen = false;
+            vrRenderNodeList();
         }
 
         function vrRenderNodeList() {
-            const container = document.getElementById("vr-node-list");
-            if (!container) return;
+            const stepper = document.getElementById("vr-node-stepper");
+            const expandedBox = document.getElementById("vr-node-expanded");
+            const addForm = document.getElementById("vr-add-node-form");
+            const addToggleBtn = document.getElementById("vr-add-node-toggle-btn");
+            const countTag = document.getElementById("vr-node-count");
+            if (!stepper || !expandedBox) return;
             const nodes = vrCalcState.nodes;
             const isProposedStatus = vrCalcState.lineStatus === "PROPOSED";
+
+            if (countTag) countTag.innerText = nodes.length ? (nodes.length + " point" + (nodes.length > 1 ? "s" : "")) : "";
+
+            if (!nodes.length) {
+                stepper.innerHTML = '<div style="text-align:center; padding:10px; color:#888; font-size:13px;">No points added yet.</div>';
+            } else {
+                stepper.innerHTML = nodes.map((node, i) => {
+                    const active = vrCalcState.expandedNodeIndex === i;
+                    let html = `<div class="vr-calc-stepper-node${node.isProposed ? " proposed" : ""}${active ? " active" : ""}" onclick="vrExpandNode(${i})" title="${escapeHtml(node.name)}">${escapeHtml(node.label)}</div>`;
+                    if (i < nodes.length - 1) html += '<div class="vr-calc-stepper-line"></div>';
+                    return html;
+                }).join("");
+            }
+
             const nameLabelEl = document.getElementById("vr-draft-name-label");
             const kvaWrap = document.getElementById("vr-draft-kva-wrap");
             const distWrap = document.getElementById("vr-draft-dist-wrap");
@@ -13033,30 +13066,33 @@
             if (kvaWrap) kvaWrap.style.display = nodes.length > 0 ? "flex" : "none";
             if (distWrap) distWrap.style.display = nodes.length > 0 ? "flex" : "none";
 
-            if (!nodes.length) {
-                container.innerHTML = '<div style="text-align:center; padding:20px; color:#888; font-size:13px;">No points added yet — add the first point using the form above.</div>';
+            if (addForm) addForm.style.display = vrCalcState.addFormOpen ? "flex" : "none";
+            if (addToggleBtn) addToggleBtn.innerText = vrCalcState.addFormOpen ? "✕ Cancel" : "+ Add point";
+
+            const expandedIndex = vrCalcState.expandedNodeIndex;
+            const node = expandedIndex !== null ? nodes[expandedIndex] : null;
+            if (!node) {
+                expandedBox.innerHTML = "";
                 return;
             }
-
-            container.innerHTML = nodes.map((node, i) => {
-                const showDistance = i > 0;
-                let html = '<div class="vr-calc-node-row">';
-                html += `<span class="vr-calc-node-label">${escapeHtml(node.label)}</span>`;
-                html += `<div class="vr-calc-field name"><label>Point Name</label><input type="text" value="${escapeHtml(node.name)}" data-index="${i}" data-field="name" onchange="vrHandleNodeChange(this)"></div>`;
-                if (showDistance) {
-                    html += `<div class="vr-calc-field kva"><label>Load (KVA)</label><input type="number" value="${node.kva}" data-index="${i}" data-field="kva" onchange="vrHandleNodeChange(this)"></div>`;
-                    html += `<div class="vr-calc-field dist"><label>Distance (Km)</label><input type="number" step="0.1" value="${node.distance}" data-index="${i}" data-field="distance" onchange="vrHandleNodeChange(this)"></div>`;
-                }
-                if (isProposedStatus) {
-                    html += `<label class="vr-calc-proposed-check"><input type="checkbox" ${node.isProposed ? "checked" : ""} data-index="${i}" data-field="isProposed" onchange="vrHandleNodeChange(this)"> Proposed Load</label>`;
-                }
-                if (node.isProposed) {
-                    html += `<div class="vr-calc-field name"><label>Proposed Description</label><input type="text" placeholder="e.g. Rice Mill" value="${escapeHtml(node.proposedNote || "")}" data-index="${i}" data-field="proposedNote" onchange="vrHandleNodeChange(this)"></div>`;
-                }
-                html += `<button class="vr-calc-remove-btn" onclick="vrRemoveNode(${i})">✕ Remove</button>`;
+            const showDistance = expandedIndex > 0;
+            let html = '<div class="vr-calc-node-expanded-card">';
+            html += `<div class="vr-calc-field name"><label>Point Name</label><input type="text" value="${escapeHtml(node.name)}" data-index="${expandedIndex}" data-field="name" onchange="vrHandleNodeChange(this)"></div>`;
+            if (showDistance) {
+                html += '<div class="vr-calc-node-expanded-row">';
+                html += `<div class="vr-calc-field kva" style="flex:1;"><label>Load (KVA)</label><input type="number" value="${node.kva}" data-index="${expandedIndex}" data-field="kva" onchange="vrHandleNodeChange(this)"></div>`;
+                html += `<div class="vr-calc-field dist" style="flex:1;"><label>Distance (Km)</label><input type="number" step="0.1" value="${node.distance}" data-index="${expandedIndex}" data-field="distance" onchange="vrHandleNodeChange(this)"></div>`;
                 html += "</div>";
-                return html;
-            }).join("");
+            }
+            if (isProposedStatus) {
+                html += `<label class="vr-calc-proposed-check"><input type="checkbox" ${node.isProposed ? "checked" : ""} data-index="${expandedIndex}" data-field="isProposed" onchange="vrHandleNodeChange(this)"> Proposed Load</label>`;
+            }
+            if (node.isProposed) {
+                html += `<div class="vr-calc-field name"><label>Proposed Description</label><input type="text" placeholder="e.g. Rice Mill" value="${escapeHtml(node.proposedNote || "")}" data-index="${expandedIndex}" data-field="proposedNote" onchange="vrHandleNodeChange(this)"></div>`;
+            }
+            html += `<button class="vr-calc-node-remove-btn" onclick="vrRemoveNode(${expandedIndex})">✕ Remove Point</button>`;
+            html += "</div>";
+            expandedBox.innerHTML = html;
         }
 
         function vrRenderSeals() {
@@ -13090,32 +13126,41 @@
 
             const conductorSelect = document.getElementById("vr-conductor-type");
             if (conductorSelect) {
-                conductorSelect.innerHTML = calc.conductorOptions.map((opt) => `<option value="${opt.key}" ${opt.key === conductorType ? "selected" : ""}>${escapeHtml(opt.label)} (CC ${opt.cc})</option>`).join("");
+                conductorSelect.innerHTML = calc.conductorOptions.map((opt) => `<option value="${opt.key}" ${opt.key === conductorType ? "selected" : ""}>${escapeHtml(opt.label)}</option>`).join("");
             }
 
-            const dfRow = document.getElementById("vr-df-row");
-            if (dfRow) dfRow.style.display = calc.isHT ? "none" : "block";
+            const dfChip = document.getElementById("vr-df-chip");
+            if (dfChip) dfChip.style.display = calc.isHT ? "none" : "block";
+
+            const resultValueEl = document.getElementById("vr-result-value");
+            const resultBadgeEl = document.getElementById("vr-result-badge");
+            const resultSubEl = document.getElementById("vr-result-sub");
+            if (resultValueEl) resultValueEl.innerText = calc.totalVr.toFixed(2) + "%";
+            if (resultBadgeEl) {
+                resultBadgeEl.innerText = nodes.length < 2 ? "Add points" : (calc.exceedsLimit ? "Exceeds limit" : "Within limit");
+                resultBadgeEl.className = "vr-calc-badge " + (calc.exceedsLimit ? "exceed" : "ok");
+            }
+            if (resultSubEl) resultSubEl.innerText = `Limit for ${vrLineTypeLabels[lineType] || "33 kV"}: ${calc.limitText}`;
 
             const title1 = document.getElementById("vr-report-title-1");
             const title2 = document.getElementById("vr-report-title-2");
             if (title1) title1.innerText = "VOLTAGE REGULATION CALCULATION – " + calc.reportTitleLine1;
             if (title2) title2.innerText = headerDescription || "";
 
-            const rowsBody = document.getElementById("vr-section-rows");
-            if (rowsBody) {
-                let html = calc.sectionRows.map((row) => `
-                    <tr>
-                        <td>${row.no}</td>
-                        <td class="vr-section-name">${escapeHtml(row.label)}</td>
-                        <td>${row.length}</td>
-                        <td>${row.kva}</td>
-                        <td>${row.df}</td>
-                        <td>${row.cc}</td>
-                        <td>${row.kvakm}</td>
-                        <td>${row.vr}</td>
-                    </tr>`).join("");
-                html += `<tr class="vr-total-row"><td colspan="6">${escapeHtml(calc.totalRowLabel)}</td><td>${calc.totalKvaKm.toFixed(0)}</td><td>${calc.totalVr.toFixed(2)}</td></tr>`;
-                rowsBody.innerHTML = html;
+            const sectionListEl = document.getElementById("vr-section-rows-list");
+            if (sectionListEl) {
+                if (!calc.sectionRows.length) {
+                    sectionListEl.innerHTML = '<div style="text-align:center; padding:16px; color:#888; font-size:13px;">Points add karne ke baad section results yaha dikhenge.</div>';
+                } else {
+                    let html = calc.sectionRows.map((row) => `
+                        <div class="vr-calc-section-row">
+                            <span class="vr-sec-label">${escapeHtml(row.label)}</span>
+                            <span class="vr-sec-meta">${row.length} km · ${row.kva} KVA</span>
+                            <span class="vr-sec-value">${row.vr}%</span>
+                        </div>`).join("");
+                    html += `<div class="vr-calc-section-row total"><span class="vr-sec-label">${escapeHtml(calc.totalRowLabel)}</span><span class="vr-sec-meta">KVA×Km ${calc.totalKvaKm.toFixed(0)}</span><span class="vr-sec-value">${calc.totalVr.toFixed(2)}%</span></div>`;
+                    sectionListEl.innerHTML = html;
+                }
             }
 
             const dfValueEl = document.getElementById("vr-df-value");
@@ -13186,6 +13231,7 @@
             if (nameEl) nameEl.value = "";
             if (kvaEl) kvaEl.value = "";
             if (distEl) distEl.value = "";
+            vrCalcState.addFormOpen = false;
             vrRenderNodeList();
             vrRenderCalc();
         }
@@ -13208,6 +13254,7 @@
         function vrRemoveNode(index) {
             vrCalcState.nodes.splice(index, 1);
             vrCalcState.nodes.forEach((n, i) => { n.label = vrNextLabel(i); });
+            vrCalcState.expandedNodeIndex = null;
             vrRenderNodeList();
             vrRenderCalc();
         }
