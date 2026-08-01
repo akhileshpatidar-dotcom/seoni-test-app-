@@ -9304,6 +9304,16 @@
             switchView("revenue-hq-village");
         }
 
+        function openRevenueTargetAchievement() {
+            closeHeaderMenu();
+            switchView("revenue-target-achievement");
+        }
+
+        function openRevenueTopDefaulters() {
+            closeHeaderMenu();
+            switchView("revenue-top-defaulters");
+        }
+
         function openRevenueCashReconcile() {
             closeHeaderMenu();
             switchView("revenue-cash-reconcile");
@@ -12458,6 +12468,464 @@
         }
 
         // =====================================================================
+        // TARGET VS ACHIEVEMENT % (Target = Net Bill, Achievement = Paid via Cash
+        // List). Existing buildRevenueHqVillagePaidUnpaidTree() ka hi paidAmountTotal/
+        // unpaidAmountTotal reuse karte hain - Target = paidAmountTotal + unpaidAmountTotal,
+        // Achievement = paidAmountTotal. Sirf summary chahiye, koi consumer list nahi.
+        // =====================================================================
+        let revenueTargetMode = "DAILY";
+        let revenueTargetTree = [];
+        let revenueTargetDrillPath = [];
+        let revenueTargetRenderToken = 0;
+
+        function initRevenueTargetAchievement() {
+            const dateInput = document.getElementById("revenue-target-date");
+            const monthInput = document.getElementById("revenue-target-month");
+            if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
+            if (monthInput && !monthInput.value) monthInput.value = getTodayIsoDate().slice(0, 7);
+            revenueTargetDrillPath = [];
+            setRevenueTargetMode(revenueTargetMode || "DAILY");
+        }
+
+        function setRevenueTargetMode(mode) {
+            revenueTargetMode = mode === "MONTHLY" ? "MONTHLY" : "DAILY";
+            const dateInput = document.getElementById("revenue-target-date");
+            const monthInput = document.getElementById("revenue-target-month");
+            const dateBtn = document.getElementById("revenue-target-date-mode-btn");
+            const monthBtn = document.getElementById("revenue-target-month-mode-btn");
+            if (dateInput) dateInput.style.display = revenueTargetMode === "DAILY" ? "block" : "none";
+            if (monthInput) monthInput.style.display = revenueTargetMode === "MONTHLY" ? "block" : "none";
+            if (dateBtn) {
+                dateBtn.style.background = revenueTargetMode === "DAILY" ? "#1d4ed8" : "#dbeafe";
+                dateBtn.style.color = revenueTargetMode === "DAILY" ? "#ffffff" : "#1d4ed8";
+            }
+            if (monthBtn) {
+                monthBtn.style.background = revenueTargetMode === "MONTHLY" ? "#1d4ed8" : "#dbeafe";
+                monthBtn.style.color = revenueTargetMode === "MONTHLY" ? "#ffffff" : "#1d4ed8";
+            }
+            revenueTargetDrillPath = [];
+            renderRevenueTargetAchievement();
+        }
+
+        function getRevenueAchievementPct(paidAmount, target) {
+            if (!target) return 0;
+            return Math.round((paidAmount / target) * 1000) / 10;
+        }
+
+        function findRevenueTargetNode(nodes, name) {
+            return (nodes || []).find((n) => n.name === name && n.type !== "SUB_TOTAL" && n.type !== "SUBDN_TOTAL");
+        }
+
+        function getRevenueTargetCurrentRows() {
+            let nodes = revenueTargetTree;
+            for (const step of revenueTargetDrillPath) {
+                const node = findRevenueTargetNode(nodes, step);
+                if (!node || !node.children) return [];
+                nodes = node.children;
+            }
+            return nodes;
+        }
+
+        function getRevenueTargetColumnLabel() {
+            const depth = revenueTargetDrillPath.length;
+            if (activeViewLevel === "DC") return depth === 0 ? "HQ NAME" : "VILLAGE";
+            if (depth === 0) return "DC NAME";
+            if (depth === 1) return "HQ NAME";
+            return "VILLAGE";
+        }
+
+        function pushRevenueTargetDrill(el) {
+            const name = el?.dataset?.drillName;
+            if (!name) return;
+            revenueTargetDrillPath.push(name);
+            const tableBox = document.getElementById("revenue-target-table");
+            if (tableBox) tableBox.innerHTML = renderRevenueTargetTable();
+        }
+
+        function popRevenueTargetDrill() {
+            revenueTargetDrillPath.pop();
+            const tableBox = document.getElementById("revenue-target-table");
+            if (tableBox) tableBox.innerHTML = renderRevenueTargetTable();
+        }
+
+        function renderRevenueTargetTable() {
+            const rows = getRevenueTargetCurrentRows();
+            const colLabel = getRevenueTargetColumnLabel();
+            const depth = revenueTargetDrillPath.length;
+            const canDrillDeeper = activeViewLevel === "DC" ? depth < 1 : depth < 2;
+
+            let breadcrumbHtml = "";
+            if (depth > 0) {
+                const crumbLabel = revenueTargetDrillPath.join(" › ");
+                breadcrumbHtml = `<div onclick="popRevenueTargetDrill()" style="display:flex; align-items:center; gap:6px; padding:9px 10px; margin-bottom:6px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:10px; font-size:0.68rem; font-weight:900; color:#1d4ed8; cursor:pointer;">⬅ ${escapeHtml(crumbLabel)} - Back</div>`;
+            }
+
+            let html = `<div class="summary-wrapper">${breadcrumbHtml}<div class="summary-table-header" style="grid-template-columns: 1.2fr 0.95fr 0.95fr 0.7fr;"><div>${colLabel}</div><div>TARGET</div><div>ACHIEVED</div><div>%</div></div>`;
+
+            if (!rows || !rows.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is scope me data nahi mila.</div></div>`;
+            } else {
+                rows.forEach((row) => {
+                    const rowClass = row.type === "SUB_TOTAL" ? " blue-bold" : (row.type === "SUBDN_TOTAL" ? " subdn-bold" : "");
+                    const clickable = canDrillDeeper && !row.type && row.children && row.children.length;
+                    const attrs = clickable ? ` data-drill-name="${escapeHtml(row.name)}" onclick="pushRevenueTargetDrill(this)" style="cursor:pointer;"` : "";
+                    const nameCell = clickable ? `${escapeHtml(row.name)} ›` : escapeHtml(row.name);
+                    const target = Number(row.paidAmountTotal || 0) + Number(row.unpaidAmountTotal || 0);
+                    const pct = getRevenueAchievementPct(row.paidAmountTotal, target);
+                    const pctColor = pct >= 75 ? "#166534" : (pct >= 40 ? "#b45309" : "#9f1239");
+                    html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: 1.2fr 0.95fr 0.95fr 0.7fr;"${attrs}><div>${nameCell}</div><div class="font-black">${formatProgressReportAmount(target)}</div><div class="text-emerald-700 font-black">${formatProgressReportAmount(row.paidAmountTotal)}</div><div style="color:${pctColor}; font-weight:950;">${pct}%</div></div>`;
+                });
+            }
+
+            const totals = (rows || []).filter((row) => row.type !== "SUB_TOTAL" && row.type !== "SUBDN_TOTAL").reduce((acc, row) => {
+                acc.paidAmountTotal += Number(row.paidAmountTotal || 0);
+                acc.unpaidAmountTotal += Number(row.unpaidAmountTotal || 0);
+                return acc;
+            }, { paidAmountTotal: 0, unpaidAmountTotal: 0 });
+            const grandTarget = totals.paidAmountTotal + totals.unpaidAmountTotal;
+            const grandPct = getRevenueAchievementPct(totals.paidAmountTotal, grandTarget);
+
+            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL (${colLabel} SCOPE)</div><div class="mt-2 grid grid-cols-3 gap-2 text-center text-[11px] font-black"><div class="rounded-xl bg-slate-100 border border-slate-200 p-2">Target<br>${formatProgressReportAmount(grandTarget)}</div><div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2">Achieved<br>${formatProgressReportAmount(totals.paidAmountTotal)}</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2">%<br>${grandPct}%</div></div></div>`;
+            return html;
+        }
+
+        function renderRevenueTargetSummaryCardsHtml(totals) {
+            const target = totals.paidAmountTotal + totals.unpaidAmountTotal;
+            const pct = getRevenueAchievementPct(totals.paidAmountTotal, target);
+            const pctColor = pct >= 75 ? "#166534" : (pct >= 40 ? "#b45309" : "#9f1239");
+            return `
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; max-width:360px; margin:12px auto 0;">
+                    <div style="background:#f1f5f9; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#64748b; text-transform:uppercase;">Target (Net Bill)</div><div style="font-size:0.9rem; font-weight:950; color:#0f172a; margin-top:3px;">${formatProgressReportAmount(target)}</div></div>
+                    <div style="background:#ecfdf5; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#166534; text-transform:uppercase;">Achieved</div><div style="font-size:0.9rem; font-weight:950; color:#166534; margin-top:3px;">${formatProgressReportAmount(totals.paidAmountTotal)}</div></div>
+                    <div style="background:#eff6ff; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#1d4ed8; text-transform:uppercase;">Achievement</div><div style="font-size:1.05rem; font-weight:950; color:${pctColor}; margin-top:3px;">${pct}%</div></div>
+                </div>
+                <div style="font-size:0.6rem; font-weight:950; color:#1d4ed8; text-align:center; margin:14px auto 0; max-width:360px; text-transform:uppercase;">${activeViewLevel === "DC" ? "HQ Wise" : "DC Wise"} (tap karke aage drill down karein)</div>
+            `;
+        }
+
+        async function renderRevenueTargetAchievement() {
+            const tableBox = document.getElementById("revenue-target-table");
+            const summaryBox = document.getElementById("revenue-target-summary");
+            const statusBox = document.getElementById("revenue-target-download-status");
+            if (!tableBox) return;
+            const renderToken = ++revenueTargetRenderToken;
+            if (statusBox) statusBox.style.display = "none";
+            if (summaryBox) summaryBox.innerHTML = "";
+            revenueTargetTree = [];
+            revenueTargetDrillPath = [];
+            if (activeDC) activeViewLevel = "DC";
+            else if (activeDiv) activeViewLevel = "DIVISION";
+            else activeViewLevel = "CIRCLE";
+            const isRenderValid = () => renderToken === revenueTargetRenderToken && document.getElementById("revenue-target-achievement-view")?.classList.contains("active");
+            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
+            try {
+                const targetDcs = getRevenueCategoryTargetDcs();
+                await Promise.all([
+                    ensureRevenueCategoryMasterDataLoaded(targetDcs),
+                    ensureRevenueCategoryRawPaymentRowsLoaded(),
+                    warmRevenueCategoryUploadedPaidCache()
+                ]);
+                if (!isRenderValid()) { progress.stop(); return; }
+                const mode = revenueTargetMode === "MONTHLY" ? "MONTHLY" : "DAILY";
+                const filterValue = mode === "MONTHLY"
+                    ? (document.getElementById("revenue-target-month")?.value || getTodayIsoDate().slice(0, 7))
+                    : (document.getElementById("revenue-target-date")?.value || getTodayIsoDate());
+                const tree = buildRevenueHqVillagePaidUnpaidTree(mode, filterValue);
+                revenueTargetTree = tree;
+                revenueTargetDrillPath = [];
+                const totals = (tree || []).filter((row) => row.type !== "SUB_TOTAL" && row.type !== "SUBDN_TOTAL").reduce((acc, row) => {
+                    acc.paidAmountTotal += Number(row.paidAmountTotal || 0);
+                    acc.unpaidAmountTotal += Number(row.unpaidAmountTotal || 0);
+                    return acc;
+                }, { paidAmountTotal: 0, unpaidAmountTotal: 0 });
+                await progress.finish();
+                if (!isRenderValid()) return;
+                if (summaryBox) summaryBox.innerHTML = renderRevenueTargetSummaryCardsHtml(totals);
+                tableBox.innerHTML = renderRevenueTargetTable();
+            } catch (error) {
+                progress.stop();
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#fff1f2";
+                    statusBox.style.borderColor = "#fda4af";
+                    statusBox.style.color = "#991b1b";
+                    statusBox.innerText = "Report load nahi ho payi";
+                }
+            }
+        }
+
+        function flattenRevenueTargetRows() {
+            const output = [];
+            const walk = (nodes, path) => {
+                (nodes || []).forEach((node) => {
+                    if (node.type === "SUB_TOTAL" || node.type === "SUBDN_TOTAL") return;
+                    const currentPath = [...path, node.name];
+                    if (node.children && node.children.length) {
+                        walk(node.children, currentPath);
+                    } else {
+                        output.push({ path: currentPath, paidAmountTotal: node.paidAmountTotal, unpaidAmountTotal: node.unpaidAmountTotal });
+                    }
+                });
+            };
+            walk(revenueTargetTree, []);
+            return output;
+        }
+
+        function getRevenueTargetReportTitle() {
+            const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+            return `Target vs Achievement Summary - ${scope}`;
+        }
+
+        function getRevenueTargetPeriodDisplay() {
+            if (revenueTargetMode === "MONTHLY") {
+                return formatRevenueMonthYear(document.getElementById("revenue-target-month")?.value || getTodayIsoDate().slice(0, 7));
+            }
+            return formatRevenueDateIndian(normalizeRevenueReportDate(document.getElementById("revenue-target-date")?.value || getCurrentDateDDMMYYYY()));
+        }
+
+        function setRevenueTargetDownloadState(isLoading, message = "", ok = true) {
+            const pdfBtn = document.getElementById("revenue-target-pdf-btn");
+            const excelBtn = document.getElementById("revenue-target-excel-btn");
+            const statusBox = document.getElementById("revenue-target-download-status");
+            const statusMessage = normalizeActionStatusMessage(message, isLoading, ok);
+            [pdfBtn, excelBtn].forEach((btn) => {
+                if (!btn) return;
+                btn.disabled = isLoading;
+                btn.style.opacity = isLoading ? "0.65" : "1";
+                btn.style.pointerEvents = isLoading ? "none" : "auto";
+            });
+            if (!statusBox) return;
+            statusBox.style.display = statusMessage ? "block" : "none";
+            statusBox.style.background = ok ? "#eff6ff" : "#fff1f2";
+            statusBox.style.borderColor = ok ? "#93c5fd" : "#fda4af";
+            statusBox.style.color = ok ? "#1d4ed8" : "#991b1b";
+            statusBox.innerHTML = escapeHtml(statusMessage);
+        }
+
+        function downloadRevenueTargetAchievement(type) {
+            const flatRows = flattenRevenueTargetRows();
+            if (!flatRows.length) return showToast("Report ke liye data nahi hai", false);
+            setRevenueTargetDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
+            try {
+                const headers = activeViewLevel === "DC"
+                    ? ["HQ NAME", "VILLAGE", "TARGET", "ACHIEVED", "%"]
+                    : ["DC NAME", "HQ NAME", "VILLAGE", "TARGET", "ACHIEVED", "%"];
+                const rows = flatRows.map((r) => {
+                    const target = Number(r.paidAmountTotal || 0) + Number(r.unpaidAmountTotal || 0);
+                    return [...r.path, formatProgressReportAmount(target), formatProgressReportAmount(r.paidAmountTotal), `${getRevenueAchievementPct(r.paidAmountTotal, target)}%`];
+                });
+                const reportTitle = getRevenueTargetReportTitle();
+                const scopeLine = `Scope: ${activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? `Division - ${activeDiv}` : "Circle - SEONI CIRCLE")}`;
+                const periodLine = `Period: ${getRevenueTargetPeriodDisplay()}`;
+                const suffix = revenueTargetMode === "MONTHLY"
+                    ? (document.getElementById("revenue-target-month")?.value || getTodayIsoDate().slice(0, 7))
+                    : normalizeRevenueReportDate(document.getElementById("revenue-target-date")?.value || getCurrentDateDDMMYYYY());
+                const fileName = `${reportTitle}-${suffix}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (type === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setRevenueTargetDownloadState(false, "PDF library load nahi hui", false); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
+                    doc.text(periodLine, 148, 25, { align: "center" });
+                    doc.autoTable({ startY: 31, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                    setRevenueTargetDownloadState(false, "PDF download ho chuki hai", true);
+                    return;
+                }
+                const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                const csv = [[reportTitle], [scopeLine], [periodLine], [], headers, ...rows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = `${fileName}.csv`;
+                link.click();
+                setRevenueTargetDownloadState(false, "Excel download ho chuki hai", true);
+            } catch (error) {
+                setRevenueTargetDownloadState(false, "Download nahi ho paya", false);
+                showToast(error?.message || "Report download nahi ho payi", false);
+            }
+        }
+
+        // =====================================================================
+        // TOP DEFAULTERS (Top 20 / Top 50) - Cash List ke baad jo balance/pending
+        // reh gaya (Net Bill, jo consumer abhi tak unpaid hai), usi ko sabse zyada
+        // bakaya wale order me sort karke dikhate hain. Same buildRevenueHqVillage-
+        // ConsumerRows() data reuse karte hain jo particular-list section use karta hai.
+        // =====================================================================
+        let revenueDefaultersLimit = 20;
+        let revenueDefaultersRows = [];
+        let revenueDefaultersRenderToken = 0;
+
+        function initRevenueTopDefaulters() {
+            const dateInput = document.getElementById("revenue-defaulters-date");
+            if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
+            setRevenueDefaultersButtonState();
+            renderRevenueTopDefaulters();
+        }
+
+        function setRevenueDefaultersButtonState() {
+            const top20Btn = document.getElementById("revenue-defaulters-top20-btn");
+            const top50Btn = document.getElementById("revenue-defaulters-top50-btn");
+            if (top20Btn) {
+                top20Btn.style.background = revenueDefaultersLimit === 20 ? "#9f1239" : "#ffe4e6";
+                top20Btn.style.color = revenueDefaultersLimit === 20 ? "#ffffff" : "#9f1239";
+            }
+            if (top50Btn) {
+                top50Btn.style.background = revenueDefaultersLimit === 50 ? "#9f1239" : "#ffe4e6";
+                top50Btn.style.color = revenueDefaultersLimit === 50 ? "#ffffff" : "#9f1239";
+            }
+        }
+
+        function setRevenueDefaultersLimit(limit) {
+            revenueDefaultersLimit = limit === 50 ? 50 : 20;
+            setRevenueDefaultersButtonState();
+            renderRevenueTopDefaulters();
+        }
+
+        function onRevenueDefaultersHqChange() {
+            const hqValue = document.getElementById("revenue-defaulters-hq")?.value || "";
+            const allRows = revenueDefaultersRows;
+            const scoped = allRows.filter((row) => !hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue));
+            populateRevenueSelect(document.getElementById("revenue-defaulters-village"), getRevenueUniqueValues(scoped, "village"), "All Villages");
+            renderRevenueDefaultersTable();
+        }
+
+        function getRevenueDefaultersFilteredRows() {
+            const hqValue = document.getElementById("revenue-defaulters-hq")?.value || "";
+            const villageValue = document.getElementById("revenue-defaulters-village")?.value || "";
+            return revenueDefaultersRows
+                .filter((row) => (
+                    (!hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue))
+                    && (!villageValue || normalizeLookupValue(row.village) === normalizeLookupValue(villageValue))
+                ))
+                .sort((a, b) => b.pendingAmount - a.pendingAmount)
+                .slice(0, revenueDefaultersLimit);
+        }
+
+        function renderRevenueDefaultersTable() {
+            const statusBox = document.getElementById("revenue-defaulters-status-box");
+            const tableBox = document.getElementById("revenue-defaulters-table");
+            if (!statusBox || !tableBox) return;
+            const rows = getRevenueDefaultersFilteredRows();
+            const hqValue = document.getElementById("revenue-defaulters-hq")?.value || "";
+            const villageValue = document.getElementById("revenue-defaulters-village")?.value || "";
+            statusBox.innerHTML = `Showing: <strong>Top ${revenueDefaultersLimit}</strong> | HQ: ${escapeHtml(hqValue || "All HQ")} | Village: ${escapeHtml(villageValue || "All Villages")} | Found: ${rows.length}`;
+            if (!rows.length) {
+                tableBox.innerHTML = `<div style="background:#ecfdf5; border:1.5px solid #86efac; border-radius:14px; padding:14px; color:#047857; font-size:0.8rem; font-weight:900; text-align:center; margin-top:10px;">Is filter me koi bakaya consumer nahi mila.</div>`;
+                return;
+            }
+            let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 0.4fr 1.3fr 0.85fr 1fr;"><div>#</div><div>CONSUMER</div><div>MOBILE</div><div>PENDING</div></div>`;
+            rows.forEach((row, index) => {
+                html += `<div class="summary-table-row" style="grid-template-columns: 0.4fr 1.3fr 0.85fr 1fr;"><div class="font-black">${index + 1}</div><div>${escapeHtml(row.consumerName || "-")}<br><span style="font-size:0.58rem; color:#64748b;">${escapeHtml(row.hqName)} / ${escapeHtml(row.village)}</span></div><div style="font-size:0.68rem;">${escapeHtml(row.mobileNo || "-")}</div><div class="text-rose-700 font-black">${formatProgressReportAmount(row.pendingAmount)}</div></div>`;
+            });
+            html += `</div>`;
+            tableBox.innerHTML = html;
+        }
+
+        async function renderRevenueTopDefaulters() {
+            const tableBox = document.getElementById("revenue-defaulters-table");
+            const statusBox = document.getElementById("revenue-defaulters-status-box");
+            const downloadStatusBox = document.getElementById("revenue-defaulters-download-status");
+            if (!tableBox) return;
+            const renderToken = ++revenueDefaultersRenderToken;
+            if (downloadStatusBox) downloadStatusBox.style.display = "none";
+            revenueDefaultersRows = [];
+            if (activeDC) activeViewLevel = "DC";
+            else if (activeDiv) activeViewLevel = "DIVISION";
+            else activeViewLevel = "CIRCLE";
+            const isRenderValid = () => renderToken === revenueDefaultersRenderToken && document.getElementById("revenue-top-defaulters-view")?.classList.contains("active");
+            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
+            try {
+                const targetDcs = getRevenueCategoryTargetDcs();
+                await Promise.all([
+                    ensureRevenueCategoryMasterDataLoaded(targetDcs),
+                    ensureRevenueCategoryRawPaymentRowsLoaded(),
+                    warmRevenueCategoryUploadedPaidCache()
+                ]);
+                if (!isRenderValid()) { progress.stop(); return; }
+                const dateValue = document.getElementById("revenue-defaulters-date")?.value || getTodayIsoDate();
+                const consumerRows = buildRevenueHqVillageConsumerRows("DAILY", dateValue);
+                revenueDefaultersRows = consumerRows
+                    .filter((row) => !row.paid)
+                    .map((row) => ({ ...row, pendingAmount: parseRevenuePaidAmount(row.netBill || 0) }))
+                    .filter((row) => row.pendingAmount > 0);
+                await progress.finish();
+                if (!isRenderValid()) return;
+                const hqSelect = document.getElementById("revenue-defaulters-hq");
+                const villageSelect = document.getElementById("revenue-defaulters-village");
+                populateRevenueSelect(hqSelect, getRevenueUniqueValues(revenueDefaultersRows, "hqName"), "All HQ");
+                populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenueDefaultersRows, "village"), "All Villages");
+                if (hqSelect) hqSelect.value = "";
+                if (villageSelect) villageSelect.value = "";
+                renderRevenueDefaultersTable();
+            } catch (error) {
+                progress.stop();
+                if (statusBox) statusBox.innerText = "Report load nahi ho payi";
+            }
+        }
+
+        function getRevenueDefaultersReportTitle() {
+            const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+            return `Top ${revenueDefaultersLimit} Defaulters - ${scope}`;
+        }
+
+        function setRevenueDefaultersDownloadState(isLoading, message = "", ok = true) {
+            const pdfBtn = document.getElementById("revenue-defaulters-pdf-btn");
+            const excelBtn = document.getElementById("revenue-defaulters-excel-btn");
+            const statusBox = document.getElementById("revenue-defaulters-download-status");
+            const statusMessage = normalizeActionStatusMessage(message, isLoading, ok);
+            [pdfBtn, excelBtn].forEach((btn) => {
+                if (!btn) return;
+                btn.disabled = isLoading;
+                btn.style.opacity = isLoading ? "0.65" : "1";
+                btn.style.pointerEvents = isLoading ? "none" : "auto";
+            });
+            if (!statusBox) return;
+            statusBox.style.display = statusMessage ? "block" : "none";
+            statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
+            statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
+            statusBox.style.color = ok ? "#166534" : "#991b1b";
+            statusBox.innerHTML = escapeHtml(statusMessage);
+        }
+
+        function downloadRevenueTopDefaulters(type) {
+            const rows = getRevenueDefaultersFilteredRows();
+            if (!rows.length) return showToast("Download ke liye data nahi hai", false);
+            setRevenueDefaultersDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
+            try {
+                const headers = ["RANK", "IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "MOBILE NO", "PENDING AMOUNT"];
+                const bodyRows = rows.map((row, index) => [index + 1, row.ivrsNo || "", row.consumerName || "", row.hqName || "", row.village || "", row.mobileNo || "", formatProgressReportAmount(row.pendingAmount)]);
+                const reportTitle = getRevenueDefaultersReportTitle();
+                const scopeLine = `Scope: ${activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? `Division - ${activeDiv}` : "Circle - SEONI CIRCLE")}`;
+                const periodLine = `Date: ${formatRevenueDateIndian(normalizeRevenueReportDate(document.getElementById("revenue-defaulters-date")?.value || getCurrentDateDDMMYYYY()))}`;
+                const suffix = normalizeRevenueReportDate(document.getElementById("revenue-defaulters-date")?.value || getCurrentDateDDMMYYYY());
+                const fileName = `${reportTitle}-${suffix}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (type === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setRevenueDefaultersDownloadState(false, "PDF library load nahi hui", false); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
+                    doc.text(periodLine, 148, 25, { align: "center" });
+                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                    setRevenueDefaultersDownloadState(false, "PDF download ho chuki hai", true);
+                    return;
+                }
+                const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                const csv = [[reportTitle], [scopeLine], [periodLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = `${fileName}.csv`;
+                link.click();
+                setRevenueDefaultersDownloadState(false, "Excel download ho chuki hai", true);
+            } catch (error) {
+                setRevenueDefaultersDownloadState(false, "Download nahi ho paya", false);
+                showToast(error?.message || "Report download nahi ho payi", false);
+            }
+        }
+
+        // =====================================================================
         // PARTICULAR LIST (HQ -> Village -> Category -> Paid/Unpaid dropdown pull)
         // Same paid-detection data (buildRevenueCategoryUploadedPaidInfo) jo summary
         // banata hai usi se ek flat per-consumer list bhi bana lete hain, taaki dropdown
@@ -13381,6 +13849,12 @@
                 if (id === "revenue-hq-village") {
                     initRevenueHqVillageReport();
                 }
+                if (id === "revenue-target-achievement") {
+                    initRevenueTargetAchievement();
+                }
+                if (id === "revenue-top-defaulters") {
+                    initRevenueTopDefaulters();
+                }
                 if (id === "revenue-pending-list") {
                     initRevenuePendingList();
                 }
@@ -13441,6 +13915,8 @@
                 if (id === "revenue-report-download") headerTitle = "REPORT DOWNLOAD";
                 if (id === "revenue-cash-reconcile") headerTitle = "PAID BY STAFF VS NGB CASH LIST";
                 if (id === "revenue-hq-village") headerTitle = "HQ / VILLAGE WISE PAID-UNPAID";
+                if (id === "revenue-target-achievement") headerTitle = "TARGET VS ACHIEVEMENT %";
+                if (id === "revenue-top-defaulters") headerTitle = "TOP DEFAULTERS";
                 if (id === "revenue-pending-list") headerTitle = "PENDING DO LIST";
                 if (id === "revenue-paid-upload") headerTitle = "ADMIN UPLOAD CASH LIST";
                 if (id === "revenue-message-login") headerTitle = "SEND MESSAGE";
@@ -13455,7 +13931,7 @@
                 document.getElementById("main-header-title").innerText = headerTitle;
                 const header = document.getElementById("app-header");
                 const headerMenuWrap = document.getElementById("header-menu-wrap");
-                const revenueMenuVisible = (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload");
+                const revenueMenuVisible = (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-target-achievement" || id === "revenue-top-defaulters" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload");
                 if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || id === "subdn-chhapara") ? "block" : "none";
                 document.querySelectorAll(".revenue-header-menu-item").forEach((item) => item.style.display = revenueMenuVisible ? "block" : "none");
                 const staffAdminMenuItem = document.getElementById("staff-admin-header-menu-item");
@@ -13470,7 +13946,7 @@
                 } else if (id === "mobile-update") {
                     header.className = "app-header bg-red-grad";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)";
-                } else if (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload" || id === "revenue-message-login") {
+                } else if (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-target-achievement" || id === "revenue-top-defaulters" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload" || id === "revenue-message-login") {
                     header.className = "app-header bg-blue-grad";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #38bdf8 0%, #0369a1 100%)";
                 } else if (id === "staff-admin") {
@@ -13577,7 +14053,9 @@
                 switchView("revenue-collection");
             } else if (act === "revenue-hq-village-view" && revenueHqVillageDrillPath.length) {
                 popRevenueHqVillageDrill();
-            } else if (act === "revenue-live-progress-view" || act === "revenue-report-download-view" || act === "revenue-hq-village-view" || act === "revenue-cash-reconcile-view" || act === "revenue-pending-list-view" || act === "revenue-paid-upload-view") {
+            } else if (act === "revenue-target-achievement-view" && revenueTargetDrillPath.length) {
+                popRevenueTargetDrill();
+            } else if (act === "revenue-live-progress-view" || act === "revenue-report-download-view" || act === "revenue-hq-village-view" || act === "revenue-target-achievement-view" || act === "revenue-top-defaulters-view" || act === "revenue-cash-reconcile-view" || act === "revenue-pending-list-view" || act === "revenue-paid-upload-view") {
                 switchView("revenue-collection");
             } else if (act === "dc-dashboard-view" || act === "mobile-update-view" || act === "revenue-collection-view") {
                 if (act === "mobile-update-view") {

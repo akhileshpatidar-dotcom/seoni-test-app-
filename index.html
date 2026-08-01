@@ -92,6 +92,8 @@
                     <button type="button" class="header-menu-item revenue-header-menu-item live-progress-menu-item" onclick="openRevenueLiveProgress()">⏱️ Live Progress</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueReportDownload()">📄 Paid by Staff Date/Month</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueHqVillageReport()">📊 HQ / Village Wise Paid-Unpaid</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueTargetAchievement()">🎯 Target vs Achievement %</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueTopDefaulters()">🔝 Top Defaulters</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePendingList()">⏳ Pending DO List</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueCashReconcile()">🧾 Paid by Staff vs NGB Cash List</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueMessageCenter()">💬 Send SMS / WhatsApp</button>
@@ -1111,6 +1113,59 @@
                     <div id="revenue-hq-village-list-box" style="width:100%; max-width:360px; margin:0 auto;"></div>
                     <div id="revenue-hq-village-list-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#ecfdf5; border:1.2px solid #86efac; color:#166534; font-size:0.66rem; font-weight:950; text-align:center;"></div>
                 </div>
+            </div>
+        </main>
+
+        <main id="revenue-target-achievement-view" class="view">
+            <div class="search-panel" style="padding-top:10px;">
+                <div style="width:100%; max-width:360px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:14px; padding:9px 12px; text-align:center;">
+                    <div style="font-size:0.78rem; font-weight:950; color:#1d4ed8; text-transform:uppercase;">Target vs Achievement %</div>
+                    <div id="revenue-target-scope-label" style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">Target = Net Bill | Achievement = Paid (Cash List)</div>
+                </div>
+                <div style="display:flex; gap:8px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="revenue-target-date-mode-btn" onclick="setRevenueTargetMode('DAILY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#1d4ed8; color:#ffffff; font-size:0.62rem; font-weight:950;">DATE WISE</button>
+                    <button id="revenue-target-month-mode-btn" onclick="setRevenueTargetMode('MONTHLY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#dbeafe; color:#1d4ed8; font-size:0.62rem; font-weight:950;">MONTH WISE</button>
+                </div>
+                <div style="width:100%; max-width:360px; overflow:hidden; border-radius:12px; margin:8px auto 0;">
+                    <input id="revenue-target-date" type="date" onchange="renderRevenueTargetAchievement()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:block; border:1.2px solid #93c5fd; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                    <input id="revenue-target-month" type="month" onchange="renderRevenueTargetAchievement()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:none; border:1.2px solid #93c5fd; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                </div>
+                <div id="revenue-target-summary" style="width:100%; max-width:360px; margin:0 auto;"></div>
+                <div id="revenue-target-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
+                <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="revenue-target-pdf-btn" onclick="downloadRevenueTargetAchievement('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF (Summary)</button>
+                    <button id="revenue-target-excel-btn" onclick="downloadRevenueTargetAchievement('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL (Summary)</button>
+                </div>
+                <div id="revenue-target-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#eff6ff; border:1.2px solid #93c5fd; color:#1d4ed8; font-size:0.66rem; font-weight:950; text-align:center;">Loading...</div>
+            </div>
+        </main>
+
+        <main id="revenue-top-defaulters-view" class="view">
+            <div class="search-panel" style="padding-top:10px;">
+                <div style="width:100%; max-width:360px; background:#fff1f2; border:1.2px solid #fda4af; border-radius:14px; padding:9px 12px; text-align:center;">
+                    <div style="font-size:0.78rem; font-weight:950; color:#9f1239; text-transform:uppercase;">Top Defaulters</div>
+                    <div id="revenue-defaulters-scope-label" style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">Cash List ke baad sabse zyada bakaya wale consumer</div>
+                </div>
+                <div style="display:flex; gap:8px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="revenue-defaulters-top20-btn" onclick="setRevenueDefaultersLimit(20)" style="flex:1; height:32px; border:none; border-radius:999px; background:#9f1239; color:#ffffff; font-size:0.62rem; font-weight:950;">TOP 20</button>
+                    <button id="revenue-defaulters-top50-btn" onclick="setRevenueDefaultersLimit(50)" style="flex:1; height:32px; border:none; border-radius:999px; background:#ffe4e6; color:#9f1239; font-size:0.62rem; font-weight:950;">TOP 50</button>
+                </div>
+                <div style="width:100%; max-width:360px; overflow:hidden; border-radius:12px; margin:8px auto 0;">
+                    <input id="revenue-defaulters-date" type="date" onchange="renderRevenueTopDefaulters()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:block; border:1.2px solid #fda4af; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                </div>
+                <select id="revenue-defaulters-hq" onchange="onRevenueDefaultersHqChange()" style="width:100%; max-width:360px; height:44px; margin:8px auto 0; display:block; border:1.2px solid #fda4af; border-radius:12px; padding:0 12px; font-size:0.76rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                    <option value="">All HQ</option>
+                </select>
+                <select id="revenue-defaulters-village" onchange="renderRevenueTopDefaulters()" style="width:100%; max-width:360px; height:44px; margin:8px auto 0; display:block; border:1.2px solid #fda4af; border-radius:12px; padding:0 12px; font-size:0.76rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                    <option value="">All Villages</option>
+                </select>
+                <div id="revenue-defaulters-status-box" style="width:100%; max-width:360px; margin:10px auto 0; border-radius:14px; padding:10px; background:#fff7f7; border:1.2px dashed #fda4af; color:#9f1239; font-size:0.72rem; font-weight:850; text-align:center;"></div>
+                <div id="revenue-defaulters-table" style="width:100%; max-width:360px; margin:8px auto 0;"></div>
+                <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="revenue-defaulters-pdf-btn" onclick="downloadRevenueTopDefaulters('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF</button>
+                    <button id="revenue-defaulters-excel-btn" onclick="downloadRevenueTopDefaulters('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL</button>
+                </div>
+                <div id="revenue-defaulters-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#fff1f2; border:1.2px solid #fda4af; color:#9f1239; font-size:0.66rem; font-weight:950; text-align:center;">Loading...</div>
             </div>
         </main>
 
