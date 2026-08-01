@@ -89,6 +89,7 @@
             <div id="header-menu-wrap" class="header-menu-wrap">
                 <button type="button" class="header-menu-btn" onclick="toggleHeaderMenu(event)">⋮</button>
                 <div id="header-menu-list" class="header-menu-list">
+                    <button type="button" class="header-menu-item mobile-update-header-menu-item" onclick="openMobileUpdateReport()" style="display:none;">📄 Download Report</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item live-progress-menu-item" onclick="openRevenueLiveProgress()">⏱️ Live Progress</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueReportDownload()">📄 Paid by Staff Date/Month</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueHqVillageReport()">📊 HQ / Village Wise Paid-Unpaid</button>
@@ -881,6 +882,26 @@
                     </div>
                 </div>
                 <button id="submit-btn" class="submit-sync-btn" onclick="submitToSheet()">Submit</button>
+            </div>
+        </main>
+
+        <main id="mobile-update-report-view" class="view">
+            <div class="search-panel" style="padding-top:10px;">
+                <div style="width:100%; max-width:360px; background:#fff1f2; border:1.2px solid #fca5a5; border-radius:14px; padding:9px 12px; text-align:center;">
+                    <div style="font-size:0.78rem; font-weight:950; color:#991b1b; text-transform:uppercase;">Mobile No Update Report</div>
+                    <div id="mobile-update-report-scope-label" style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">Total / Updated / Pending consumer</div>
+                </div>
+                <select id="mobile-update-report-viewby" onchange="setMobileUpdateReportViewBy(this.value)" style="width:100%; max-width:360px; height:42px; margin:9px auto 0; display:block; border:1.5px solid #fca5a5; border-radius:12px; padding:0 12px; font-size:0.76rem; font-weight:950; color:#991b1b; background:#fff7f7;">
+                    <option value="HQ">HQ WISE</option>
+                    <option value="VILLAGE">VILLAGE WISE</option>
+                </select>
+                <div id="mobile-update-report-summary" style="width:100%; max-width:360px; margin:0 auto;"></div>
+                <div id="mobile-update-report-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
+                <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="mobile-update-report-pdf-btn" onclick="downloadMobileUpdateReport('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF</button>
+                    <button id="mobile-update-report-excel-btn" onclick="downloadMobileUpdateReport('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL</button>
+                </div>
+                <div id="mobile-update-report-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#fff1f2; border:1.2px solid #fca5a5; color:#991b1b; font-size:0.66rem; font-weight:950; text-align:center;">Loading...</div>
             </div>
         </main>
 

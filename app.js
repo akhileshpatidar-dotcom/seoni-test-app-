@@ -469,6 +469,197 @@
             }
         }
 
+        // =====================================================================
+        // MOBILE NO UPDATE - DOWNLOAD REPORT (HQ Wise / Village Wise)
+        // "Mobile No Update" screen hamesha ek specific DC ke andar hi khulti hai
+        // (Division/Circle scope yahan lagta hi nahi) - isliye yeh report bhi sirf
+        // activeDC ke consumer master (getConsumerRows) aur mobileAlreadySubmittedMap
+        // (jo already is DC ke "already submitted" check ke liye load hota hai) se
+        // Total/Updated/Pending consumer count nikalti hai, HQ ya Village level par.
+        // Staff-wise breakdown abhi possible nahi hai kyonki submitToSheet() koi staff
+        // identity record hi nahi karta - user se confirm karke abhi sirf yeh rakha hai.
+        // =====================================================================
+        let mobileUpdateReportViewBy = "HQ";
+        let mobileUpdateReportTree = null;
+        let mobileUpdateReportRenderToken = 0;
+
+        function openMobileUpdateReport() {
+            closeHeaderMenu();
+            switchView("mobile-update-report");
+        }
+
+        function initMobileUpdateReport() {
+            const select = document.getElementById("mobile-update-report-viewby");
+            if (select) select.value = mobileUpdateReportViewBy;
+            const scopeLabel = document.getElementById("mobile-update-report-scope-label");
+            if (scopeLabel) scopeLabel.innerText = activeDC ? `DC: ${activeDC} - Total / Updated / Pending consumer` : "Total / Updated / Pending consumer";
+            renderMobileUpdateReport();
+        }
+
+        function setMobileUpdateReportViewBy(value) {
+            mobileUpdateReportViewBy = value === "VILLAGE" ? "VILLAGE" : "HQ";
+            if (!mobileUpdateReportTree) return;
+            const tableBox = document.getElementById("mobile-update-report-table");
+            if (tableBox) tableBox.innerHTML = renderMobileUpdateReportTableHtml();
+        }
+
+        function buildMobileUpdateReportData(rows, dcName) {
+            const hqMap = {};
+            let totalConsumer = 0, totalUpdated = 0;
+            rows.forEach((row) => {
+                const ivrs = normalizeLookupDigits(row.ivrsNo);
+                if (!ivrs) return;
+                const hqName = String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL";
+                const village = String(row.village || "UNKNOWN").trim().toUpperCase() || "UNKNOWN";
+                if (!hqMap[hqName]) hqMap[hqName] = { total: 0, updated: 0, villages: {} };
+                if (!hqMap[hqName].villages[village]) hqMap[hqName].villages[village] = { total: 0, updated: 0 };
+                const isUpdated = !!getMobileAlreadySubmittedEntry(dcName, ivrs);
+                hqMap[hqName].total++;
+                hqMap[hqName].villages[village].total++;
+                totalConsumer++;
+                if (isUpdated) {
+                    hqMap[hqName].updated++;
+                    hqMap[hqName].villages[village].updated++;
+                    totalUpdated++;
+                }
+            });
+            return { hqMap, totalConsumer, totalUpdated };
+        }
+
+        function renderMobileUpdateReportSummaryHtml(data) {
+            const pct = data.totalConsumer ? Math.round((data.totalUpdated / data.totalConsumer) * 1000) / 10 : 0;
+            return `
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; margin:0 auto;">
+                    <div style="background:#f1f5f9; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#64748b; text-transform:uppercase;">Total Consumer</div><div style="font-size:1.05rem; font-weight:950; color:#0f172a; margin-top:3px;">${data.totalConsumer}</div></div>
+                    <div style="background:#ecfdf5; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#166534; text-transform:uppercase;">Updated</div><div style="font-size:1.05rem; font-weight:950; color:#166534; margin-top:3px;">${data.totalUpdated}</div></div>
+                    <div style="background:#fff1f2; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Pending</div><div style="font-size:1.05rem; font-weight:950; color:#9f1239; margin-top:3px;">${data.totalConsumer - data.totalUpdated}</div></div>
+                </div>
+                <div style="text-align:center; margin-top:8px; font-size:0.7rem; font-weight:950; color:#991b1b;">${pct}% Updated</div>
+            `;
+        }
+
+        function getMobileUpdateReportRows() {
+            if (!mobileUpdateReportTree) return [];
+            const rows = [];
+            Object.keys(mobileUpdateReportTree.hqMap).sort((a, b) => a.localeCompare(b)).forEach((hqName) => {
+                const hq = mobileUpdateReportTree.hqMap[hqName];
+                if (mobileUpdateReportViewBy === "HQ") {
+                    rows.push({ name: hqName, total: hq.total, updated: hq.updated });
+                } else {
+                    Object.keys(hq.villages).sort((a, b) => a.localeCompare(b)).forEach((villageName) => {
+                        const v = hq.villages[villageName];
+                        rows.push({ name: `${villageName} (${hqName})`, total: v.total, updated: v.updated });
+                    });
+                }
+            });
+            return rows;
+        }
+
+        function renderMobileUpdateReportTableHtml() {
+            const rows = getMobileUpdateReportRows();
+            const colLabel = mobileUpdateReportViewBy === "HQ" ? "HQ NAME" : "VILLAGE";
+            let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"><div>${colLabel}</div><div>TOTAL</div><div>UPDATED</div><div>PENDING</div></div>`;
+            if (!rows.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Data nahi mila.</div></div>`;
+            } else {
+                rows.forEach((row) => {
+                    const pending = row.total - row.updated;
+                    html += `<div class="summary-table-row" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"><div>${escapeHtml(row.name)}</div><div class="font-black">${row.total}</div><div class="text-emerald-700 font-black">${row.updated}</div><div class="text-rose-700 font-black">${pending}</div></div>`;
+                });
+            }
+            html += `</div>`;
+            return html;
+        }
+
+        async function renderMobileUpdateReport() {
+            const summaryBox = document.getElementById("mobile-update-report-summary");
+            const tableBox = document.getElementById("mobile-update-report-table");
+            const statusBox = document.getElementById("mobile-update-report-download-status");
+            if (!tableBox) return;
+            const renderToken = ++mobileUpdateReportRenderToken;
+            if (statusBox) statusBox.style.display = "none";
+            if (summaryBox) summaryBox.innerHTML = "";
+            mobileUpdateReportTree = null;
+            const dcName = activeDC;
+            const isRenderValid = () => renderToken === mobileUpdateReportRenderToken && document.getElementById("mobile-update-report-view")?.classList.contains("active");
+            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST DATA...");
+            try {
+                if (!dcName) throw new Error("DC select nahi hai");
+                await ensureConsumerDataLoadedFor([dcName]);
+                await loadMobileAlreadySubmittedMap();
+                if (!isRenderValid()) { progress.stop(); return; }
+                const rows = getConsumerRows(dcName).map(mapRevenueConsumerRow).filter((row) => normalizeLookupDigits(row.ivrsNo));
+                mobileUpdateReportTree = buildMobileUpdateReportData(rows, dcName);
+                await progress.finish();
+                if (!isRenderValid()) return;
+                if (summaryBox) summaryBox.innerHTML = renderMobileUpdateReportSummaryHtml(mobileUpdateReportTree);
+                tableBox.innerHTML = renderMobileUpdateReportTableHtml();
+            } catch (error) {
+                progress.stop();
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#fff1f2";
+                    statusBox.style.borderColor = "#fca5a5";
+                    statusBox.style.color = "#991b1b";
+                    statusBox.innerText = "Report load nahi ho payi";
+                }
+            }
+        }
+
+        function setMobileUpdateReportDownloadState(isLoading, message = "", ok = true) {
+            const pdfBtn = document.getElementById("mobile-update-report-pdf-btn");
+            const excelBtn = document.getElementById("mobile-update-report-excel-btn");
+            const statusBox = document.getElementById("mobile-update-report-download-status");
+            const statusMessage = normalizeActionStatusMessage(message, isLoading, ok);
+            [pdfBtn, excelBtn].forEach((btn) => {
+                if (!btn) return;
+                btn.disabled = isLoading;
+                btn.style.opacity = isLoading ? "0.65" : "1";
+                btn.style.pointerEvents = isLoading ? "none" : "auto";
+            });
+            if (!statusBox) return;
+            statusBox.style.display = statusMessage ? "block" : "none";
+            statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
+            statusBox.style.borderColor = ok ? "#86efac" : "#fca5a5";
+            statusBox.style.color = ok ? "#166534" : "#991b1b";
+            statusBox.innerHTML = escapeHtml(statusMessage);
+        }
+
+        function downloadMobileUpdateReport(type) {
+            const rows = getMobileUpdateReportRows();
+            if (!rows.length) return showToast("Report ke liye data nahi hai", false);
+            setMobileUpdateReportDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
+            try {
+                const colLabel = mobileUpdateReportViewBy === "HQ" ? "HQ NAME" : "VILLAGE";
+                const headers = [colLabel, "TOTAL", "UPDATED", "PENDING"];
+                const bodyRows = rows.map((row) => [row.name, row.total, row.updated, row.total - row.updated]);
+                const reportTitle = `Mobile No Update Report - DC ${activeDC}`;
+                const scopeLine = `Scope: DC - ${activeDC}`;
+                const fileName = reportTitle.replace(/[\\/:*?"<>|]+/g, "_");
+                if (type === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setMobileUpdateReportDownloadState(false, "PDF library load nahi hui", false); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
+                    doc.autoTable({ startY: 25, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                    setMobileUpdateReportDownloadState(false, "PDF download ho chuki hai", true);
+                    return;
+                }
+                const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                const csv = [[reportTitle], [scopeLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = `${fileName}.csv`;
+                link.click();
+                setMobileUpdateReportDownloadState(false, "Excel download ho chuki hai", true);
+            } catch (error) {
+                setMobileUpdateReportDownloadState(false, "Download nahi ho paya", false);
+                showToast(error?.message || "Report download nahi ho payi", false);
+            }
+        }
+
         function getCourtRecordStorageKey(record) {
             if (!record) return "";
             const dc = normalizeLookupValue(record.dcName || activeDC || "");
@@ -14157,6 +14348,9 @@
                 if (id === "mobile-update" && activeDC) {
                     ensureDcDataLoaded(activeDC);
                 }
+                if (id === "mobile-update-report") {
+                    initMobileUpdateReport();
+                }
                 if (id === "revenue-collection") {
                     initRevenueCollection();
                 }
@@ -14250,13 +14444,16 @@
                 if (id === "low-stock") headerTitle = "LOW STOCK";
                 if (id === "stock-report") headerTitle = "STOCK REPORT";
                 if (id === "mobile-update") headerTitle = "UPDATE MOBILE NO";
+                if (id === "mobile-update-report") headerTitle = "MOBILE UPDATE REPORT";
                 if (id === "summary") headerTitle = "PROGRESS REPORT";
                 document.getElementById("main-header-title").innerText = headerTitle;
                 const header = document.getElementById("app-header");
                 const headerMenuWrap = document.getElementById("header-menu-wrap");
                 const revenueMenuVisible = (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-target-achievement" || id === "revenue-top-defaulters" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload");
-                if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || id === "subdn-chhapara") ? "block" : "none";
+                const mobileUpdateMenuVisible = (id === "mobile-update");
+                if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || mobileUpdateMenuVisible || id === "subdn-chhapara") ? "block" : "none";
                 document.querySelectorAll(".revenue-header-menu-item").forEach((item) => item.style.display = revenueMenuVisible ? "block" : "none");
+                document.querySelectorAll(".mobile-update-header-menu-item").forEach((item) => item.style.display = mobileUpdateMenuVisible ? "block" : "none");
                 const staffAdminMenuItem = document.getElementById("staff-admin-header-menu-item");
                 if (staffAdminMenuItem) staffAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 closeHeaderMenu();
@@ -14266,7 +14463,7 @@
                     document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)");
                     header.className = "app-header bg-teal-grad";
                     prewarmGpsCameraLocationIfAllowed();
-                } else if (id === "mobile-update") {
+                } else if (id === "mobile-update" || id === "mobile-update-report") {
                     header.className = "app-header bg-red-grad";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)";
                 } else if (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-target-achievement" || id === "revenue-top-defaulters" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload" || id === "revenue-message-login") {
@@ -14380,6 +14577,8 @@
                 popRevenueTargetDrill();
             } else if (act === "revenue-live-progress-view" || act === "revenue-report-download-view" || act === "revenue-hq-village-view" || act === "revenue-target-achievement-view" || act === "revenue-top-defaulters-view" || act === "revenue-cash-reconcile-view" || act === "revenue-pending-list-view" || act === "revenue-paid-upload-view") {
                 switchView("revenue-collection");
+            } else if (act === "mobile-update-report-view") {
+                switchView("mobile-update");
             } else if (act === "dc-dashboard-view" || act === "mobile-update-view" || act === "revenue-collection-view") {
                 if (act === "mobile-update-view") {
                     resetForm(true);
