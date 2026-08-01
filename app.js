@@ -2155,13 +2155,84 @@
 
         // "LAST PAYMENT DATE" master-data column ke aadhar par 3 naye Non Payee aging
         // report types - purane STAFF/CATEGORY/TARGET/DEFAULTERS jaisa hi dropdown-driven
-        // flow, wahi lastRevenueProgressBoxData (mode/filterValue) reuse hota hai.
+        // flow, wahi lastRevenueProgressBoxData (mode/filterValue) reuse hota hai. Inke
+        // saath HQ/Village/Category/Net Bill Slab/Govt-NonGovt - "Pending DO List" jaisa
+        // filter set bhi rahega, taaki koi bhi combination nikal sake.
+        let progressNonPayeeFilterState = { hq: "", village: "", category: "", slab: "", govt: "" };
+
+        function resetProgressNonPayeeFilterState() {
+            progressNonPayeeFilterState = { hq: "", village: "", category: "", slab: "", govt: "" };
+        }
+
+        function setProgressNonPayeeFilter(key, value) {
+            if (!(key in progressNonPayeeFilterState)) return;
+            progressNonPayeeFilterState[key] = value || "";
+            if (key === "hq") progressNonPayeeFilterState.village = "";
+            const body = document.getElementById("progress-revenue-body");
+            if (body) body.innerHTML = renderProgressRevenueBodyInner();
+        }
+
+        function isProgressNonPayeeNetBillInSlab(row, slabValue) {
+            if (!slabValue) return true;
+            const amount = Number(row.pendingAmount || 0);
+            if (slabValue === "0-500") return amount >= 0 && amount <= 500;
+            if (slabValue === "500-1000") return amount > 500 && amount <= 1000;
+            if (slabValue === "1000-5000") return amount > 1000 && amount <= 5000;
+            if (slabValue === "5000-10000") return amount > 5000 && amount <= 10000;
+            if (slabValue === "10000-25000") return amount > 10000 && amount <= 25000;
+            if (slabValue === "25000+") return amount > 25000;
+            return true;
+        }
+
+        function getProgressNonPayeeFilteredRows(mode, filterValue, bucket) {
+            const allRows = buildRevenueNonPayeeRows(mode, filterValue, bucket);
+            const f = progressNonPayeeFilterState;
+            const rows = allRows.filter((row) => (
+                (!f.hq || normalizeLookupValue(row.hqName) === normalizeLookupValue(f.hq))
+                && (!f.village || normalizeLookupValue(row.village) === normalizeLookupValue(f.village))
+                && (!f.category || normalizeLookupValue(row.tariffCategory) === normalizeLookupValue(f.category))
+                && isProgressNonPayeeNetBillInSlab(row, f.slab)
+                && (!f.govt || (f.govt === "GOVT" ? !!row.govtFlag : !row.govtFlag))
+            ));
+            return { allRows, rows };
+        }
+
+        function buildProgressNonPayeeOptionsHtml(values, selectedValue, placeholder) {
+            const options = [`<option value="">${escapeHtml(placeholder)}</option>`].concat(
+                (values || []).map((v) => `<option value="${escapeHtml(v)}" ${v === selectedValue ? "selected" : ""}>${escapeHtml(v)}</option>`)
+            );
+            return options.join("");
+        }
+
         function renderRevenueProgressNonPayeeSummaryHtml(mode, filterValue, bucket) {
-            const rows = buildRevenueNonPayeeRows(mode, filterValue, bucket);
+            const { allRows, rows } = getProgressNonPayeeFilteredRows(mode, filterValue, bucket);
+            const f = progressNonPayeeFilterState;
             const bucketLabel = getRevenueNonPayeeBucketLabel(bucket);
             const totalPending = rows.reduce((sum, r) => sum + Number(r.pendingAmount || 0), 0);
+            const villageScoped = allRows.filter((row) => !f.hq || normalizeLookupValue(row.hqName) === normalizeLookupValue(f.hq));
+            const hqOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(allRows, "hqName"), f.hq, "All HQ Names");
+            const villageOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(villageScoped, "village"), f.village, "All Villages");
+            const categoryOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(allRows, "tariffCategory"), f.category, "All Categories");
+            const selectStyle = "width:100%; height:46px; margin:8px auto 0; display:block; border:1.5px solid #fb923c; border-radius:14px; padding:0 12px; font-size:0.8rem; font-weight:900; color:#0f172a; background:#ffffff;";
             let html = `
                 <div style="font-size:0.75rem; font-weight:950; color:#9f1239; text-align:center;">${escapeHtml(bucketLabel)}</div>
+                <select onchange="setProgressNonPayeeFilter('hq', this.value)" style="${selectStyle}">${hqOptionsHtml}</select>
+                <select onchange="setProgressNonPayeeFilter('village', this.value)" style="${selectStyle}">${villageOptionsHtml}</select>
+                <select onchange="setProgressNonPayeeFilter('category', this.value)" style="${selectStyle}">${categoryOptionsHtml}</select>
+                <select onchange="setProgressNonPayeeFilter('slab', this.value)" style="${selectStyle}">
+                    <option value="">All Net Bill Slabs</option>
+                    <option value="0-500" ${f.slab === "0-500" ? "selected" : ""}>₹0 - ₹500</option>
+                    <option value="500-1000" ${f.slab === "500-1000" ? "selected" : ""}>₹500 - ₹1,000</option>
+                    <option value="1000-5000" ${f.slab === "1000-5000" ? "selected" : ""}>₹1,000 - ₹5,000</option>
+                    <option value="5000-10000" ${f.slab === "5000-10000" ? "selected" : ""}>₹5,000 - ₹10,000</option>
+                    <option value="10000-25000" ${f.slab === "10000-25000" ? "selected" : ""}>₹10,000 - ₹25,000</option>
+                    <option value="25000+" ${f.slab === "25000+" ? "selected" : ""}>₹25,000 Above</option>
+                </select>
+                <select onchange="setProgressNonPayeeFilter('govt', this.value)" style="${selectStyle}">
+                    <option value="">All (Govt + Non Govt)</option>
+                    <option value="GOVT" ${f.govt === "GOVT" ? "selected" : ""}>Govt</option>
+                    <option value="NONGOVT" ${f.govt === "NONGOVT" ? "selected" : ""}>Non Govt</option>
+                </select>
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; width:100%; margin:10px auto 0;">
                     <div style="background:#fff1f2; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Consumers</div><div style="font-size:0.95rem; font-weight:950; color:#9f1239; margin-top:2px;">${rows.length}</div></div>
                     <div style="background:#fff1f2; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Total Pending</div><div style="font-size:0.85rem; font-weight:950; color:#9f1239; margin-top:2px;">${formatProgressReportAmount(totalPending)}</div></div>
@@ -2169,7 +2240,7 @@
                 <div class="summary-wrapper" style="margin-top:10px;"><div class="summary-table-header" style="grid-template-columns: 1.3fr 0.7fr 1fr;"><div>CONSUMER</div><div>${bucket === "SINCE_CONNECTION" ? "TYPE" : "MONTHS"}</div><div>PENDING</div></div>
             `;
             if (!rows.length) {
-                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is scope me koi consumer nahi mila (ya master sheet me LAST PAYMENT DATE column abhi update nahi hui).</div></div>`;
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is filter me koi consumer nahi mila (ya master sheet me LAST PAYMENT DATE column abhi update nahi hui).</div></div>`;
             } else {
                 rows.slice(0, 200).forEach((row) => {
                     const middleCell = bucket === "SINCE_CONNECTION" ? "Never Paid" : `${row.monthsSincePayment} mo`;
@@ -2189,17 +2260,19 @@
             setProgressCategoryDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
             try {
                 const { mode, filterValue } = lastRevenueProgressBoxData;
-                const rows = buildRevenueNonPayeeRows(mode || "DAILY", filterValue || "", bucket);
+                const { rows } = getProgressNonPayeeFilteredRows(mode || "DAILY", filterValue || "", bucket);
                 if (!rows.length) { setProgressCategoryDownloadState(false, "Download ke liye data nahi hai"); return; }
-                const headers = ["IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "GOVT/NON GOVT", "MOBILE NO", bucket === "SINCE_CONNECTION" ? "STATUS" : "MONTHS SINCE PAYMENT", "LAST PAYMENT DATE", "PENDING AMOUNT"];
+                const headers = ["IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO", bucket === "SINCE_CONNECTION" ? "STATUS" : "MONTHS SINCE PAYMENT", "LAST PAYMENT DATE", "PENDING AMOUNT"];
                 const bodyRows = rows.map((row) => [
-                    row.ivrsNo || "", row.consumerName || "", row.hqName || "", row.village || "",
+                    row.ivrsNo || "", row.consumerName || "", row.hqName || "", row.village || "", row.tariffCategory || "",
                     row.govtFlag ? "GOVT" : "NON GOVT", row.mobileNo || "",
                     bucket === "SINCE_CONNECTION" ? "Never Paid" : `${row.monthsSincePayment}`,
                     row.lastPaymentDate || "Never Paid",
                     formatProgressReportAmount(row.pendingAmount)
                 ]);
                 const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+                const f = progressNonPayeeFilterState;
+                const filterLine = `HQ: ${f.hq || "All"}  |  Village: ${f.village || "All"}  |  Category: ${f.category || "All"}  |  Net Bill Slab: ${f.slab || "All"}  |  Type: ${f.govt === "GOVT" ? "Govt" : (f.govt === "NONGOVT" ? "Non Govt" : "All")}`;
                 const reportTitle = `${getRevenueNonPayeeBucketLabel(bucket)} - ${scope}`;
                 const asOfLine = `As of: ${formatRevenueDateIndian(normalizeRevenueReportDate(getCurrentDateDDMMYYYY()))}`;
                 const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
@@ -2209,12 +2282,13 @@
                     const doc = new jsPDF({ orientation: "landscape" });
                     doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
-                    doc.text(asOfLine, 148, 25, { align: "center" });
-                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
+                    doc.text(filterLine, 148, 25, { align: "center" });
+                    doc.text(asOfLine, 148, 30, { align: "center" });
+                    doc.autoTable({ startY: 36, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                 } else {
                     const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
-                    const csv = [[reportTitle], [`Scope: ${scope}`], [asOfLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                    const csv = [[reportTitle], [`Scope: ${scope}`], [filterLine], [asOfLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
                     const link = document.createElement("a");
                     link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
                     link.download = `${fileName}.csv`;
@@ -2230,6 +2304,7 @@
         function setProgressRevenueReportType(value) {
             const validValues = ["STAFF", "CATEGORY", "TARGET", "DEFAULTERS", "NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION"];
             progressRevenueReportType = validValues.includes(value) ? value : "STAFF";
+            resetProgressNonPayeeFilterState();
             const body = document.getElementById("progress-revenue-body");
             if (body) body.innerHTML = renderProgressRevenueBodyInner();
         }
