@@ -12595,6 +12595,11 @@
                         });
                     }
                 });
+            } else if (level === "DC") {
+                (revenueTargetTree || []).forEach((dc) => {
+                    if (dc.type) return;
+                    rows.push({ name: dc.name, paidAmountTotal: dc.paidAmountTotal, unpaidAmountTotal: dc.unpaidAmountTotal });
+                });
             } else {
                 (revenueTargetTree || []).forEach((dc) => {
                     if (dc.type) return;
@@ -12747,23 +12752,6 @@
             }
         }
 
-        function flattenRevenueTargetRows() {
-            const output = [];
-            const walk = (nodes, path) => {
-                (nodes || []).forEach((node) => {
-                    if (node.type === "SUB_TOTAL" || node.type === "SUBDN_TOTAL") return;
-                    const currentPath = [...path, node.name];
-                    if (node.children && node.children.length) {
-                        walk(node.children, currentPath);
-                    } else {
-                        output.push({ path: currentPath, paidAmountTotal: node.paidAmountTotal, unpaidAmountTotal: node.unpaidAmountTotal });
-                    }
-                });
-            };
-            walk(revenueTargetTree, []);
-            return output;
-        }
-
         function getRevenueTargetReportTitle() {
             const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
             return `Target vs Achievement Summary - ${scope}`;
@@ -12796,20 +12784,21 @@
         }
 
         function downloadRevenueTargetAchievement(type) {
-            const isFlatView = revenueTargetViewBy !== getRevenueTargetNaturalLevel();
-            const flatRows = isFlatView ? buildRevenueTargetFlatRows(revenueTargetViewBy) : flattenRevenueTargetRows();
+            // Download hamesha usi granularity par ho jo abhi screen par select hai
+            // (revenueTargetViewBy) - HQ select hai to sirf HQ-level summary, VILLAGE
+            // select hai to village-level, DC select hai to DC-level. Pehle yahan
+            // "natural level" par purani flattenRevenueTargetRows() (jo hamesha leaf/
+            // village tak flatten karti thi) use ho rahi thi - isi wajah se HQ WISE
+            // select karne par bhi PDF me saari village aa rahi thi. Ab hamesha
+            // buildRevenueTargetFlatRows() hi use hoga, jo screen ke summary jaisa
+            // hi granularity rakhta hai.
+            const flatRows = buildRevenueTargetFlatRows(revenueTargetViewBy);
             if (!flatRows.length) return showToast("Report ke liye data nahi hai", false);
             setRevenueTargetDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
             try {
-                const headers = isFlatView
-                    ? [revenueTargetViewBy === "HQ" ? "HQ NAME" : "VILLAGE", "TARGET", "ACHIEVED", "%"]
-                    : (activeViewLevel === "DC" ? ["HQ NAME", "VILLAGE", "TARGET", "ACHIEVED", "%"] : ["DC NAME", "HQ NAME", "VILLAGE", "TARGET", "ACHIEVED", "%"]);
-                const rows = isFlatView
-                    ? flatRows.map((r) => [r.name, formatProgressReportAmount(r.target), formatProgressReportAmount(r.paidAmountTotal), `${r.pct}%`])
-                    : flatRows.map((r) => {
-                        const target = Number(r.paidAmountTotal || 0) + Number(r.unpaidAmountTotal || 0);
-                        return [...r.path, formatProgressReportAmount(target), formatProgressReportAmount(r.paidAmountTotal), `${getRevenueAchievementPct(r.paidAmountTotal, target)}%`];
-                    });
+                const colLabel = revenueTargetViewBy === "DC" ? "DC NAME" : (revenueTargetViewBy === "HQ" ? "HQ NAME" : "VILLAGE");
+                const headers = [colLabel, "TARGET", "ACHIEVED", "%"];
+                const rows = flatRows.map((r) => [r.name, formatProgressReportAmount(r.target), formatProgressReportAmount(r.paidAmountTotal), `${r.pct}%`]);
                 const reportTitle = getRevenueTargetReportTitle();
                 const scopeLine = `Scope: ${activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? `Division - ${activeDiv}` : "Circle - SEONI CIRCLE")}`;
                 const periodLine = `Period: ${getRevenueTargetPeriodDisplay()}`;
