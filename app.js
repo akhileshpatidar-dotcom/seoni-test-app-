@@ -12477,6 +12477,34 @@
         let revenueTargetTree = [];
         let revenueTargetDrillPath = [];
         let revenueTargetRenderToken = 0;
+        // View-by: DC scope me natural top level "HQ" hai, Division/Circle scope me "DC".
+        // Dropdown se seedha "HQ WISE" ya "VILLAGE WISE" flat/sorted comparison bhi mil jata
+        // hai - tap-drill kiye bina - taaki DC ke andar sabhi HQ (ya sabhi Village) ek sath
+        // achievement % ke hisab se compare ho sake (jaise kaunsi HQ ne accha kaam kiya).
+        let revenueTargetViewBy = "HQ";
+
+        function getRevenueTargetNaturalLevel() {
+            return activeViewLevel === "DC" ? "HQ" : "DC";
+        }
+
+        function refreshRevenueTargetViewByOptions() {
+            const select = document.getElementById("revenue-target-viewby");
+            if (!select) return;
+            const isDc = activeViewLevel === "DC";
+            select.innerHTML = isDc
+                ? `<option value="HQ">HQ WISE</option><option value="VILLAGE">VILLAGE WISE</option>`
+                : `<option value="DC">DC WISE</option><option value="HQ">HQ WISE</option><option value="VILLAGE">VILLAGE WISE</option>`;
+            const validValues = isDc ? ["HQ", "VILLAGE"] : ["DC", "HQ", "VILLAGE"];
+            if (!validValues.includes(revenueTargetViewBy)) revenueTargetViewBy = getRevenueTargetNaturalLevel();
+            select.value = revenueTargetViewBy;
+        }
+
+        function setRevenueTargetViewBy(value) {
+            revenueTargetViewBy = ["DC", "HQ", "VILLAGE"].includes(value) ? value : getRevenueTargetNaturalLevel();
+            revenueTargetDrillPath = [];
+            const tableBox = document.getElementById("revenue-target-table");
+            if (tableBox) tableBox.innerHTML = renderRevenueTargetTable();
+        }
 
         function initRevenueTargetAchievement() {
             const dateInput = document.getElementById("revenue-target-date");
@@ -12548,7 +12576,71 @@
             if (tableBox) tableBox.innerHTML = renderRevenueTargetTable();
         }
 
+        // DC scope me root tree hi HQ nodes hain (children = village leaves).
+        // Division/Circle scope me root tree DC nodes hain (SUB_TOTAL/SUBDN_TOTAL rows
+        // ke saath mixed) jinke children HQ nodes, unke children village leaves.
+        // Yeh function jo bhi "level" chuna gaya hai (HQ ya VILLAGE) uska ek FLAT,
+        // achievement % ke hisab se sorted list bana deta hai - taaki DC ke andar sabhi
+        // HQ (ya sabhi Village) ek sath compare ho sakein, tap-drill kiye bina.
+        function buildRevenueTargetFlatRows(level) {
+            const rows = [];
+            if (activeViewLevel === "DC") {
+                (revenueTargetTree || []).forEach((hq) => {
+                    if (hq.type) return;
+                    if (level === "HQ") {
+                        rows.push({ name: hq.name, paidAmountTotal: hq.paidAmountTotal, unpaidAmountTotal: hq.unpaidAmountTotal });
+                    } else {
+                        (hq.children || []).forEach((v) => {
+                            rows.push({ name: `${v.name} (${hq.name})`, paidAmountTotal: v.paidAmountTotal, unpaidAmountTotal: v.unpaidAmountTotal });
+                        });
+                    }
+                });
+            } else {
+                (revenueTargetTree || []).forEach((dc) => {
+                    if (dc.type) return;
+                    if (level === "HQ") {
+                        (dc.children || []).forEach((hq) => {
+                            rows.push({ name: `${hq.name} (${dc.name})`, paidAmountTotal: hq.paidAmountTotal, unpaidAmountTotal: hq.unpaidAmountTotal });
+                        });
+                    } else {
+                        (dc.children || []).forEach((hq) => {
+                            (hq.children || []).forEach((v) => {
+                                rows.push({ name: `${v.name} (${hq.name}/${dc.name})`, paidAmountTotal: v.paidAmountTotal, unpaidAmountTotal: v.unpaidAmountTotal });
+                            });
+                        });
+                    }
+                });
+            }
+            rows.forEach((row) => {
+                row.target = Number(row.paidAmountTotal || 0) + Number(row.unpaidAmountTotal || 0);
+                row.pct = getRevenueAchievementPct(row.paidAmountTotal, row.target);
+            });
+            rows.sort((a, b) => b.pct - a.pct);
+            return rows;
+        }
+
+        function renderRevenueTargetFlatTable(level) {
+            const rows = buildRevenueTargetFlatRows(level);
+            const colLabel = level === "HQ" ? "HQ NAME" : "VILLAGE";
+            let html = `<div class="summary-wrapper"><div style="padding:9px 10px; margin-bottom:6px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:10px; font-size:0.64rem; font-weight:900; color:#1d4ed8; text-align:center;">Sabhi ${colLabel === "HQ NAME" ? "HQ" : "Village"} - Achievement % ke hisab se sorted (best se worst)</div><div class="summary-table-header" style="grid-template-columns: 1.5fr 0.9fr 0.9fr 0.6fr;"><div>${colLabel}</div><div>TARGET</div><div>ACHIEVED</div><div>%</div></div>`;
+            if (!rows.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is scope me data nahi mila.</div></div>`;
+            } else {
+                rows.forEach((row, index) => {
+                    const pctColor = row.pct >= 75 ? "#166534" : (row.pct >= 40 ? "#b45309" : "#9f1239");
+                    html += `<div class="summary-table-row" style="grid-template-columns: 1.5fr 0.9fr 0.9fr 0.6fr;"><div><span style="color:#94a3b8; font-weight:900;">${index + 1}.</span> ${escapeHtml(row.name)}</div><div class="font-black">${formatProgressReportAmount(row.target)}</div><div class="text-emerald-700 font-black">${formatProgressReportAmount(row.paidAmountTotal)}</div><div style="color:${pctColor}; font-weight:950;">${row.pct}%</div></div>`;
+                });
+            }
+            const totals = rows.reduce((acc, row) => { acc.paidAmountTotal += row.paidAmountTotal; acc.target += row.target; return acc; }, { paidAmountTotal: 0, target: 0 });
+            const grandPct = getRevenueAchievementPct(totals.paidAmountTotal, totals.target);
+            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL (${colLabel} SCOPE)</div><div class="mt-2 grid grid-cols-3 gap-2 text-center text-[11px] font-black"><div class="rounded-xl bg-slate-100 border border-slate-200 p-2">Target<br>${formatProgressReportAmount(totals.target)}</div><div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2">Achieved<br>${formatProgressReportAmount(totals.paidAmountTotal)}</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2">%<br>${grandPct}%</div></div></div>`;
+            return html;
+        }
+
         function renderRevenueTargetTable() {
+            if (revenueTargetViewBy !== getRevenueTargetNaturalLevel()) {
+                return renderRevenueTargetFlatTable(revenueTargetViewBy);
+            }
             const rows = getRevenueTargetCurrentRows();
             const colLabel = getRevenueTargetColumnLabel();
             const depth = revenueTargetDrillPath.length;
@@ -12640,6 +12732,7 @@
                 }, { paidAmountTotal: 0, unpaidAmountTotal: 0 });
                 await progress.finish();
                 if (!isRenderValid()) return;
+                refreshRevenueTargetViewByOptions();
                 if (summaryBox) summaryBox.innerHTML = renderRevenueTargetSummaryCardsHtml(totals);
                 tableBox.innerHTML = renderRevenueTargetTable();
             } catch (error) {
@@ -12703,17 +12796,20 @@
         }
 
         function downloadRevenueTargetAchievement(type) {
-            const flatRows = flattenRevenueTargetRows();
+            const isFlatView = revenueTargetViewBy !== getRevenueTargetNaturalLevel();
+            const flatRows = isFlatView ? buildRevenueTargetFlatRows(revenueTargetViewBy) : flattenRevenueTargetRows();
             if (!flatRows.length) return showToast("Report ke liye data nahi hai", false);
             setRevenueTargetDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
             try {
-                const headers = activeViewLevel === "DC"
-                    ? ["HQ NAME", "VILLAGE", "TARGET", "ACHIEVED", "%"]
-                    : ["DC NAME", "HQ NAME", "VILLAGE", "TARGET", "ACHIEVED", "%"];
-                const rows = flatRows.map((r) => {
-                    const target = Number(r.paidAmountTotal || 0) + Number(r.unpaidAmountTotal || 0);
-                    return [...r.path, formatProgressReportAmount(target), formatProgressReportAmount(r.paidAmountTotal), `${getRevenueAchievementPct(r.paidAmountTotal, target)}%`];
-                });
+                const headers = isFlatView
+                    ? [revenueTargetViewBy === "HQ" ? "HQ NAME" : "VILLAGE", "TARGET", "ACHIEVED", "%"]
+                    : (activeViewLevel === "DC" ? ["HQ NAME", "VILLAGE", "TARGET", "ACHIEVED", "%"] : ["DC NAME", "HQ NAME", "VILLAGE", "TARGET", "ACHIEVED", "%"]);
+                const rows = isFlatView
+                    ? flatRows.map((r) => [r.name, formatProgressReportAmount(r.target), formatProgressReportAmount(r.paidAmountTotal), `${r.pct}%`])
+                    : flatRows.map((r) => {
+                        const target = Number(r.paidAmountTotal || 0) + Number(r.unpaidAmountTotal || 0);
+                        return [...r.path, formatProgressReportAmount(target), formatProgressReportAmount(r.paidAmountTotal), `${getRevenueAchievementPct(r.paidAmountTotal, target)}%`];
+                    });
                 const reportTitle = getRevenueTargetReportTitle();
                 const scopeLine = `Scope: ${activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? `Division - ${activeDiv}` : "Circle - SEONI CIRCLE")}`;
                 const periodLine = `Period: ${getRevenueTargetPeriodDisplay()}`;
@@ -13916,7 +14012,7 @@
                 if (id === "revenue-cash-reconcile") headerTitle = "PAID BY STAFF VS NGB CASH LIST";
                 if (id === "revenue-hq-village") headerTitle = "HQ / VILLAGE WISE PAID-UNPAID";
                 if (id === "revenue-target-achievement") headerTitle = "TARGET VS ACHIEVEMENT %";
-                if (id === "revenue-top-defaulters") headerTitle = "TOP DEFAULTERS";
+                if (id === "revenue-top-defaulters") headerTitle = "TOP 20/50 DEFAULTERS";
                 if (id === "revenue-pending-list") headerTitle = "PENDING DO LIST";
                 if (id === "revenue-paid-upload") headerTitle = "ADMIN UPLOAD CASH LIST";
                 if (id === "revenue-message-login") headerTitle = "SEND MESSAGE";

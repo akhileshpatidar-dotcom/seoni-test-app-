@@ -93,7 +93,7 @@
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueReportDownload()">📄 Paid by Staff Date/Month</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueHqVillageReport()">📊 HQ / Village Wise Paid-Unpaid</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueTargetAchievement()">🎯 Target vs Achievement %</button>
-                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueTopDefaulters()">🔝 Top Defaulters</button>
+                    <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueTopDefaulters()">🔝 Top 20/50 Defaulters</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePendingList()">⏳ Pending DO List</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueCashReconcile()">🧾 Paid by Staff vs NGB Cash List</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueMessageCenter()">💬 Send SMS / WhatsApp</button>
@@ -1130,6 +1130,10 @@
                     <input id="revenue-target-date" type="date" onchange="renderRevenueTargetAchievement()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:block; border:1.2px solid #93c5fd; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
                     <input id="revenue-target-month" type="month" onchange="renderRevenueTargetAchievement()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:none; border:1.2px solid #93c5fd; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
                 </div>
+                <select id="revenue-target-viewby" onchange="setRevenueTargetViewBy(this.value)" style="width:100%; max-width:360px; height:42px; margin:8px auto 0; display:block; border:1.5px solid #93c5fd; border-radius:12px; padding:0 12px; font-size:0.76rem; font-weight:950; color:#1d4ed8; background:#eff6ff;">
+                    <option value="HQ">HQ WISE</option>
+                    <option value="VILLAGE">VILLAGE WISE</option>
+                </select>
                 <div id="revenue-target-summary" style="width:100%; max-width:360px; margin:0 auto;"></div>
                 <div id="revenue-target-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
                 <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
@@ -1143,7 +1147,7 @@
         <main id="revenue-top-defaulters-view" class="view">
             <div class="search-panel" style="padding-top:10px;">
                 <div style="width:100%; max-width:360px; background:#fff1f2; border:1.2px solid #fda4af; border-radius:14px; padding:9px 12px; text-align:center;">
-                    <div style="font-size:0.78rem; font-weight:950; color:#9f1239; text-transform:uppercase;">Top Defaulters</div>
+                    <div style="font-size:0.78rem; font-weight:950; color:#9f1239; text-transform:uppercase;">Top 20/50 Defaulters</div>
                     <div id="revenue-defaulters-scope-label" style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">Cash List ke baad sabse zyada bakaya wale consumer</div>
                 </div>
                 <div style="display:flex; gap:8px; width:100%; max-width:360px; margin:9px auto 0;">
