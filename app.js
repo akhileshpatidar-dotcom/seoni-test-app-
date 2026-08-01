@@ -117,6 +117,13 @@
         ];
 
         let activeDiv = "", activeDC = "", activeGrad = "bg-teal-grad", summaryMode = "DAILY", summaryModule = "MOBILE", activeViewLevel = "", currentData = null, pendingLevel = "", dcCacheRaw = {}, dcCacheRows = {}, uiListSummary = [], grandTC = 0, grandTU = 0, courtCaseRaw = "", courtCaseCacheByDc = {}, courtCaseLines = [], courtCaseRecords = [], lokDistributedRows = [], lokDistributedLoaded = false, currentCourtRecord = null, receiverGeoData = null;
+        // Progress Report (Daily Progress) ke Revenue tab me Category Wise ke saath-saath
+        // Target vs Achievement aur Top 20/50 Defaulters bhi dropdown se select ho sakein -
+        // teeno DC/Division/Circle scope automatically activeViewLevel se hi follow karte
+        // hain (jaisa is view ka baaki sab data already karta hai), koi alag scoping nahi.
+        let progressRevenueReportType = "CATEGORY";
+        let progressRevenueDefaultersLimit = 20;
+        let lastRevenueProgressBoxData = null;
         let suppressHistoryPush = false;
         let progressSummaryDownloadInProgress = false;
         let selectedStockReceiveItem = null, selectedStockIssueItem = null, pendingReceiveItems = [], pendingIssueItems = [];
@@ -1688,6 +1695,104 @@
             }
         }
 
+        // Dropdown se jo bhi report type (Category Wise / Target vs Achievement / Top
+        // 20-50 Defaulters) select hai, usi ke hisaab se sahi download function call karta
+        // hai. Category Wise ke liye purani, poori tarah test-ki-hui exportRevenueCategory-
+        // Summary() hi chalti hai - Target/Defaulters ke liye alag, seedhe simple export.
+        function downloadProgressRevenueReportBox(fmt) {
+            if (progressRevenueReportType === "TARGET") return downloadProgressRevenueTargetSummary(fmt);
+            if (progressRevenueReportType === "DEFAULTERS") return downloadProgressRevenueDefaultersSummary(fmt);
+            return downloadProgressRevenueCategorySummary(fmt);
+        }
+
+        function downloadProgressRevenueTargetSummary(fmt) {
+            if (!lastRevenueProgressBoxData?.hqVillageSummaryData) return showToast("Report ke liye data nahi hai", false);
+            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
+            setProgressCategoryDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
+            try {
+                const tree = lastRevenueProgressBoxData.hqVillageSummaryData.tree || [];
+                const colLabel = activeViewLevel === "DC" ? "HQ NAME" : "DC NAME";
+                const headers = [colLabel, "TARGET", "ACHIEVED", "%"];
+                const rows = tree.map((row) => {
+                    const target = Number(row.paidAmountTotal || 0) + Number(row.unpaidAmountTotal || 0);
+                    return [row.name, formatProgressReportAmount(target), formatProgressReportAmount(row.paidAmountTotal), `${getRevenueAchievementPct(row.paidAmountTotal, target)}%`];
+                });
+                const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+                const reportTitle = `Target vs Achievement Summary - ${scope}`;
+                const rawVal = document.getElementById("report-date")?.value || "";
+                const parsed = parseSummarySelection(rawVal, summaryMode);
+                const periodLine = `Period: ${parsed.label || getTodayIsoDate()}`;
+                const fileName = `${reportTitle}-${parsed.label || getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (fmt === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
+                    doc.text(periodLine, 148, 25, { align: "center" });
+                    doc.autoTable({ startY: 31, head: [headers], body: rows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                } else {
+                    const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                    const csv = [[reportTitle], [`Scope: ${scope}`], [periodLine], [], headers, ...rows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                    link.download = `${fileName}.csv`;
+                    link.click();
+                }
+                setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
+            } catch (error) {
+                setProgressCategoryDownloadState(false, "Download nahi ho paya");
+                showToast(error?.message || "Target vs Achievement download nahi ho payi", false);
+            }
+        }
+
+        function downloadProgressRevenueDefaultersSummary(fmt) {
+            if (!lastRevenueProgressBoxData) return showToast("Report ke liye data nahi hai", false);
+            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
+            setProgressCategoryDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
+            try {
+                const { mode, filterValue } = lastRevenueProgressBoxData;
+                const consumerRows = buildRevenueHqVillageConsumerRows(mode, filterValue);
+                const rows = consumerRows
+                    .filter((row) => !row.paid)
+                    .map((row) => ({ ...row, pendingAmount: parseRevenuePaidAmount(row.netBill || 0) }))
+                    .filter((row) => row.pendingAmount > 0)
+                    .sort((a, b) => b.pendingAmount - a.pendingAmount)
+                    .slice(0, progressRevenueDefaultersLimit);
+                if (!rows.length) { setProgressCategoryDownloadState(false, "Download ke liye data nahi hai"); return; }
+                const headers = ["RANK", "IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "MOBILE NO", "PENDING AMOUNT"];
+                const bodyRows = rows.map((row, index) => [index + 1, row.ivrsNo || "", row.consumerName || "", row.hqName || "", row.village || "", row.mobileNo || "", formatProgressReportAmount(row.pendingAmount)]);
+                const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+                const reportTitle = `Top ${progressRevenueDefaultersLimit} Defaulters - ${scope}`;
+                const rawVal = document.getElementById("report-date")?.value || "";
+                const parsed = parseSummarySelection(rawVal, summaryMode);
+                const periodLine = `Period: ${parsed.label || getTodayIsoDate()}`;
+                const fileName = `${reportTitle}-${parsed.label || getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (fmt === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
+                    doc.text(periodLine, 148, 25, { align: "center" });
+                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                } else {
+                    const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                    const csv = [[reportTitle], [`Scope: ${scope}`], [periodLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                    link.download = `${fileName}.csv`;
+                    link.click();
+                }
+                setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
+            } catch (error) {
+                setProgressCategoryDownloadState(false, "Download nahi ho paya");
+                showToast(error?.message || "Top Defaulters download nahi ho payi", false);
+            }
+        }
+
         function setProgressSummaryDownloadState(isDownloading, message = "") {
             const status = document.getElementById("progress-summary-download-status");
             const buttons = document.querySelectorAll("#summary-content .btn-export-row button");
@@ -1722,6 +1827,129 @@
             return html;
         }
 
+        function renderRevenueTargetStaticTableHtml(tree, colLabel) {
+            const rows = tree || [];
+            let html = `<div class="summary-wrapper" style="margin-top:6px;"><div class="summary-table-header" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.7fr;"><div>${colLabel}</div><div>TARGET</div><div>ACHIEVED</div><div>%</div></div>`;
+            if (!rows.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Data nahi mila.</div></div>`;
+            } else {
+                rows.forEach((row) => {
+                    const rowClass = row.type === "SUB_TOTAL" ? " blue-bold" : (row.type === "SUBDN_TOTAL" ? " subdn-bold" : "");
+                    const target = Number(row.paidAmountTotal || 0) + Number(row.unpaidAmountTotal || 0);
+                    const pct = getRevenueAchievementPct(row.paidAmountTotal, target);
+                    const pctColor = pct >= 75 ? "#166534" : (pct >= 40 ? "#b45309" : "#9f1239");
+                    html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.7fr;"><div>${escapeHtml(row.name)}</div><div class="font-black">${formatProgressReportAmount(target)}</div><div class="text-emerald-700 font-black">${formatProgressReportAmount(row.paidAmountTotal)}</div><div style="color:${pctColor}; font-weight:950;">${pct}%</div></div>`;
+                });
+            }
+            html += `</div>`;
+            return html;
+        }
+
+        // Target vs Achievement ka wahi tree (buildRevenueHqVillagePaidUnpaidTree se aaya
+        // hua, jo hqVillageSummaryData.tree me already available hai - Category Wise summary
+        // ke liye load ho hi chuka hai) reuse karte hain, sirf presentation Target/Achieved/%
+        // ki hai. Isliye koi extra fetch nahi chahiye - dropdown switch turant, bina reload ke.
+        function renderRevenueProgressTargetSummaryHtml(data) {
+            const target = Number(data.totals.paidAmountTotal || 0) + Number(data.totals.unpaidAmountTotal || 0);
+            const pct = getRevenueAchievementPct(data.totals.paidAmountTotal, target);
+            const pctColor = pct >= 75 ? "#166534" : (pct >= 40 ? "#b45309" : "#9f1239");
+            const colLabel = activeViewLevel === "DC" ? "HQ NAME" : "DC NAME";
+            return `
+                <div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Target vs Achievement (Net Bill vs Paid)</div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; margin:10px auto 0;">
+                    <div style="background:#f1f5f9; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#64748b; text-transform:uppercase;">Target</div><div style="font-size:0.82rem; font-weight:950; color:#0f172a; margin-top:2px;">${formatProgressReportAmount(target)}</div></div>
+                    <div style="background:#ecfdf5; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#166534; text-transform:uppercase;">Achieved</div><div style="font-size:0.82rem; font-weight:950; color:#166534; margin-top:2px;">${formatProgressReportAmount(data.totals.paidAmountTotal)}</div></div>
+                    <div style="background:#eff6ff; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#1d4ed8; text-transform:uppercase;">%</div><div style="font-size:0.95rem; font-weight:950; color:${pctColor}; margin-top:2px;">${pct}%</div></div>
+                </div>
+                <div style="font-size:0.62rem; font-weight:900; color:#1d4ed8; text-align:center; margin-top:10px;">${colLabel} WISE</div>
+                ${renderRevenueTargetStaticTableHtml(data.tree, colLabel)}
+            `;
+        }
+
+        // Top 20/50 Defaulters ka data buildRevenueHqVillageConsumerRows() se aata hai - isi
+        // function ka data "HQ / Village Wise Paid-Unpaid" list section aur dedicated "Top
+        // 20/50 Defaulters" report dono use karte hain. Yahan par (Daily/Progress Report ki
+        // Revenue tab me) bhi wahi consumer-level unpaid rows lekar, jo scope (DC/Division/
+        // Circle) abhi active hai usi ke hisaab se top defaulters nikalte hain.
+        function renderRevenueProgressDefaultersSummaryHtml(mode, filterValue) {
+            const consumerRows = buildRevenueHqVillageConsumerRows(mode, filterValue);
+            const rows = consumerRows
+                .filter((row) => !row.paid)
+                .map((row) => ({ ...row, pendingAmount: parseRevenuePaidAmount(row.netBill || 0) }))
+                .filter((row) => row.pendingAmount > 0)
+                .sort((a, b) => b.pendingAmount - a.pendingAmount)
+                .slice(0, progressRevenueDefaultersLimit);
+            let html = `
+                <div style="font-size:0.75rem; font-weight:950; color:#9f1239; text-align:center;">Top ${progressRevenueDefaultersLimit} Defaulters (Cash List ke baad bakaya)</div>
+                <div style="display:flex; gap:8px; width:100%; margin:9px auto 0;">
+                    <div onclick="setProgressDefaultersLimit(20)" style="flex:1; height:28px; line-height:28px; text-align:center; border-radius:999px; cursor:pointer; font-size:0.6rem; font-weight:950; background:${progressRevenueDefaultersLimit === 20 ? "#9f1239" : "#ffe4e6"}; color:${progressRevenueDefaultersLimit === 20 ? "#ffffff" : "#9f1239"};">TOP 20</div>
+                    <div onclick="setProgressDefaultersLimit(50)" style="flex:1; height:28px; line-height:28px; text-align:center; border-radius:999px; cursor:pointer; font-size:0.6rem; font-weight:950; background:${progressRevenueDefaultersLimit === 50 ? "#9f1239" : "#ffe4e6"}; color:${progressRevenueDefaultersLimit === 50 ? "#ffffff" : "#9f1239"};">TOP 50</div>
+                </div>
+                <div class="summary-wrapper" style="margin-top:8px;"><div class="summary-table-header" style="grid-template-columns: 0.4fr 1.3fr 1fr;"><div>#</div><div>CONSUMER</div><div>PENDING</div></div>
+            `;
+            if (!rows.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is scope me koi bakaya consumer nahi mila.</div></div>`;
+            } else {
+                rows.forEach((row, index) => {
+                    html += `<div class="summary-table-row" style="grid-template-columns: 0.4fr 1.3fr 1fr;"><div class="font-black">${index + 1}</div><div>${escapeHtml(row.consumerName || "-")}<br><span style="font-size:0.56rem; color:#64748b;">${escapeHtml(row.hqName)} / ${escapeHtml(row.village)}</span></div><div class="text-rose-700 font-black">${formatProgressReportAmount(row.pendingAmount)}</div></div>`;
+                });
+            }
+            html += `</div>`;
+            return html;
+        }
+
+        function setProgressRevenueReportType(value) {
+            progressRevenueReportType = ["CATEGORY", "TARGET", "DEFAULTERS"].includes(value) ? value : "CATEGORY";
+            renderProgressRevenueReportBoxFromCache();
+        }
+
+        function setProgressDefaultersLimit(limit) {
+            progressRevenueDefaultersLimit = limit === 50 ? 50 : 20;
+            renderProgressRevenueReportBoxFromCache();
+        }
+
+        function renderProgressRevenueReportBoxFromCache() {
+            const box = document.getElementById("progress-category-download-box");
+            if (!box || !lastRevenueProgressBoxData) return;
+            box.innerHTML = renderProgressRevenueReportBoxInner(lastRevenueProgressBoxData.hqVillageSummaryData, lastRevenueProgressBoxData.mode, lastRevenueProgressBoxData.filterValue);
+        }
+
+        function getProgressRevenueReportTypeLabel() {
+            if (progressRevenueReportType === "TARGET") return "Target vs Achievement";
+            if (progressRevenueReportType === "DEFAULTERS") return `Top ${progressRevenueDefaultersLimit} Defaulters`;
+            return "Category Wise";
+        }
+
+        function renderProgressRevenueReportBoxInner(hqVillageSummaryData, mode, filterValue) {
+            const selectHtml = `
+                <select onchange="setProgressRevenueReportType(this.value)" style="width:100%; height:38px; margin-bottom:8px; display:block; border:1.5px solid #93c5fd; border-radius:10px; padding:0 10px; font-size:0.72rem; font-weight:950; color:#1d4ed8; background:#ffffff;">
+                    <option value="CATEGORY" ${progressRevenueReportType === "CATEGORY" ? "selected" : ""}>Category Wise</option>
+                    <option value="TARGET" ${progressRevenueReportType === "TARGET" ? "selected" : ""}>Target vs Achievement</option>
+                    <option value="DEFAULTERS" ${progressRevenueReportType === "DEFAULTERS" ? "selected" : ""}>Top 20/50 Defaulters</option>
+                </select>
+            `;
+            let bodyHtml;
+            if (!hqVillageSummaryData) {
+                bodyHtml = `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Data nahi mila.</div>`;
+            } else if (progressRevenueReportType === "TARGET") {
+                bodyHtml = renderRevenueProgressTargetSummaryHtml(hqVillageSummaryData);
+            } else if (progressRevenueReportType === "DEFAULTERS") {
+                bodyHtml = renderRevenueProgressDefaultersSummaryHtml(mode, filterValue);
+            } else {
+                bodyHtml = renderRevenueProgressHqVillageSummaryHtml(hqVillageSummaryData);
+            }
+            const typeLabel = getProgressRevenueReportTypeLabel();
+            return `
+                ${selectHtml}
+                ${bodyHtml}
+                <div class="btn-export-row" style="margin-top:8px;">
+                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">${escapeHtml(typeLabel)} Excel</button>
+                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">${escapeHtml(typeLabel)} PDF</button>
+                </div>
+                <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>
+            `;
+        }
+
         // Daily Progress (DC/Division/Circle) me sirf summary dikhani hai - koi drill-down
         // ya per-consumer list/download yahan nahi, sirf Total/Paid/Unpaid + category-wise +
         // HQ ya DC-wise (level ke hisaab se) numbers. Poora consumer-level list/dropdown sirf
@@ -1752,7 +1980,7 @@
             `;
         }
 
-        function renderRevenueProgressSummary(rows, label, hqVillageSummaryData = null) {
+        function renderRevenueProgressSummary(rows, label, hqVillageSummaryData = null, revenueMode = "DAILY", revenueFilterValue = "") {
             const colLabel = getRevenueProgressColumnLabel();
             const totals = getRevenueProgressTotals(rows);
             let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.15fr 0.75fr 0.95fr 0.75fr 0.95fr;"><div>${colLabel}</div><div>PAID</div><div>PAID AMT</div><div>LINE TD</div><div>TD AMT</div></div>`;
@@ -1779,14 +2007,10 @@
                 </div>
                 <div id="progress-summary-download-status" style="display:none; text-align:center; font-weight:900; border-radius:16px; padding:10px 12px; width:100%; margin-top:12px;"></div>
                 <div id="progress-category-download-box" style="margin-top:12px; border:1.5px dashed #93c5fd; background:#eff6ff; border-radius:16px; padding:10px;">
-                    ${hqVillageSummaryData ? renderRevenueProgressHqVillageSummaryHtml(hqVillageSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Category Wise Paid/Unpaid Summary</div>`}
-                    <div class="btn-export-row" style="margin-top:8px;">
-                        <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueCategorySummary('XLS')">Category Excel</button>
-                        <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueCategorySummary('PDF')">Category PDF</button>
-                    </div>
-                    <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>
+                    ${renderProgressRevenueReportBoxInner(hqVillageSummaryData, revenueMode, revenueFilterValue)}
                 </div>
             </div>`;
+            lastRevenueProgressBoxData = { hqVillageSummaryData, mode: revenueMode, filterValue: revenueFilterValue };
             return html;
         }
 
@@ -2054,7 +2278,7 @@
                         hqVillageSummaryData = null;
                     }
 
-                    cont.innerHTML = renderRevenueProgressSummary(uiListSummary, label, hqVillageSummaryData);
+                    cont.innerHTML = renderRevenueProgressSummary(uiListSummary, label, hqVillageSummaryData, revenueMode, revenueFilterValue);
                 } catch (error) {
                     cont.innerHTML = '<p class="text-center text-red-500 py-10 font-black">REVENUE REPORT LOAD NAHI HO PAYI</p>';
                 }
