@@ -121,9 +121,10 @@
         // Target vs Achievement aur Top 20/50 Defaulters bhi dropdown se select ho sakein -
         // teeno DC/Division/Circle scope automatically activeViewLevel se hi follow karte
         // hain (jaisa is view ka baaki sab data already karta hai), koi alag scoping nahi.
-        let progressRevenueReportType = "CATEGORY";
+        let progressRevenueReportType = "STAFF";
         let progressRevenueDefaultersLimit = 20;
         let lastRevenueProgressBoxData = null;
+        let lastRevenueProgressStaffData = null;
         let suppressHistoryPush = false;
         let progressSummaryDownloadInProgress = false;
         let selectedStockReceiveItem = null, selectedStockIssueItem = null, pendingReceiveItems = [], pendingIssueItems = [];
@@ -1439,7 +1440,7 @@
         let categoryDownloadProgressToken = 0;
         function setProgressCategoryDownloadState(isDownloading, message = "") {
             const status = document.getElementById("progress-category-download-status");
-            const buttons = document.querySelectorAll("#progress-category-download-box button");
+            const buttons = document.querySelectorAll("#progress-revenue-body .btn-export-row button");
             const statusMessage = normalizeActionStatusMessage(message, isDownloading, !String(message || "").toLowerCase().includes("nahi"));
             buttons.forEach((button) => {
                 button.disabled = isDownloading;
@@ -1899,55 +1900,22 @@
         }
 
         function setProgressRevenueReportType(value) {
-            progressRevenueReportType = ["CATEGORY", "TARGET", "DEFAULTERS"].includes(value) ? value : "CATEGORY";
-            renderProgressRevenueReportBoxFromCache();
+            progressRevenueReportType = ["STAFF", "CATEGORY", "TARGET", "DEFAULTERS"].includes(value) ? value : "STAFF";
+            const body = document.getElementById("progress-revenue-body");
+            if (body) body.innerHTML = renderProgressRevenueBodyInner();
         }
 
         function setProgressDefaultersLimit(limit) {
             progressRevenueDefaultersLimit = limit === 50 ? 50 : 20;
-            renderProgressRevenueReportBoxFromCache();
-        }
-
-        function renderProgressRevenueReportBoxFromCache() {
-            const box = document.getElementById("progress-category-download-box");
-            if (!box || !lastRevenueProgressBoxData) return;
-            box.innerHTML = renderProgressRevenueReportBoxInner(lastRevenueProgressBoxData.hqVillageSummaryData, lastRevenueProgressBoxData.mode, lastRevenueProgressBoxData.filterValue);
+            const body = document.getElementById("progress-revenue-body");
+            if (body) body.innerHTML = renderProgressRevenueBodyInner();
         }
 
         function getProgressRevenueReportTypeLabel() {
             if (progressRevenueReportType === "TARGET") return "Target vs Achievement";
             if (progressRevenueReportType === "DEFAULTERS") return `Top ${progressRevenueDefaultersLimit} Defaulters`;
+            if (progressRevenueReportType === "STAFF") return "Paid by Staff";
             return "Category Wise";
-        }
-
-        function renderProgressRevenueReportBoxInner(hqVillageSummaryData, mode, filterValue) {
-            const selectHtml = `
-                <select onchange="setProgressRevenueReportType(this.value)" style="width:100%; height:38px; margin-bottom:8px; display:block; border:1.5px solid #93c5fd; border-radius:10px; padding:0 10px; font-size:0.72rem; font-weight:950; color:#1d4ed8; background:#ffffff;">
-                    <option value="CATEGORY" ${progressRevenueReportType === "CATEGORY" ? "selected" : ""}>Category Wise</option>
-                    <option value="TARGET" ${progressRevenueReportType === "TARGET" ? "selected" : ""}>Target vs Achievement</option>
-                    <option value="DEFAULTERS" ${progressRevenueReportType === "DEFAULTERS" ? "selected" : ""}>Top 20/50 Defaulters</option>
-                </select>
-            `;
-            let bodyHtml;
-            if (!hqVillageSummaryData) {
-                bodyHtml = `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Data nahi mila.</div>`;
-            } else if (progressRevenueReportType === "TARGET") {
-                bodyHtml = renderRevenueProgressTargetSummaryHtml(hqVillageSummaryData);
-            } else if (progressRevenueReportType === "DEFAULTERS") {
-                bodyHtml = renderRevenueProgressDefaultersSummaryHtml(mode, filterValue);
-            } else {
-                bodyHtml = renderRevenueProgressHqVillageSummaryHtml(hqVillageSummaryData);
-            }
-            const typeLabel = getProgressRevenueReportTypeLabel();
-            return `
-                ${selectHtml}
-                ${bodyHtml}
-                <div class="btn-export-row" style="margin-top:8px;">
-                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">${escapeHtml(typeLabel)} Excel</button>
-                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">${escapeHtml(typeLabel)} PDF</button>
-                </div>
-                <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>
-            `;
         }
 
         // Daily Progress (DC/Division/Circle) me sirf summary dikhani hai - koi drill-down
@@ -1980,7 +1948,10 @@
             `;
         }
 
-        function renderRevenueProgressSummary(rows, label, hqVillageSummaryData = null, revenueMode = "DAILY", revenueFilterValue = "") {
+        // "Paid by Staff" (jo pehle hamesha upar dikhta tha) ab bhi wahi table hai, sirf
+        // ab dropdown se select hone par hi dikhta hai - baaki 3 report type isi jagah
+        // (usi #progress-revenue-body me) unke apne render se replace ho jate hain.
+        function renderRevenueProgressStaffBodyHtml(rows, label) {
             const colLabel = getRevenueProgressColumnLabel();
             const totals = getRevenueProgressTotals(rows);
             let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.15fr 0.75fr 0.95fr 0.75fr 0.95fr;"><div>${colLabel}</div><div>PAID</div><div>PAID AMT</div><div>LINE TD</div><div>TD AMT</div></div>`;
@@ -2006,12 +1977,55 @@
                     </button>
                 </div>
                 <div id="progress-summary-download-status" style="display:none; text-align:center; font-weight:900; border-radius:16px; padding:10px 12px; width:100%; margin-top:12px;"></div>
-                <div id="progress-category-download-box" style="margin-top:12px; border:1.5px dashed #93c5fd; background:#eff6ff; border-radius:16px; padding:10px;">
-                    ${renderProgressRevenueReportBoxInner(hqVillageSummaryData, revenueMode, revenueFilterValue)}
-                </div>
             </div>`;
-            lastRevenueProgressBoxData = { hqVillageSummaryData, mode: revenueMode, filterValue: revenueFilterValue };
             return html;
+        }
+
+        // Category Wise / Target vs Achievement / Top 20-50 Defaulters - teeno isi dashed
+        // box me, jo bhi type dropdown me select hai usi ka content + usi ka Excel/PDF.
+        function renderRevenueProgressNonStaffBoxHtml() {
+            const data = lastRevenueProgressBoxData || {};
+            let bodyHtml;
+            if (progressRevenueReportType === "TARGET") {
+                bodyHtml = data.hqVillageSummaryData ? renderRevenueProgressTargetSummaryHtml(data.hqVillageSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Data nahi mila.</div>`;
+            } else if (progressRevenueReportType === "DEFAULTERS") {
+                bodyHtml = renderRevenueProgressDefaultersSummaryHtml(data.mode || "DAILY", data.filterValue || "");
+            } else {
+                bodyHtml = data.hqVillageSummaryData ? renderRevenueProgressHqVillageSummaryHtml(data.hqVillageSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Category Wise Paid/Unpaid Summary</div>`;
+            }
+            const typeLabel = getProgressRevenueReportTypeLabel();
+            return `
+                <div style="border:1.5px dashed #93c5fd; background:#eff6ff; border-radius:16px; padding:10px;">
+                    ${bodyHtml}
+                    <div class="btn-export-row" style="margin-top:8px;">
+                        <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">${escapeHtml(typeLabel)} Excel</button>
+                        <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">${escapeHtml(typeLabel)} PDF</button>
+                    </div>
+                    <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>
+                </div>
+            `;
+        }
+
+        function renderProgressRevenueBodyInner() {
+            if (progressRevenueReportType === "CATEGORY" || progressRevenueReportType === "TARGET" || progressRevenueReportType === "DEFAULTERS") {
+                return renderRevenueProgressNonStaffBoxHtml();
+            }
+            const staffData = lastRevenueProgressStaffData || { rows: [], label: "" };
+            return renderRevenueProgressStaffBodyHtml(staffData.rows, staffData.label);
+        }
+
+        function renderRevenueProgressSummary(rows, label, hqVillageSummaryData = null, revenueMode = "DAILY", revenueFilterValue = "") {
+            lastRevenueProgressBoxData = { hqVillageSummaryData, mode: revenueMode, filterValue: revenueFilterValue };
+            lastRevenueProgressStaffData = { rows, label };
+            const selectHtml = `
+                <select onchange="setProgressRevenueReportType(this.value)" style="width:100%; max-width:360px; height:44px; margin:0 auto 10px; display:block; border:1.5px solid #0f766e; border-radius:12px; padding:0 12px; font-size:0.78rem; font-weight:950; color:#0f766e; background:#ffffff;">
+                    <option value="STAFF" ${progressRevenueReportType === "STAFF" ? "selected" : ""}>Paid by Staff (Daily/Monthly)</option>
+                    <option value="CATEGORY" ${progressRevenueReportType === "CATEGORY" ? "selected" : ""}>Category Wise</option>
+                    <option value="TARGET" ${progressRevenueReportType === "TARGET" ? "selected" : ""}>Target vs Achievement</option>
+                    <option value="DEFAULTERS" ${progressRevenueReportType === "DEFAULTERS" ? "selected" : ""}>Top 20/50 Defaulters</option>
+                </select>
+            `;
+            return `${selectHtml}<div id="progress-revenue-body">${renderProgressRevenueBodyInner()}</div>`;
         }
 
         function renderSyncingProgress(cont, isStillValid, label = "SYNCING ALL DC DATA...") {
