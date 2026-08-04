@@ -2348,6 +2348,11 @@
                     <div style="background:#fff1f2; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Consumers</div><div style="font-size:0.95rem; font-weight:950; color:#9f1239; margin-top:2px;">${rows.length}</div></div>
                     <div style="background:#fff1f2; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Total Pending</div><div style="font-size:0.85rem; font-weight:950; color:#9f1239; margin-top:2px;">${formatProgressReportAmount(totalPending)}</div></div>
                 </div>
+                <div class="btn-export-row" style="margin-top:10px;">
+                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">${escapeHtml(getProgressRevenueReportTypeLabel())} Excel</button>
+                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">${escapeHtml(getProgressRevenueReportTypeLabel())} PDF</button>
+                </div>
+                <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>
                 <div class="summary-wrapper" style="margin-top:10px;"><div class="summary-table-header" style="grid-template-columns: 1.3fr 0.7fr 1fr;"><div>CONSUMER</div><div>${bucket === "SINCE_CONNECTION" ? "TYPE" : "MONTHS"}</div><div>PENDING</div></div>
             `;
             if (!rows.length) {
@@ -2536,6 +2541,14 @@
         function renderRevenueProgressNonStaffBoxHtml() {
             const data = lastRevenueProgressBoxData || {};
             let bodyHtml;
+            // Non Payee (3M/6M/Since Connection) me consumer list bahut lambi ho sakti hai
+            // (hazaaron rows) - isliye in teeno ke liye Excel/PDF buttons aur download-status
+            // ab renderRevenueProgressNonPayeeSummaryHtml() ke andar hi, summary cards (Consumers/
+            // Total Pending) ke turant baad, list se PEHLE render ho jaate hain - taki user ko
+            // download karne ke liye poori list scroll na karni pade. Isliye yahan (list ke baad)
+            // dobara buttons nahi jodte, warna do baar dikhte. Baaki Category/Target/Defaulters
+            // pehle jaisे hi (bodyHtml ke NEECHE) buttons rakhte hain - wahan list chhoti hoti hai.
+            const isNonPayeeType = ["NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION"].includes(progressRevenueReportType);
             if (progressRevenueReportType === "TARGET") {
                 bodyHtml = data.hqVillageSummaryData ? renderRevenueProgressTargetSummaryHtml(data.hqVillageSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Data nahi mila.</div>`;
             } else if (progressRevenueReportType === "DEFAULTERS") {
@@ -2550,14 +2563,15 @@
                 bodyHtml = data.hqVillageSummaryData ? renderRevenueProgressHqVillageSummaryHtml(data.hqVillageSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Category Wise Paid/Unpaid Summary</div>`;
             }
             const typeLabel = getProgressRevenueReportTypeLabel();
-            return `
-                <div style="border:1.5px dashed #93c5fd; background:#eff6ff; border-radius:16px; padding:10px;">
-                    ${bodyHtml}
+            const bottomButtonsHtml = isNonPayeeType ? "" : `
                     <div class="btn-export-row" style="margin-top:8px;">
                         <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">${escapeHtml(typeLabel)} Excel</button>
                         <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">${escapeHtml(typeLabel)} PDF</button>
                     </div>
-                    <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>
+                    <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>`;
+            return `
+                <div style="border:1.5px dashed #93c5fd; background:#eff6ff; border-radius:16px; padding:10px;">
+                    ${bodyHtml}${bottomButtonsHtml}
                 </div>
             `;
         }
