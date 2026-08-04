@@ -63,6 +63,31 @@ const STAFF_MAX_FAILED_ATTEMPTS = 5;
 const STAFF_LOCK_MINUTES = 15;
 const STAFF_DAILY_MESSAGE_LIMIT = 100;
 const STAFF_ALLOWED_ROLES = ["AE", "JE", "LINE STAFF", "OPERATOR", "TA", "METER READER"];
+// Fallback defaults only — real passwords should be set via
+// Project Settings > Script Properties (keys: STAFF_ADMIN_PASSWORD, REVENUE_ADMIN_PASSWORD).
+// Jab tak Script Property set nahi hoti, yahi fallback value use hogi.
+const STAFF_ADMIN_PASSWORD = "AE123";
+const REVENUE_ADMIN_PASSWORD = "JE12345";
+
+function getAdminPassword_(type) {
+  const props = PropertiesService.getScriptProperties();
+  if (type === "staff") return props.getProperty("STAFF_ADMIN_PASSWORD") || STAFF_ADMIN_PASSWORD;
+  if (type === "revenue") return props.getProperty("REVENUE_ADMIN_PASSWORD") || REVENUE_ADMIN_PASSWORD;
+  return "";
+}
+
+function requireRevenueAdmin_(data) {
+  if (clean_(data.admin_password) !== getAdminPassword_("revenue")) throw new Error("Invalid Admin Password");
+}
+
+function verifyAdminPassword_(data) {
+  const type = clean_(data.password_type).toLowerCase();
+  if (type !== "staff" && type !== "revenue") {
+    return jsonResponse_({ status: "error", message: "Invalid password_type" });
+  }
+  const valid = clean_(data.password) === getAdminPassword_(type);
+  return jsonResponse_({ status: "success", valid: valid });
+}
 
 const TEST_STAFF_PROFILE = {
   staff_id: "9425805442",
@@ -100,7 +125,10 @@ function doPost(e) {
     if (action === "staffChangePin") return staffChangePin_(data);
     if (action === "staffLogout") return staffLogout_(data);
     if (action === "staffLogMessage") return staffLogMessage_(data);
+    if (action === "staffAdminSearch") return staffAdminSearch_(data);
+    if (action === "staffAdminAction") return staffAdminAction_(data);
     if (action === "uploadPaidMaster") return uploadPaidMaster_(data);
+    if (action === "verifyAdminPassword") return verifyAdminPassword_(data);
     if (action === "submitTD") return submitLineTd_(data);
     return submitRevenuePayment_(data);
   } catch (error) {
@@ -121,6 +149,10 @@ function doGet(e) {
     if (action === "checkPaid") return checkPaidEntry_(params);
     if (action === "checkUploadedPaid") return checkUploadedPaid_(params);
     if (action === "getUploadedPaidEntries") return getUploadedPaidEntries_(params);
+    if (action === "getUploadedPaidIvrsList") return getUploadedPaidIvrsList_(params);
+    if (action === "getUploadedPaidCategoryList") return getUploadedPaidCategoryList_(params);
+    if (action === "getPaidMasterRowCount") return getPaidMasterRowCount_(params);
+    if (action === "getPaidMasterLastUploadDate") return getPaidMasterLastUploadDate_(params);
     if (action === "checkTD") return checkLineTd_(params);
     if (action === "getTDEntries") return getLineTdEntries_(params);
 
@@ -200,6 +232,121 @@ function resetTestStaffDevice() {
   sheet.getRange(found.rowNumber, 16).clearContent();
   deactivateStaffSessions_(ss, "9425805442");
   return "Test staff device reset ho gaya";
+}
+
+// Run only once before starting fresh self-registration testing.
+// This removes old staff accounts, sessions and message activity rows.
+function resetStaffRegistrationSystemOnce() {
+  const ss = getSpreadsheet_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const staffSheet = getOrCreateSheet_(ss, STAFF_MASTER_SHEET_NAME, STAFF_MASTER_HEADERS);
+    const sessionSheet = getOrCreateSheet_(ss, STAFF_SESSION_SHEET_NAME, STAFF_SESSION_HEADERS);
+    const messageSheet = getOrCreateSheet_(ss, MESSAGE_LOG_SHEET_NAME, MESSAGE_LOG_HEADERS);
+    clearSheetRowsBelowHeader_(staffSheet, STAFF_MASTER_HEADERS.length);
+    clearSheetRowsBelowHeader_(sessionSheet, STAFF_SESSION_HEADERS.length);
+    clearSheetRowsBelowHeader_(messageSheet, MESSAGE_LOG_HEADERS.length);
+    return "STAFF REGISTRATION TOTAL RESET COMPLETE";
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function clearSheetRowsBelowHeader_(sheet, columnCount) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, columnCount).clearContent();
+}
+
+function requireStaffAdmin_(data) {
+  if (clean_(data.admin_password) !== getAdminPassword_("staff")) throw new Error("Invalid Admin Password");
+}
+
+function getStaffAdminAccount_(data) {
+  const dcName = requireDcName_(data.dc_name);
+  const mobileNo = normalizeMobile_(data.mobile_no);
+  if (!mobileNo) throw new Error("Valid 10-digit staff mobile number required hai");
+  const ss = getSpreadsheet_();
+  const sheet = getOrCreateSheet_(ss, STAFF_MASTER_SHEET_NAME, STAFF_MASTER_HEADERS);
+  const found = findStaffRow_(sheet, mobileNo);
+  if (!found) throw new Error("Is mobile number ka staff account nahi mila");
+  if (normalizeDcKey_(found.values[4]) !== normalizeDcKey_(dcName)) {
+    throw new Error("Staff selected DC me registered nahi hai");
+  }
+  return { ss: ss, sheet: sheet, found: found };
+}
+
+function mapStaffAdminAccount_(row) {
+  const safe = mapSafeStaff_(row);
+  const lockedUntil = row[12];
+  safe.failed_attempts = Number(row[11] || 0);
+  safe.locked_until = dateValueToMillis_(lockedUntil) > Date.now()
+    ? Utilities.formatDate(new Date(lockedUntil), Session.getScriptTimeZone() || "Asia/Kolkata", "dd/MM/yyyy HH:mm")
+    : "";
+  safe.device_registered = !!clean_(row[15]);
+  safe.must_change_pin = clean_(row[9]).toUpperCase() === "YES";
+  return safe;
+}
+
+function staffAdminSearch_(data) {
+  requireStaffAdmin_(data);
+  const account = getStaffAdminAccount_(data);
+  return jsonResponse_({
+    status: "success",
+    message: "Staff account found",
+    staff: mapStaffAdminAccount_(account.found.values)
+  });
+}
+
+function staffAdminAction_(data) {
+  requireStaffAdmin_(data);
+  const adminAction = clean_(data.admin_action).toUpperCase();
+  const allowedActions = ["RESET_DEVICE", "RESET_PIN", "UNLOCK_ACCOUNT", "DEACTIVATE_ACCOUNT"];
+  if (allowedActions.indexOf(adminAction) < 0) throw new Error("Invalid Staff Admin action");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const account = getStaffAdminAccount_(data);
+    const sheet = account.sheet;
+    const found = account.found;
+    const staffId = clean_(found.values[0]);
+    let message = "";
+    let temporaryPassword = "";
+
+    if (adminAction === "RESET_DEVICE") {
+      sheet.getRange(found.rowNumber, 16).clearContent();
+      sheet.getRange(found.rowNumber, 12, 1, 2).setValues([[0, ""]]);
+      deactivateStaffSessions_(account.ss, staffId);
+      message = "Staff device successfully reset ho gaya";
+    } else if (adminAction === "RESET_PIN") {
+      temporaryPassword = generateStaffTemporaryPassword_();
+      const salt = Utilities.getUuid();
+      sheet.getRange(found.rowNumber, 8, 1, 3).setValues([[
+        hashStaffSecret_(temporaryPassword, salt), salt, "YES"
+      ]]);
+      sheet.getRange(found.rowNumber, 12, 1, 2).setValues([[0, ""]]);
+      deactivateStaffSessions_(account.ss, staffId);
+      message = "Temporary password generate ho gaya";
+    } else if (adminAction === "UNLOCK_ACCOUNT") {
+      sheet.getRange(found.rowNumber, 12, 1, 2).setValues([[0, ""]]);
+      message = "Staff account successfully unlock ho gaya";
+    } else if (adminAction === "DEACTIVATE_ACCOUNT") {
+      sheet.getRange(found.rowNumber, 11).setValue("INACTIVE");
+      deactivateStaffSessions_(account.ss, staffId);
+      message = "Staff account successfully deactivate ho gaya";
+    }
+
+    const refreshed = findStaffRow_(sheet, staffId);
+    return jsonResponse_({
+      status: "success",
+      message: message,
+      temporary_password: temporaryPassword,
+      staff: mapStaffAdminAccount_(refreshed.values)
+    });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function staffRegister_(data) {
@@ -646,7 +793,7 @@ function submitRevenuePayment_(data) {
       time
     ]];
 
-    appendRows_(sheet, row, COLLECTION_HEADERS.length);
+    appendRows_(sheet, row, COLLECTION_HEADERS.length, COLLECTION_HEADERS);
     updateLineTdPaidStatus_(ss, dcName, ivrsNo, amountPaid, date, time);
 
     return jsonResponse_({
@@ -696,7 +843,7 @@ function submitLineTd_(data) {
       paidStatus
     ]];
 
-    appendRows_(sheet, row, LINE_TD_HEADERS.length);
+    appendRows_(sheet, row, LINE_TD_HEADERS.length, LINE_TD_HEADERS);
     return jsonResponse_({
       status: "success",
       message: "Line TD submit ho gaya",
@@ -816,6 +963,27 @@ function checkUploadedPaid_(params) {
   return jsonResponse_({ status: "success", paid: false });
 }
 
+function getPaidMasterLastUploadDate_(params) {
+  const requestedDc = clean_(params.dc_name);
+  if (!requestedDc) throw new Error("dc_name missing hai");
+  const dcName = requireDcName_(requestedDc);
+  const ss = getSpreadsheet_();
+  const sheet = getPaidMasterSheet_(ss, dcName, false);
+  if (!sheet || sheet.getLastRow() < 2) return jsonResponse_({ status: "success", dc_name: dcName, last_upload_date: "" });
+  const value = sheet.getRange(2, 9, 1, 1).getValue();
+  return jsonResponse_({ status: "success", dc_name: dcName, last_upload_date: formatDateValue_(value) });
+}
+
+function getPaidMasterRowCount_(params) {
+  const requestedDc = clean_(params.dc_name);
+  if (!requestedDc) throw new Error("dc_name missing hai");
+  const dcName = requireDcName_(requestedDc);
+  const ss = getSpreadsheet_();
+  const sheet = getPaidMasterSheet_(ss, dcName, false);
+  const count = sheet ? Math.max(0, sheet.getLastRow() - 1) : 0;
+  return jsonResponse_({ status: "success", dc_name: dcName, count: count });
+}
+
 function getUploadedPaidEntries_(params) {
   const requestedDc = clean_(params.dc_name);
   const ss = getSpreadsheet_();
@@ -827,6 +995,76 @@ function getUploadedPaidEntries_(params) {
     if (!sheet || sheet.getLastRow() < 2) return;
     const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, PAID_MASTER_HEADERS.length).getValues();
     entries = entries.concat(values.map(mapPaidMasterRow_).filter(hasIvrs_));
+  });
+
+  return jsonResponse_({ status: "success", entries: entries });
+}
+
+// LIGHTWEIGHT version of getUploadedPaidEntries_ - sirf "kaun paid hai" pata
+// karne ke liye chahiye hone wale fields (dc_name, ivrs_no, uploaded_date) hi
+// bhejta hai, har row ka bhaari "PAYMENT ROWS JSON" column (column 11) bilkul
+// nahi padhta/bhejta. Bade DC (jaise SEONI (T) - 33,000+ paid rows) ke liye
+// response kaafi chhota aur fast ho jaata hai, isliye slow/mobile network par
+// bhi reliably time par mil jaata hai. Poori payment-detail chahiye ho to
+// purana getUploadedPaidEntries hi use hoga (Category Wise report jaise
+// jagah), yeh sirf Pending DO List / Cash Reconcile / Freshness ticker ke
+// liye hai.
+function getUploadedPaidIvrsList_(params) {
+  const requestedDc = clean_(params.dc_name);
+  const ss = getSpreadsheet_();
+  const dcList = requestedDc ? [requireDcName_(requestedDc)] : DC_NAMES;
+  let entries = [];
+
+  dcList.forEach(function(dcName) {
+    const sheet = getPaidMasterSheet_(ss, dcName, false);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    // Sirf column 1-9 padhte hain (DC NAME..UPLOADED DATE) - column 10
+    // (UPLOADED TIME) aur 11 (bhaari PAYMENT ROWS JSON) skip kar dete hain.
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 9).getValues();
+    values.forEach(function(row) {
+      const ivrsNo = normalizeIvrs_(row[1]);
+      if (!ivrsNo) return;
+      entries.push({
+        dc_name: row[0],
+        ivrs_no: ivrsNo,
+        uploaded_date: formatDateValue_(row[8])
+      });
+    });
+  });
+
+  return jsonResponse_({ status: "success", entries: entries });
+}
+
+// Category Wise / Non-Payee / Target vs Achievement / Top Defaulters reports ke
+// liye - inhe per-consumer amount/date/category chahiye, lekin poori nested
+// "PAYMENT ROWS JSON" duplication nahi. Yeh flat (dc_name, ivrs_no, amount_paid,
+// payment_date, source_type, tariff_category) response deta hai - purane
+// getUploadedPaidEntries se kaafi chhota, isliye bade DC (SEONI (T) jaise) me
+// bhi fast/reliable rehta hai.
+function getUploadedPaidCategoryList_(params) {
+  const requestedDc = clean_(params.dc_name);
+  const ss = getSpreadsheet_();
+  const dcList = requestedDc ? [requireDcName_(requestedDc)] : DC_NAMES;
+  let entries = [];
+
+  dcList.forEach(function(dcName) {
+    const sheet = getPaidMasterSheet_(ss, dcName, false);
+    if (!sheet || sheet.getLastRow() < 2) return;
+    const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, PAID_MASTER_HEADERS.length).getValues();
+    values.forEach(function(row) {
+      const ivrsNo = normalizeIvrs_(row[1]);
+      if (!ivrsNo) return;
+      const paymentRows = parsePaymentRows_(row[10]);
+      const first = paymentRows.length ? paymentRows[0] : null;
+      entries.push({
+        dc_name: row[0],
+        ivrs_no: ivrsNo,
+        amount_paid: row[2],
+        payment_date: formatDateValue_(row[3]),
+        source_type: row[5],
+        tariff_category: first ? clean_(first.tariff_category || first.tariffCategory) : ""
+      });
+    });
   });
 
   return jsonResponse_({ status: "success", entries: entries });
@@ -1028,18 +1266,47 @@ function getDcSheet_(ss, prefix, dcName, headers, create) {
   return create ? getOrCreateSheet_(ss, sheetName, headers) : null;
 }
 
-function appendRows_(sheet, rows, columnCount) {
+function appendRows_(sheet, rows, columnCount, headers) {
   if (!rows.length) return;
   const startRow = Math.max(sheet.getLastRow() + 1, 2);
   const range = sheet.getRange(startRow, 1, rows.length, columnCount);
+  // DATE/TD DATE columns ko plain TEXT format karte hain values likhne SE
+  // PEHLE - warna Google Sheet apne locale ke hisaab se "dd/MM/yyyy" wali
+  // text string ko khud-ba-khud date samajh kar reinterpret kar sakta hai
+  // (din/mahina ulat sakta hai, jaise "04/08/2026" "08/04/2026" ban jaaye).
+  // Same fix jo replaceSheetData_() me PAID MASTER ke liye hai, yahan
+  // COLLECTION (PAID - {DC}) aur LINE TD sheets ke liye bhi - dono DC-agnostic,
+  // saare 24 DC par apply hote hain.
+  if (headers === COLLECTION_HEADERS) {
+    sheet.getRange(startRow, 12, rows.length, 1).setNumberFormat("@");
+  } else if (headers === LINE_TD_HEADERS) {
+    sheet.getRange(startRow, 11, rows.length, 1).setNumberFormat("@");
+  }
   range.setValues(rows);
   styleDataRange_(range);
 }
 
 function replaceSheetData_(sheet, rows, headers) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, headers.length).clearContent();
-  if (rows.length) appendRows_(sheet, rows, headers.length);
+  const maxRows = sheet.getMaxRows();
+  if (maxRows > 1) {
+    sheet.getRange(2, 1, maxRows - 1, headers.length).clearContent();
+  }
+  if (rows.length) {
+    const range = sheet.getRange(2, 1, rows.length, headers.length);
+    // PAYMENT DATE (column 4) aur UPLOADED DATE (column 9) ko plain TEXT
+    // format karte hain values likhne SE PEHLE. Warna Google Sheet apne
+    // locale ke hisaab se "dd/MM/yyyy" wali text string ko khud-ba-khud
+    // date samajh kar reinterpret kar sakta hai - agar Sheet ka locale
+    // US-style hai to din/mahina ulta ho jaata hai (e.g. "03/08/2026" store
+    // hoke "08/03/2026" ban jaata hai). Text-format cell me aisa reinterpret
+    // nahi hota, jo bilkul waisi hi string save/return karta hai jaisi bheji.
+    if (headers === PAID_MASTER_HEADERS) {
+      sheet.getRange(2, 4, rows.length, 1).setNumberFormat("@");
+      sheet.getRange(2, 9, rows.length, 1).setNumberFormat("@");
+    }
+    range.setValues(rows);
+    styleDataRange_(range);
+  }
 }
 
 /**
@@ -1141,7 +1408,7 @@ function rowSignature_(row) {
       return value.getTime();
     }
     return clean_(value);
-  }).join("\u001f");
+  }).join("");
 }
 
 function createAllDcSheets() {

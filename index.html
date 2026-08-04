@@ -322,6 +322,7 @@
                                 <button class="vr-calc-menu-btn" onclick="vrToggleMenu()">⋮</button>
                                 <div id="vr-menu-dropdown" style="display:none; position:absolute; right:0; top:40px; background:#fff; border:1px solid #ddd; border-radius:6px; box-shadow:0 4px 12px rgba(0,0,0,0.12); z-index:10; width:220px;">
                                     <button id="vr-menu-toggle-ref-btn" onclick="vrToggleReferenceInfo()" style="width:100%; text-align:left; padding:10px 14px; background:none; border:none; cursor:pointer; font-size:13px; color:#333;">Show Limits &amp; CC Reference Table</button>
+                                    <button onclick="openVrDownloadLog()" style="width:100%; text-align:left; padding:10px 14px; background:none; border:none; border-top:1px solid #eee; cursor:pointer; font-size:13px; color:#333;">📊 Download Log Report</button>
                                 </div>
                             </div>
                         </div>
@@ -390,6 +391,34 @@
                     </div>
 
                 </div>
+            </div>
+        </main>
+
+        <main id="vr-download-log-view" class="view">
+            <div class="search-panel" style="padding-top:10px;">
+                <div style="width:100%; max-width:360px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:14px; padding:9px 12px; text-align:center;">
+                    <div style="font-size:0.78rem; font-weight:950; color:#1d4ed8; text-transform:uppercase;">VR Download Log</div>
+                    <div style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">Division / DC / Date wise PDF download count</div>
+                </div>
+                <div style="display:flex; gap:8px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="vr-download-log-all-mode-btn" onclick="setVrDownloadLogMode('ALL')" style="flex:1; height:32px; border:none; border-radius:999px; background:#1d4ed8; color:#ffffff; font-size:0.62rem; font-weight:950;">ALL TIME</button>
+                    <button id="vr-download-log-date-mode-btn" onclick="setVrDownloadLogMode('DATE')" style="flex:1; height:32px; border:none; border-radius:999px; background:#dbeafe; color:#1d4ed8; font-size:0.62rem; font-weight:950;">DATE WISE</button>
+                </div>
+                <div style="width:100%; max-width:360px; overflow:hidden; border-radius:12px; margin:8px auto 0;">
+                    <input id="vr-download-log-date" type="date" onchange="renderVrDownloadLog()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:none; border:1.2px solid #93c5fd; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                </div>
+                <select id="vr-download-log-division" onchange="renderVrDownloadLog()" style="width:100%; max-width:360px; height:44px; margin:8px auto 0; display:block; border:1.5px solid #93c5fd; border-radius:12px; padding:0 12px; font-size:0.76rem; font-weight:950; color:#1d4ed8; background:#eff6ff;">
+                    <option value="">All Divisions</option>
+                    <option value="DIVISION SEONI">DIVISION SEONI</option>
+                    <option value="DIVISION LAKHNADON">DIVISION LAKHNADON</option>
+                </select>
+                <div id="vr-download-log-status" style="width:100%; max-width:360px; margin:10px auto 0; border-radius:14px; padding:10px; background:#f8fafc; border:1.2px dashed #93c5fd; color:#475569; font-size:0.72rem; font-weight:850; text-align:center;"></div>
+                <div id="vr-download-log-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
+                <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
+                    <button id="vr-download-log-pdf-btn" onclick="downloadVrDownloadLog('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF</button>
+                    <button id="vr-download-log-excel-btn" onclick="downloadVrDownloadLog('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL</button>
+                </div>
+                <div id="vr-download-log-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#eff6ff; border:1.2px solid #93c5fd; color:#1d4ed8; font-size:0.66rem; font-weight:950; text-align:center;">Loading...</div>
             </div>
         </main>
 
@@ -999,6 +1028,11 @@
                 </div>
                 <select id="revenue-report-hq" onchange="renderRevenueReportDownload()" style="width:100%; max-width:360px; height:38px; margin:8px auto 0; display:block; border:1.2px solid #93c5fd; border-radius:12px; padding:0 12px; font-size:0.7rem; font-weight:900; color:#0f172a; background:#ffffff;">
                     <option value="">All HQ</option>
+                </select>
+                <select id="revenue-report-type" onchange="renderRevenueReportDownload()" style="width:100%; max-width:360px; height:38px; margin:8px auto 0; display:block; border:1.2px solid #93c5fd; border-radius:12px; padding:0 12px; font-size:0.7rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                    <option value="">Paid + TD Both</option>
+                    <option value="PAID">Paid by Staff</option>
+                    <option value="TD">TD by Staff</option>
                 </select>
                 <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
                     <button id="revenue-report-pdf-btn" onclick="downloadRevenueSelectedReport('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF</button>

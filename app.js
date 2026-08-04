@@ -56,13 +56,18 @@
         //                                        (revenue-submit-script-dc-wise.gs)
         //   feederSubmitScriptUrl            -> Feeder Reading (feeder-submit-script.gs)
         //   peakLoadSubmitScriptUrl          -> Daily Hourly Peak Load (daily-hourly-peak-load-submit-script.gs)
+        //   vrDownloadLogScriptUrl           -> VR Calculation PDF Download Log (vr-download-log-submit-script.gs)
         //
         // Function dhoondhne ke liye keyword-search karo (feature-wise physically grouped nahi hai):
         // Feeder->"Feeder" | PeakLoad->"peakLoad" | Vehicle->"vehicleReading" | STM->"stm"
         // SHMS->"shms" | Stock->"Stock"/"Material" | Revenue->"revenue"/"Revenue"
-        // Staff Admin->"staffAdmin" | Court Case->"courtCase"
+        // Staff Admin->"staffAdmin" | Court Case->"courtCase" | VR Download Log->"vrDownloadLog"
         // =====================================================================
         const scriptURL = "https://script.google.com/macros/s/AKfycbw-euczRMZFKMjHveuvWd-vkuNqLXmFLkrLUERWgdExC7obxVGcBkBKGBWuHNfimzEh3g/exec";
+        // TODO: vr-download-log-submit-script.gs deploy karke jo Web App URL milega, wahi
+        // yahan paste karo. Jab tak yeh khaali hai, tab tak logVrDownload() chup-chap kuch
+        // nahi karega (koi error nahi aayega) - is se koi existing feature disturb nahi hoga.
+        const vrDownloadLogScriptUrl = "https://script.google.com/macros/s/AKfycbzfA79ksJUQ9HGPTAZAqa56QkkrWCurWQ8HSPYdoLdOSRVA72O5UK5JPiqukese3yx6TQ/exec";
         const courtCaseCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQMSrQZGqkLsMpwNO6SrRVaRf0JW3r7T5Bsj0N03ZCTgm53WqrtbXiANxplkgxhyiBaCw2A2woCrV_k/pub?output=csv";
         const lokAdalatScriptUrl = "https://script.google.com/macros/s/AKfycbzS1xRgKs5HyUjnCGt7l9d3D33rscPaFhtucyH63KAfFabfIu67loo1Yd-uGSIffJieIg/exec";
         const lokAdalatDistributedCsvUrl = "https://docs.google.com/spreadsheets/d/1l-IJkL7aylyjxpdYtHlwJzUhFS8OPtg4RzhXfLlJWjQ/export?format=csv&gid=0";
@@ -124,6 +129,7 @@
         let progressRevenueReportType = "STAFF";
         let progressRevenueDefaultersLimit = 20;
         let progressDefaultersGovtFilter = "";
+        let progressStaffTypeFilter = "";
         let lastRevenueProgressBoxData = null;
         let lastRevenueProgressStaffData = null;
         let suppressHistoryPush = false;
@@ -1224,8 +1230,12 @@
 
         function formatProgressReportAmount(value) {
             const amount = Number(value || 0);
-            if (!Number.isFinite(amount)) return "0";
-            return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+            // Point/paise nahi dikhane - amount Rs me poori tarah round off hoke dikhega.
+            // Extra safety: agar kabhi koi garbage/asambhav bada number (>1 crore) yahan tak
+            // pahunch jaaye to bhi 0 dikhayenge, warna JS bade number ko khud "9.88e+22"
+            // jaisi scientific notation me convert kar deta hai.
+            if (!Number.isFinite(amount) || Math.abs(amount) > 1e7) return "0";
+            return String(Math.round(amount));
         }
 
         const revenueCategoryList = ["LV1", "LV2", "LV3", "LV4", "LV5"];
@@ -1464,9 +1474,16 @@
         }
 
         async function fetchUploadedPaidEntriesWithRetry_(dcName, attempts = 2) {
+            // NOTE: Kuch DC (jaise SEONI (T) - 33,000+ paid records) ka uploaded-paid
+            // data itna bada hai ki Apps Script se poora JSON (payment_rows sahit)
+            // padhne/bhejne me 45 second se zyada time lag sakta hai - pehle 45s
+            // timeout par yeh fetch fail ho jaata tha aur paid-set khaali reh jaata
+            // tha, jisse Pending DO List me saare paid consumer bhi galti se
+            // "pending" dikhte the. Ab bade DC ke liye bhi safely poora data aane
+            // deta hai (90s per attempt).
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 45000);
+                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 90000);
                 try {
                     const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidEntries&dc_name=${encodeURIComponent(dcName)}&t=${Date.now()}`, controller ? { signal: controller.signal } : {});
                     const parsed = await response.json();
@@ -1479,11 +1496,79 @@
             return null;
         }
 
-        async function warmRevenueCategoryUploadedPaidCache() {
+        // Pending DO List / Cash Reconcile / Freshness ticker - inteeno ko sirf itna
+        // hi chahiye "kaun paid hai" (dc_name + ivrs_no) aur "kab upload hua"
+        // (uploaded_date) - inhe poori payment_rows/amount/source detail nahi
+        // chahiye. Purana getUploadedPaidEntries action bahut bhaari response
+        // deta tha (har row ka poora payment_rows JSON dobara), jo bade DC
+        // (SEONI (T) - 33,000+ rows) ke liye slow network par timeout kar jaata
+        // tha. Yeh naya "getUploadedPaidIvrsList" action halka/chhota response
+        // deta hai (backend script me add karna hoga), isliye fast aur reliable
+        // hai. Agar backend abhi purana hi hai (naya action nahi mila), to
+        // fetchUploadedPaidEntriesWithRetry_ (purana, poora data) par fallback
+        // ho jaata hai - koi cheez toot nahi ti.
+        async function fetchUploadedPaidIvrsListWithRetry_(dcName, attempts = 2) {
+            for (let attempt = 1; attempt <= attempts; attempt++) {
+                const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 60000);
+                try {
+                    const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidIvrsList&dc_name=${encodeURIComponent(dcName)}&t=${Date.now()}`, controller ? { signal: controller.signal } : {});
+                    const parsed = await response.json();
+                    if (parsed && parsed.status === "success" && Array.isArray(parsed.entries)) return parsed;
+                } catch (_) {} finally {
+                    clearTimeout(timer);
+                }
+                if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 800));
+            }
+            // Backend abhi purane version par hai (naya lightweight action available
+            // nahi) - purane bhaari endpoint par fallback taaki feature kaam karta rahe.
+            return fetchUploadedPaidEntriesWithRetry_(dcName, attempts);
+        }
+
+        // Category Wise / Non-Payee / Target vs Achievement / Top Defaulters reports
+        // ko per-consumer amount/date/category chahiye (sirf IVRS list se kaam nahi
+        // chalega), lekin poori nested payment_rows duplication (jo purane endpoint
+        // me har row do baar bhejta tha) inhe bhi nahi chahiye - sirf ek flat set of
+        // fields kaafi hai. Yeh naya "getUploadedPaidCategoryList" action wahi flat
+        // data deta hai, jisse bade DC (SEONI (T) jaisे) ke liye bhi response chhota
+        // aur fast rehta hai. Backend abhi purana ho to purane bhaari endpoint par
+        // fallback ho jaata hai, koi feature todta nahi.
+        async function fetchUploadedPaidCategoryListWithRetry_(dcName, attempts = 2) {
+            for (let attempt = 1; attempt <= attempts; attempt++) {
+                const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 60000);
+                try {
+                    const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidCategoryList&dc_name=${encodeURIComponent(dcName)}&t=${Date.now()}`, controller ? { signal: controller.signal } : {});
+                    const parsed = await response.json();
+                    if (parsed && parsed.status === "success" && Array.isArray(parsed.entries)) return parsed;
+                } catch (_) {} finally {
+                    clearTimeout(timer);
+                }
+                if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 800));
+            }
+            return fetchUploadedPaidEntriesWithRetry_(dcName, attempts);
+        }
+
+        // Pehle ye function har baar call hone par (panel khulte waqt + phir dropdown me
+        // report select karte waqt + phir Download dabate waqt) sabhi target DC ka data
+        // dobara network se fetch kar deta tha, chahe kuch second pehle hi wahi data aa
+        // chuka ho - isi wajah se Daily Progress Revenue reports (Category/Target/
+        // Defaulters/Non Payee, saat me se 6) slow feel hote the. Ab har DC ke liye last
+        // warm hone ka time yaad rakhte hain aur agar 60 second ke andar dobara call ho to
+        // us DC ko skip kar dete hain (forceRefresh=true dene par hamesha fresh fetch
+        // hoga). DC-agnostic - sabhi 24 DC par apne aap lagu.
+        const revenueCategoryCacheWarmedAt = {};
+        const REVENUE_CATEGORY_CACHE_TTL_MS = 60000;
+        async function warmRevenueCategoryUploadedPaidCache(forceRefresh = false) {
             if (!revenueCollectionSubmitScriptUrl) return;
-            const dcNames = Array.from(new Set(getRevenueCategoryTargetDcs().map((dcName) => normalizeDcName(dcName)).filter(Boolean)));
+            const allDcNames = Array.from(new Set(getRevenueCategoryTargetDcs().map((dcName) => normalizeDcName(dcName)).filter(Boolean)));
+            const now = Date.now();
+            const dcNames = forceRefresh
+                ? allDcNames
+                : allDcNames.filter((dcName) => now - (revenueCategoryCacheWarmedAt[dcName] || 0) > REVENUE_CATEGORY_CACHE_TTL_MS);
+            if (!dcNames.length) return;
             await Promise.all(dcNames.map(async (dcName) => {
-                const parsed = await fetchUploadedPaidEntriesWithRetry_(dcName);
+                const parsed = await fetchUploadedPaidCategoryListWithRetry_(dcName);
                 if (!parsed) return;
                 const rows = Array.isArray(parsed?.entries) ? parsed.entries : (Array.isArray(parsed?.data) ? parsed.data : []);
                 const localCache = getRevenueUploadedPaidCache();
@@ -1511,6 +1596,7 @@
                     return row;
                 });
                 saveRevenueUploadedPaidEntriesLocalBulk(mergedRows, dcName, true);
+                revenueCategoryCacheWarmedAt[dcName] = Date.now();
             }));
         }
 
@@ -1888,21 +1974,32 @@
                 doc.setFontSize(8.5);
                 doc.setTextColor(29, 78, 216);
                 doc.text("TABLE 1: DOMESTIC / NON DOMESTIC / PUBLIC WATER WORKS AND STREET LIGHTS", 14, startY);
+                // NOTE: Pehle fontSize 6.5/cellPadding 1.3 the aur HQ NAME column ki
+                // width fix nahi thi - lambe combined HQ names (jaise "KAMAL KUMAR
+                // DESHMUKH+RAKESH BAGHEL") 2-line me wrap ho jaate the, jisse row height
+                // badh jaati thi aur Table 2 ke aakhri 1-2 row + Grand Total agle page
+                // par chale jaate the. Ab font/padding thoda chhota kiya hai aur HQ NAME
+                // column ki width fix (42mm) kar di hai taaki wrap na ho - isse dono
+                // table ek hi landscape page me fit ho jaate hain.
+                const categoryLeadingColumnStyles = activeViewLevel === "CIRCLE"
+                    ? { 0: { halign: "left", cellWidth: 26 }, 1: { halign: "left", cellWidth: 42 } }
+                    : { 0: { halign: "left", cellWidth: 46 } };
                 doc.autoTable({
                     startY: startY + 3,
                     head: groupedHeadFor(groupACategories.map(getRevenueCategoryDisplayLabel)),
                     body: chunk.chunkRows.map(rowToArrayA),
                     foot: isLastChunk ? [grandRowA] : undefined,
                     theme: "grid",
-                    styles: { fontSize: 6.5, cellPadding: 1.3, overflow: "linebreak", halign: "center", lineWidth: 0.12 },
-                    headStyles: { fillColor: [37, 99, 235], halign: "center", fontSize: 6.5, lineColor: [15, 23, 42], lineWidth: 0.25 },
-                    columnStyles: { 0: { halign: "left" }, 1: { halign: activeViewLevel === "CIRCLE" ? "left" : "center" } },
+                    styles: { fontSize: 6, cellPadding: 0.9, overflow: "linebreak", halign: "center", lineWidth: 0.12 },
+                    headStyles: { fillColor: [37, 99, 235], halign: "center", fontSize: 6, lineColor: [15, 23, 42], lineWidth: 0.25 },
+                    columnStyles: categoryLeadingColumnStyles,
                     footStyles: { fillColor: [241, 245, 249], textColor: [190, 18, 60], fontStyle: "bold", halign: "center" },
+                    margin: { left: 8, right: 8, bottom: 8 },
                     didParseCell: highlightTotalRows
                 });
                 // TABLE 2: LT INDUSTRIAL / AGRICULTURE / TOTAL (TOTAL block ab % ke saath)
-                let table2StartY = (doc.lastAutoTable?.finalY || startY + 3) + 10;
-                if (table2StartY > 180) {
+                let table2StartY = (doc.lastAutoTable?.finalY || startY + 3) + 6;
+                if (table2StartY > 190) {
                     doc.addPage();
                     table2StartY = 20;
                 }
@@ -1915,10 +2012,11 @@
                     body: chunk.chunkRows.map(rowToArrayB),
                     foot: isLastChunk ? [grandRowB] : undefined,
                     theme: "grid",
-                    styles: { fontSize: 6.5, cellPadding: 1.3, overflow: "linebreak", halign: "center", lineWidth: 0.12 },
-                    headStyles: { fillColor: [37, 99, 235], halign: "center", fontSize: 6.5, lineColor: [15, 23, 42], lineWidth: 0.25 },
-                    columnStyles: { 0: { halign: "left" }, 1: { halign: activeViewLevel === "CIRCLE" ? "left" : "center" } },
+                    styles: { fontSize: 6, cellPadding: 0.9, overflow: "linebreak", halign: "center", lineWidth: 0.12 },
+                    headStyles: { fillColor: [37, 99, 235], halign: "center", fontSize: 6, lineColor: [15, 23, 42], lineWidth: 0.25 },
+                    columnStyles: categoryLeadingColumnStyles,
                     footStyles: { fillColor: [241, 245, 249], textColor: [190, 18, 60], fontStyle: "bold", halign: "center" },
+                    margin: { left: 8, right: 8, bottom: 8 },
                     didParseCell: highlightTotalRows
                 });
             });
@@ -2009,7 +2107,7 @@
             return consumerRows
                 .filter((row) => !row.paid)
                 .filter((row) => !govtFilter || (govtFilter === "GOVT" ? !!row.govtFlag : !row.govtFlag))
-                .map((row) => ({ ...row, pendingAmount: parseRevenuePaidAmount(row.netBill || 0) }))
+                .map((row) => ({ ...row, pendingAmount: parseRevenuePendingAmount(row.netBill || 0) }))
                 .filter((row) => row.pendingAmount > 0)
                 .sort((a, b) => b.pendingAmount - a.pendingAmount)
                 .slice(0, progressRevenueDefaultersLimit);
@@ -2319,6 +2417,7 @@
             progressRevenueReportType = validValues.includes(value) ? value : "STAFF";
             resetProgressNonPayeeFilterState();
             progressDefaultersGovtFilter = "";
+            progressStaffTypeFilter = "";
             const body = document.getElementById("progress-revenue-body");
             if (body) body.innerHTML = renderProgressRevenueBodyInner();
         }
@@ -2372,21 +2471,51 @@
         // "Paid by Staff" (jo pehle hamesha upar dikhta tha) ab bhi wahi table hai, sirf
         // ab dropdown se select hone par hi dikhta hai - baaki 3 report type isi jagah
         // (usi #progress-revenue-body me) unke apne render se replace ho jate hain.
+        function setProgressStaffTypeFilter(value) {
+            progressStaffTypeFilter = ["PAID", "TD"].includes(value) ? value : "";
+            const body = document.getElementById("progress-revenue-body");
+            if (body) body.innerHTML = renderProgressRevenueBodyInner();
+        }
+
+        // Paid by Staff aur TD by Staff dono ka data ek hi jagah (rows me paidCount/
+        // paidAmount/tdCount/tdAmount saath) already aata hai - isliye alag se koi naya
+        // fetch nahi chahiye, sirf yeh dropdown decide karta hai ki table/export me kaunsa
+        // column set dikhana hai (dono / sirf Paid / sirf TD).
         function renderRevenueProgressStaffBodyHtml(rows, label) {
             const colLabel = getRevenueProgressColumnLabel();
             const totals = getRevenueProgressTotals(rows);
-            let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.15fr 0.75fr 0.95fr 0.75fr 0.95fr;"><div>${colLabel}</div><div>PAID</div><div>PAID AMT</div><div>LINE TD</div><div>TD AMT</div></div>`;
+            const showPaid = progressStaffTypeFilter !== "TD";
+            const showTd = progressStaffTypeFilter !== "PAID";
+            const gridCols = showPaid && showTd ? "1.15fr 0.75fr 0.95fr 0.75fr 0.95fr" : "1.4fr 0.9fr 1.1fr";
+            const headerCells = [`<div>${colLabel}</div>`];
+            if (showPaid) headerCells.push(`<div>PAID</div>`, `<div>PAID AMT</div>`);
+            if (showTd) headerCells.push(`<div>LINE TD</div>`, `<div>TD AMT</div>`);
+            let html = `
+                <select onchange="setProgressStaffTypeFilter(this.value)" style="width:100%; max-width:360px; height:40px; margin:0 auto 8px; display:block; border:1.5px solid #0f766e; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#0f766e; background:#ffffff;">
+                    <option value="" ${progressStaffTypeFilter === "" ? "selected" : ""}>Paid + TD Both</option>
+                    <option value="PAID" ${progressStaffTypeFilter === "PAID" ? "selected" : ""}>Paid by Staff</option>
+                    <option value="TD" ${progressStaffTypeFilter === "TD" ? "selected" : ""}>TD by Staff</option>
+                </select>
+                <div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: ${gridCols};">${headerCells.join("")}</div>`;
 
             if (!rows.length) {
                 html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Selected ${summaryMode === "DAILY" ? "date" : "month"} me revenue entry nahi hai.</div></div>`;
             } else {
                 rows.forEach((row) => {
                     const rowClass = row.type === "SUB_TOTAL" ? " blue-bold" : (row.type === "SUBDN_TOTAL" ? " subdn-bold" : "");
-                    html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: 1.15fr 0.75fr 0.95fr 0.75fr 0.95fr;"><div>${row.name}</div><div>${row.paidCount}</div><div class="text-emerald-700 font-black">${formatProgressReportAmount(row.paidAmount)}</div><div>${row.tdCount}</div><div class="text-rose-700 font-black">${formatProgressReportAmount(row.tdAmount)}</div></div>`;
+                    const cells = [`<div>${row.name}</div>`];
+                    if (showPaid) cells.push(`<div>${row.paidCount}</div>`, `<div class="text-emerald-700 font-black">${formatProgressReportAmount(row.paidAmount)}</div>`);
+                    if (showTd) cells.push(`<div>${row.tdCount}</div>`, `<div class="text-rose-700 font-black">${formatProgressReportAmount(row.tdAmount)}</div>`);
+                    html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: ${gridCols};">${cells.join("")}</div>`;
                 });
             }
 
-            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">GRAND TOTAL (${label})</div><div class="mt-2 grid grid-cols-2 gap-2 text-center text-[11px] font-black"><div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2">Paid: ${totals.paidCount}<br>${formatProgressReportAmount(totals.paidAmount)}</div><div class="rounded-xl bg-rose-50 border border-rose-200 p-2">Line TD: ${totals.tdCount}<br>${formatProgressReportAmount(totals.tdAmount)}</div></div>
+            const footerCards = [];
+            if (showPaid) footerCards.push(`<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2">Paid: ${totals.paidCount}<br>${formatProgressReportAmount(totals.paidAmount)}</div>`);
+            if (showTd) footerCards.push(`<div class="rounded-xl bg-rose-50 border border-rose-200 p-2">Line TD: ${totals.tdCount}<br>${formatProgressReportAmount(totals.tdAmount)}</div>`);
+            const footerGridCols = showPaid && showTd ? "grid-cols-2" : "grid-cols-1";
+
+            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">GRAND TOTAL (${label})</div><div class="mt-2 grid ${footerGridCols} gap-2 text-center text-[11px] font-black">${footerCards.join("")}</div>
                 <div class="btn-export-row">
                     <button class="btn-unique btn-excel-unique" onclick="doExport('XLS')">
                         <svg width="18" height="18" fill="white" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16h-8v-2h8v2zm0-4h-8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
@@ -3231,11 +3360,29 @@
                 const revenueTotals = getRevenueProgressTotals(uiListSummary);
                 const revenueScopeLabel = activeViewLevel === "DC" ? `DC: ${activeDC}` : (activeViewLevel === "DIVISION" ? `Division: ${activeDiv}` : "Circle: SEONI CIRCLE");
                 const revenueFilterLabel = activeViewLevel === "DC" ? "HQ Filter: All HQ" : (activeViewLevel === "DIVISION" ? "DC Filter: All DC" : "Division/DC Filter: All");
+                const showPaid = progressStaffTypeFilter !== "TD";
+                const showTd = progressStaffTypeFilter !== "PAID";
+                const typeLabel = progressStaffTypeFilter === "PAID" ? "Paid by Staff" : (progressStaffTypeFilter === "TD" ? "TD by Staff" : "Paid + TD Both");
                 const revenueReportTitle = `${levelT} ${reportType} PROGRESS REPORT`;
                 const revenueGeneratedAt = `${getCurrentDateDDMMYYYY()} ${getCurrentTimeHHMM()}`;
                 const csvSafe = (value) => {
                     const text = String(value ?? "");
                     return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+                };
+                const revenueHeaders = [revenueColLabel];
+                if (showPaid) revenueHeaders.push("NO OF CONSUMER PAID", "TOTAL PAID AMOUNT");
+                if (showTd) revenueHeaders.push("NO OF LINE TD", "TD AMOUNT");
+                const revenueRowValues = (row) => {
+                    const values = [row.name];
+                    if (showPaid) values.push(row.paidCount, formatProgressReportAmount(row.paidAmount));
+                    if (showTd) values.push(row.tdCount, formatProgressReportAmount(row.tdAmount));
+                    return values;
+                };
+                const revenueGrandTotalValues = () => {
+                    const values = ["GRAND TOTAL"];
+                    if (showPaid) values.push(revenueTotals.paidCount, formatProgressReportAmount(revenueTotals.paidAmount));
+                    if (showTd) values.push(revenueTotals.tdCount, formatProgressReportAmount(revenueTotals.tdAmount));
+                    return values;
                 };
 
                 if (fmt === "XLS") {
@@ -3245,30 +3392,19 @@
                         ["PERIOD", dateLabel],
                         ["SCOPE", revenueScopeLabel],
                         ["FILTER", revenueFilterLabel],
+                        ["TYPE", typeLabel],
                         ["GENERATED AT", revenueGeneratedAt],
                         [],
                         ["REVENUE COLLECTION SUMMARY"]
                     ].map((row) => row.map(csvSafe).join(",")).join("\n") + "\n";
-                    csv += `${revenueColLabel},NO OF CONSUMER PAID,TOTAL PAID AMOUNT,NO OF LINE TD,TD AMOUNT\n`;
+                    csv += revenueHeaders.map(csvSafe).join(",") + "\n";
                     uiListSummary.forEach((row) => {
-                        csv += [
-                            row.name,
-                            row.paidCount,
-                            formatProgressReportAmount(row.paidAmount),
-                            row.tdCount,
-                            formatProgressReportAmount(row.tdAmount)
-                        ].map(csvSafe).join(",") + "\n";
+                        csv += revenueRowValues(row).map(csvSafe).join(",") + "\n";
                     });
-                    csv += [
-                        "GRAND TOTAL",
-                        revenueTotals.paidCount,
-                        formatProgressReportAmount(revenueTotals.paidAmount),
-                        revenueTotals.tdCount,
-                        formatProgressReportAmount(revenueTotals.tdAmount)
-                    ].map(csvSafe).join(",");
+                    csv += revenueGrandTotalValues().map(csvSafe).join(",");
                     const link = document.createElement("a");
                     link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-                    link.download = `Revenue_Report_${levelT}_${reportType}.csv`;
+                    link.download = `Revenue_Report_${levelT}_${reportType}${progressStaffTypeFilter ? "_" + progressStaffTypeFilter : ""}.csv`;
                     link.click();
                 } else {
                     const { jsPDF } = window.jspdf;
@@ -3282,7 +3418,7 @@
                     doc.setFontSize(9);
                     doc.setTextColor(30, 58, 138);
                     doc.text(dateLabel, 148, 25, { align: "center" });
-                    doc.text(`${revenueScopeLabel} | ${revenueFilterLabel}`, 148, 31, { align: "center" });
+                    doc.text(`${revenueScopeLabel} | ${revenueFilterLabel} | Type: ${typeLabel}`, 148, 31, { align: "center" });
                     doc.setFontSize(7);
                     doc.setTextColor(100);
                     doc.text(`Generated: ${revenueGeneratedAt}`, 283, 10, { align: "right" });
@@ -3291,21 +3427,9 @@
                     doc.text("REVENUE COLLECTION SUMMARY", 148, 38, { align: "center" });
                     doc.autoTable({
                         startY: 43,
-                        head: [[revenueColLabel, "NO OF CONSUMER PAID", "TOTAL PAID AMOUNT", "NO OF LINE TD", "TD AMOUNT"]],
-                        body: uiListSummary.map((row) => [
-                            row.name,
-                            row.paidCount,
-                            formatProgressReportAmount(row.paidAmount),
-                            row.tdCount,
-                            formatProgressReportAmount(row.tdAmount)
-                        ]),
-                        foot: [[
-                            "GRAND TOTAL",
-                            revenueTotals.paidCount,
-                            formatProgressReportAmount(revenueTotals.paidAmount),
-                            revenueTotals.tdCount,
-                            formatProgressReportAmount(revenueTotals.tdAmount)
-                        ]],
+                        head: [revenueHeaders],
+                        body: uiListSummary.map((row) => revenueRowValues(row)),
+                        foot: [revenueGrandTotalValues()],
                         theme: "grid",
                         styles: { fontSize: 8, cellPadding: 2, overflow: "linebreak", halign: "center" },
                         headStyles: { fillColor: [37, 99, 235], halign: "center" },
@@ -3322,7 +3446,7 @@
                             }
                         }
                     });
-                savePdfDocumentForDevice(doc, `Revenue_Report_${levelT}_${reportType}.pdf`);
+                savePdfDocumentForDevice(doc, `Revenue_Report_${levelT}_${reportType}${progressStaffTypeFilter ? "_" + progressStaffTypeFilter : ""}.pdf`);
                 }
                 downloadCompleted = true;
                 setTimeout(() => setProgressSummaryDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
@@ -9138,13 +9262,30 @@
         function renderRevenueMobileActionRow(mobileNo) {
             const validMobile = normalizeRevenueMessageMobile(mobileNo);
             const disabledStyle = validMobile ? "" : "opacity:0.45; pointer-events:none;";
+            // "UPDATE MOBILE NO" chautha button - Update Mobile No jaisa hi red rang, aur
+            // CALL button ka rang ab peela (yellow) kar diya hai (pehle CALL hi red tha).
+            // Yeh button IVRS search ke isi record ke sath seedha Update Mobile No screen
+            // par le jaata hai (dobara IVRS search karne ki zaroorat nahi) - sabhi 24 DC
+            // par same tarike se kaam karta hai kyunki yeh sirf activeDC + currentRevenueRecord
+            // use karta hai (DC-specific hardcoding nahi hai).
             return `
-                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:7px; ${disabledStyle}">
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px; margin-top:7px; ${disabledStyle}">
                     <button type="button" onclick="openCurrentRevenueSms()" style="min-height:36px; border:none; border-radius:10px; background:#2563eb; color:#fff; font-size:0.6rem; font-weight:950;">SMS</button>
                     <button type="button" onclick="openCurrentRevenueWhatsApp()" style="min-height:36px; border:none; border-radius:10px; background:#16a34a; color:#fff; font-size:0.58rem; font-weight:950;">WHATSAPP</button>
-                    <button type="button" onclick="callCurrentRevenueConsumer()" style="min-height:36px; border:none; border-radius:10px; background:#dc2626; color:#fff; font-size:0.6rem; font-weight:950;">CALL</button>
+                    <button type="button" onclick="callCurrentRevenueConsumer()" style="min-height:36px; border:none; border-radius:10px; background:#f59e0b; color:#fff; font-size:0.6rem; font-weight:950;">CALL</button>
+                    <button type="button" onclick="jumpToUpdateMobileNoFromRevenue()" style="min-height:36px; border:none; border-radius:10px; background:#dc2626; color:#fff; font-size:0.52rem; font-weight:950; line-height:1.1;">UPDATE<br>MOBILE NO</button>
                 </div>
             `;
+        }
+
+        function jumpToUpdateMobileNoFromRevenue() {
+            const record = currentRevenueRecord;
+            const ivrsNo = normalizeRevenueIvrs(record?.ivrsNo);
+            if (!ivrsNo) return showToast("Pehle IVRS search kijiye", false);
+            switchView("mobile-update");
+            const searchInput = document.getElementById("search-ivrs");
+            if (searchInput) searchInput.value = ivrsNo;
+            performSearch();
         }
 
         function copyRevenueText(value) {
@@ -10199,7 +10340,7 @@
             try {
                 const dcKey = getRevenueCollectionDcKey(activeDC);
                 const fallbackRows = revenueCollectionRowsByDc[dcKey] || getConsumerRows(activeDC).map(mapRevenueConsumerRow);
-                const loadedRows = await withTimeout(loadRevenueCollectionData(activeDC, true), 30000, []);
+                const loadedRows = await withTimeout(loadRevenueCollectionData(activeDC, true), 45000, []);
                 const rows = loadedRows.length ? loadedRows : fallbackRows;
                 populateRevenueSelect(hqSelect, getRevenueUniqueValues(rows, "hqName"), "Select HQ Name");
                 setRevenueMessageAuthStatus("Apni details bharkar 6-digit PIN banaiye", true);
@@ -10617,7 +10758,7 @@
                 const dcKey = getRevenueCollectionDcKey(activeDC);
                 const fallbackRows = revenueCollectionRowsByDc[dcKey] || getConsumerRows(activeDC).map(mapRevenueConsumerRow).filter((row) => normalizeRevenueIvrs(row.ivrsNo));
                 const [freshRows, paidSet] = await Promise.all([
-                    withTimeout(loadRevenueCollectionData(activeDC, true), 30000, []),
+                    withTimeout(loadRevenueCollectionData(activeDC, true), 45000, []),
                     getRevenuePendingPaidIvrsSet()
                 ]);
                 if (refreshToken !== revenuePendingPaidRefreshToken) { if (pendingListProgress) pendingListProgress.stop(); return; }
@@ -10983,20 +11124,45 @@
         }
 
         async function getRevenueUploadedPaidMasterRows() {
+            // Upload ke turant baad local cache me entries turant save ho jaati hain
+            // (saveRevenueUploadedPaidEntriesLocalBulk), backend fetch se pehle hi -
+            // isliye yahan backend call se pehle current local rows capture kar lete
+            // hain, taaki agar backend response us waqt thoda incomplete/stale aaye
+            // (jaise abhi-abhi upload hui bade DC ki list, ya koi backend delay) to
+            // bhi turant-upload hui entries paid-set se chhoote na. Isse Pending DO
+            // List me abhi-abhi paid hue consumer galti se "pending" nahi dikhenge.
+            const localRowsBeforeSync = getRevenueUploadedPaidMasterRowsLocal();
             if (revenueCollectionSubmitScriptUrl) {
                 try {
-                    // fetchUploadedPaidEntriesWithRetry_ (45s timeout + 2 retry) - same
-                    // robust fetch Category Wise/HQ-Village report already use, taaki bade
-                    // DC (jaise KURAI - hazaaron rows) ke liye bhi fetch timeout na ho.
-                    const parsed = await fetchUploadedPaidEntriesWithRetry_(activeDC || "");
+                    // Sirf "kaun paid hai" pata karne ke liye halka (dc_name + ivrs_no +
+                    // uploaded_date) response fetch karte hain - bade DC me bhi fast aur
+                    // reliable. NOTE: is response ko purane full-detail local cache
+                    // (getRevenueUploadedPaidEntryLocal - jo search/amount display me
+                    // kaam aata hai) me save NAHI karte, kyunki yeh data lean hai; usse
+                    // save karne se poori detail (amount/payment_rows) overwrite ho
+                    // jaati - baaki features (Search screen paid-amount display) us
+                    // alag, already-working upload-flow cache par hi depend karte rahenge.
+                    const parsed = await fetchUploadedPaidIvrsListWithRetry_(activeDC || "");
                     const rows = Array.isArray(parsed?.entries) ? parsed.entries : (Array.isArray(parsed?.data) ? parsed.data : []);
                     if (parsed && parsed.status === "success" && rows.length) {
-                        saveRevenueUploadedPaidEntriesLocalBulk(rows, activeDC || "", true);
-                        return rows.filter((row) => normalizeLookupValue(row.dc_name || activeDC || "") === normalizeLookupValue(activeDC || ""));
+                        const backendRows = rows.filter((row) => normalizeLookupValue(row.dc_name || activeDC || "") === normalizeLookupValue(activeDC || ""));
+                        // Backend rows + turant-upload hui local rows ko IVRS ke hisaab
+                        // se merge (union) karte hain - kisi bhi ek source par poori tarah
+                        // depend nahi karte, taaki koi bhi paid consumer chhoote nahi.
+                        const merged = new Map();
+                        localRowsBeforeSync.forEach((row) => {
+                            const key = normalizeRevenueIvrs(row.ivrs_no || row.ivrsNo || row.consumerNo);
+                            if (key) merged.set(key, row);
+                        });
+                        backendRows.forEach((row) => {
+                            const key = normalizeRevenueIvrs(row.ivrs_no || row.ivrsNo || row.consumerNo);
+                            if (key) merged.set(key, row);
+                        });
+                        return Array.from(merged.values());
                     }
                 } catch (_) {}
             }
-            return getRevenueUploadedPaidMasterRowsLocal();
+            return localRowsBeforeSync;
         }
 
         function initRevenuePaidUpload() {
@@ -11118,6 +11284,23 @@
             `;
         }
 
+        function convertUploadedDateToDDMMYYYY(value) {
+            // Backend ne "uploaded_date" DD/MM/YYYY text bhejne ki koshish karta hai,
+            // lekin Google Sheet ka locale kabhi-kabhi is string ko date samajh kar
+            // MM/DD ulta kar deta tha (jaise 03/08/2026 -> 08/03/2026 store ho jaata
+            // tha) - confirmed via actual backend response. Backend script me ab yeh
+            // column plain-text force kar diya hai (naye uploads se yeh bug nahi
+            // aayega), lekin pehle se corrupt ho chuki purani entries ke liye yahan
+            // month/day swap karke DD/MM/YYYY wapas banate hain.
+            const raw = String(value || "").trim();
+            const match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (!match) return normalizeRevenueReportDate(raw);
+            const month = match[1].padStart(2, "0");
+            const day = match[2].padStart(2, "0");
+            const year = match[3];
+            return `${day}/${month}/${year}`;
+        }
+
         async function checkRevenueUploadFreshness() {
             const box = document.getElementById("revenue-upload-freshness-ticker");
             if (!box) return;
@@ -11128,12 +11311,32 @@
             }
             const today = new Date();
             const todayDDMMYYYY = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
+            // NOTE: pehle yahan ek alag backend action "getPaidMasterLastUploadDate" call
+            // hoti thi, jo Cash List upload ho jaane ke baad bhi kabhi-kabhi purani/galat
+            // date laut rahi thi (isliye upload ho jaane par bhi warning ticker chhupta
+            // nahi tha). Ab usi proven, already-tested action ("getUploadedPaidEntries")
+            // se check karte hain jo Category Wise/HQ-Village reports me hamesha sahi
+            // latest uploaded data deta hai - agar aaj ki date ka koi bhi entry mil jaaye
+            // to ticker turant chhup jayega.
             try {
-                const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getPaidMasterLastUploadDate&dc_name=${encodeURIComponent(dcName)}&t=${Date.now()}`);
-                const parsed = await response.json();
+                const parsed = await fetchUploadedPaidIvrsListWithRetry_(normalizeDcName(dcName), 1);
                 if (activeDC !== dcName) return;
-                const lastUploadDate = parsed?.status === "success" ? String(parsed.last_upload_date || "").trim() : "";
-                if (lastUploadDate === todayDDMMYYYY) {
+                const entries = Array.isArray(parsed?.entries) ? parsed.entries : (Array.isArray(parsed?.data) ? parsed.data : []);
+                const uploadedToday = parsed?.status === "success" && entries.some((entry) => {
+                    const rawDate = String(entry?.uploaded_date || entry?.uploadedDate || "").trim();
+                    if (!rawDate) return false;
+                    // Dono tarah check karte hain (jaisa aaya waisa, aur month/day
+                    // swap karke) - taaki purani (Sheet-locale se corrupt hui) aur
+                    // nayi (backend fix ke baad sahi text-format) dono tarah ki
+                    // dates ke liye "aaj upload hua" sahi pehchana jaaye. NOTE:
+                    // normalizeRevenueReportDate DD-MM-YYYY (dash) format deta hai,
+                    // isliye formatRevenueDateIndian se slash format me convert karna
+                    // zaroori hai - yahi missing step tha jiski wajah se pichhli baar
+                    // sahi data hone ke bawajood bhi ticker match nahi ho pa raha tha.
+                    return formatRevenueDateIndian(normalizeRevenueReportDate(rawDate)) === todayDDMMYYYY
+                        || convertUploadedDateToDDMMYYYY(rawDate) === todayDDMMYYYY;
+                });
+                if (uploadedToday) {
                     box.style.display = "none";
                     return;
                 }
@@ -11806,6 +12009,13 @@
                 renderRevenuePaidUploadSummary(uploadMeta);
                 setActionButtonState(uploadBtn, "done", "Upload Paid Data");
                 showToast("Paid data upload ho gaya", true);
+                // Freshness ticker (DC dashboard wali red patti) pehle sirf tab check hoti
+                // thi jab dc-dashboard screen par navigate karte the - upload ke turant
+                // baad, jab tak user wapas dc-dashboard par na jaaye, ticker purani hi
+                // dikhti rehti thi chahe upload sahi ho chuka ho. Ab upload complete hote
+                // hi turant bhi check kar lete hain, taaki agli baar dc-dashboard par
+                // jaate hi (ya turant, agar wahi screen abhi active hai) sahi status mile.
+                checkRevenueUploadFreshness();
             } catch (error) {
                 const message = error?.name === "AbortError"
                     ? "Backend response time out ho gaya. Internet/Apps Script deployment check karke dobara try kijiye."
@@ -12020,6 +12230,21 @@
 
         function parseRevenuePaidAmount(value) {
             return Number(String(value || "").replace(/[^\d.]/g, "")) || 0;
+        }
+
+        // NET BILL / arrears source data kabhi-kabhi CSV column-misalignment ki wajah se
+        // 2-3 columns ke digits aapas me jud ke ek hi field me aa jaate hain (jaise IVRS+
+        // mobile+bill milke ek 20+ digit ka number ban jaana) - jo ek asli consumer bill se
+        // kayi guna bada hota hai aur JS me bade number "9.88e+22" jaisi scientific notation
+        // me dikhne lagte hain, plus Top Defaulters list me sabse upar aa jaate hain (sirf
+        // isliye ki wo number galti se sabse "bada" hai). Koi bhi genuine bill/arrears kabhi
+        // ~1 crore se upar nahi hota, isliye usse zyada ko garbage maan kar 0 (yani list se
+        // bahar) kar dete hain - sabhi 24 DC ke Defaulters/Non-Payee reports isi ek function
+        // se pending amount nikalte hain, isliye fix sab jagah ek saath lagu hoga.
+        function parseRevenuePendingAmount(value) {
+            const amount = parseRevenuePaidAmount(value);
+            if (!Number.isFinite(amount) || Math.abs(amount) > 1e7) return 0;
+            return amount;
         }
 
         function getRevenueTdAmount(row) {
@@ -12487,6 +12712,12 @@
             renderRevenueReportDownload();
         }
 
+        function filterRevenueRowsBySelectedType(rows) {
+            const typeValue = document.getElementById("revenue-report-type")?.value || "";
+            if (!typeValue) return rows || [];
+            return (rows || []).filter((row) => (typeValue === "TD" ? row.reportType === "TD" : row.reportType !== "TD"));
+        }
+
         function getRevenueSelectedReportRows() {
             let rows = [];
             if (revenueReportMode === "MONTHLY") {
@@ -12496,18 +12727,27 @@
                 const dateValue = document.getElementById("revenue-report-date")?.value || getTodayIsoDate();
                 rows = getRevenueCombinedFilteredEntries("DAILY", dateValue);
             }
-            return filterRevenueRowsBySelectedHq(rows);
+            return filterRevenueRowsBySelectedType(filterRevenueRowsBySelectedHq(rows));
+        }
+
+        function getRevenueSelectedReportTypeLabel() {
+            const typeValue = document.getElementById("revenue-report-type")?.value || "";
+            if (typeValue === "PAID") return "Paid by Staff";
+            if (typeValue === "TD") return "TD by Staff";
+            return "Paid + TD Both";
         }
 
         function getRevenueSelectedReportTitle() {
             const hqValue = document.getElementById("revenue-report-hq")?.value || "";
             const hqSuffix = hqValue ? ` - ${hqValue}` : " - All HQ";
+            const typeValue = document.getElementById("revenue-report-type")?.value || "";
+            const typeSuffix = typeValue ? ` - ${getRevenueSelectedReportTypeLabel()}` : "";
             if (revenueReportMode === "MONTHLY") {
                 const monthValue = document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7);
-                return `Revenue Collection Month Report - ${formatRevenueMonthYear(monthValue)}${hqSuffix}`;
+                return `Revenue Collection Month Report - ${formatRevenueMonthYear(monthValue)}${hqSuffix}${typeSuffix}`;
             }
             const dateValue = normalizeRevenueReportDate(document.getElementById("revenue-report-date")?.value || getCurrentDateDDMMYYYY());
-            return `Revenue Collection Date Report - ${dateValue}${hqSuffix}`;
+            return `Revenue Collection Date Report - ${dateValue}${hqSuffix}${typeSuffix}`;
         }
 
         async function renderRevenueReportDownload() {
@@ -12566,12 +12806,14 @@
                     ? (document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7))
                     : normalizeRevenueReportDate(document.getElementById("revenue-report-date")?.value || getCurrentDateDDMMYYYY());
                 const hqSuffix = String(hqValue).replace(/[\\/:*?"<>|]+/g, "_");
+                const typeValue = document.getElementById("revenue-report-type")?.value || "";
+                const typeFileSuffix = typeValue ? `-${typeValue.toLowerCase()}` : "";
                 const periodLabel = revenueReportMode === "MONTHLY"
                     ? `Month: ${formatRevenueMonthYear(document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7))}`
                     : `Date: ${normalizeRevenueReportDate(document.getElementById("revenue-report-date")?.value || getCurrentDateDDMMYYYY())}`;
-                const filterLabel = hqValue && hqValue !== "all-hq" ? `HQ Filter: ${hqValue}` : "HQ Filter: All HQ";
+                const filterLabel = `${hqValue && hqValue !== "all-hq" ? `HQ Filter: ${hqValue}` : "HQ Filter: All HQ"}  |  Type: ${getRevenueSelectedReportTypeLabel()}`;
                 const reportTitle = revenueReportMode === "MONTHLY" ? "Revenue Collection Month Report" : "Revenue Collection Date Report";
-                downloadRevenueRowsReport(type, rows, title, `revenue-${revenueReportMode.toLowerCase()}-${suffix}-${hqSuffix}.csv`, getRevenueReportMeta(
+                downloadRevenueRowsReport(type, rows, title, `revenue-${revenueReportMode.toLowerCase()}-${suffix}-${hqSuffix}${typeFileSuffix}.csv`, getRevenueReportMeta(
                     reportTitle,
                     periodLabel,
                     filterLabel
@@ -13664,7 +13906,7 @@
                 const consumerRows = buildRevenueHqVillageConsumerRows("DAILY", dateValue);
                 revenueDefaultersRows = consumerRows
                     .filter((row) => !row.paid)
-                    .map((row) => ({ ...row, pendingAmount: parseRevenuePaidAmount(row.netBill || 0) }))
+                    .map((row) => ({ ...row, pendingAmount: parseRevenuePendingAmount(row.netBill || 0) }))
                     .filter((row) => row.pendingAmount > 0);
                 await progress.finish();
                 if (!isRenderValid()) return;
@@ -13820,7 +14062,7 @@
 
         function buildRevenueNonPayeeRows(mode, filterValue, bucket) {
             const consumerRows = buildRevenueHqVillageConsumerRows(mode, filterValue);
-            const withPendingAmount = (row) => ({ ...row, pendingAmount: parseRevenuePaidAmount(row.netBill || 0) });
+            const withPendingAmount = (row) => ({ ...row, pendingAmount: parseRevenuePendingAmount(row.netBill || 0) });
             if (bucket === "SINCE_CONNECTION") {
                 return consumerRows
                     .filter((row) => row.hasPaymentDateData && row.neverPaid)
@@ -14660,8 +14902,188 @@
             box.innerText = message;
         }
 
+        // Fire-and-forget log call - PDF download (window.print()) ko block/delay nahi
+        // karta, aur agar script URL abhi set nahi hai ya network fail ho jaye to bhi
+        // silently ignore ho jata hai, print flow par koi asar nahi padega.
+        function logVrDownload() {
+            if (!vrDownloadLogScriptUrl || !activeDC) return;
+            try {
+                const division = activeDiv || getRevenueDivisionNameForDc(activeDC);
+                const p = new URLSearchParams();
+                p.append("division", division || "");
+                p.append("dc", activeDC || "");
+                p.append("date", getCurrentDateDDMMYYYY());
+                p.append("timestamp", `${getCurrentDateDDMMYYYY()} ${getCurrentTimeHHMM()}`);
+                fetch(vrDownloadLogScriptUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+                    body: p.toString()
+                }).catch(() => {});
+            } catch (_) {}
+        }
+
         function vrDownloadPDF() {
+            logVrDownload();
             window.print();
+        }
+
+        // =====================================================================
+        // VR Calculation - Download Log Report (Division/DC/Date wise count)
+        // vrDownloadLogScriptUrl se raw logged rows fetch karke yahan group/count
+        // karte hain - koi naya per-consumer data nahi, sirf ek chhota aggregation.
+        // =====================================================================
+        let vrDownloadLogMode = "ALL";
+        let vrDownloadLogRawRows = [];
+        let vrDownloadLogRenderToken = 0;
+
+        function openVrDownloadLog() {
+            const dd = document.getElementById("vr-menu-dropdown");
+            if (dd) dd.style.display = "none";
+            switchView("vr-download-log");
+        }
+
+        function initVrDownloadLog() {
+            const dateInput = document.getElementById("vr-download-log-date");
+            if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
+            setVrDownloadLogMode(vrDownloadLogMode || "ALL");
+        }
+
+        function setVrDownloadLogMode(mode) {
+            vrDownloadLogMode = mode === "DATE" ? "DATE" : "ALL";
+            const dateInput = document.getElementById("vr-download-log-date");
+            const allBtn = document.getElementById("vr-download-log-all-mode-btn");
+            const dateBtn = document.getElementById("vr-download-log-date-mode-btn");
+            if (dateInput) dateInput.style.display = vrDownloadLogMode === "DATE" ? "block" : "none";
+            if (allBtn) {
+                allBtn.style.background = vrDownloadLogMode === "ALL" ? "#1d4ed8" : "#dbeafe";
+                allBtn.style.color = vrDownloadLogMode === "ALL" ? "#ffffff" : "#1d4ed8";
+            }
+            if (dateBtn) {
+                dateBtn.style.background = vrDownloadLogMode === "DATE" ? "#1d4ed8" : "#dbeafe";
+                dateBtn.style.color = vrDownloadLogMode === "DATE" ? "#ffffff" : "#1d4ed8";
+            }
+            renderVrDownloadLog();
+        }
+
+        function buildVrDownloadLogGroupedRows() {
+            const divisionValue = document.getElementById("vr-download-log-division")?.value || "";
+            const dateValue = document.getElementById("vr-download-log-date")?.value || "";
+            // Sheet me date "DD-MM-YYYY" (Indian) format me store hoti hai; purani/test
+            // entries agar "YYYY-MM-DD" format me hain to normalizeRevenueReportDate()
+            // dono ko wahi ek consistent "DD-MM-YYYY" me le aata hai.
+            const normalizedFilterDate = dateValue ? normalizeRevenueReportDate(dateValue) : "";
+            const sortKeyOf = (ddmmyyyy) => {
+                const match = String(ddmmyyyy || "").match(/^(\d{2})-(\d{2})-(\d{4})$/);
+                return match ? `${match[3]}${match[2]}${match[1]}` : "00000000";
+            };
+            const groups = {};
+            vrDownloadLogRawRows.forEach((row) => {
+                const division = String(row["Division"] || "").trim().toUpperCase() || "-";
+                const dc = String(row["DC"] || "").trim().toUpperCase() || "-";
+                const date = normalizeRevenueReportDate(String(row["Date"] || "").trim()) || "-";
+                if (divisionValue && division !== divisionValue) return;
+                if (vrDownloadLogMode === "DATE" && normalizedFilterDate && date !== normalizedFilterDate) return;
+                const key = `${division}||${dc}||${date}`;
+                if (!groups[key]) groups[key] = { division, dc, date, count: 0 };
+                groups[key].count++;
+            });
+            return Object.values(groups).sort((a, b) => (
+                sortKeyOf(b.date).localeCompare(sortKeyOf(a.date)) || a.division.localeCompare(b.division) || a.dc.localeCompare(b.dc)
+            ));
+        }
+
+        async function renderVrDownloadLog() {
+            const statusBox = document.getElementById("vr-download-log-status");
+            const tableBox = document.getElementById("vr-download-log-table");
+            if (!statusBox || !tableBox) return;
+            if (!vrDownloadLogScriptUrl) {
+                statusBox.innerHTML = "Yeh report abhi live nahi hai - Google Sheet ke saath Apps Script deploy hone ke baad hi data aayega.";
+                tableBox.innerHTML = "";
+                return;
+            }
+            const renderToken = ++vrDownloadLogRenderToken;
+            const isRenderValid = () => renderToken === vrDownloadLogRenderToken && document.getElementById("vr-download-log-view")?.classList.contains("active");
+            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING DOWNLOAD LOG...");
+            try {
+                const data = await loadRemoteJson(`${vrDownloadLogScriptUrl}?action=getSummary&t=${Date.now()}`);
+                if (!isRenderValid()) { progress.stop(); return; }
+                vrDownloadLogRawRows = Array.isArray(data) ? data : [];
+                await progress.finish();
+                if (!isRenderValid()) return;
+                const rows = buildVrDownloadLogGroupedRows();
+                const totalDownloads = rows.reduce((sum, row) => sum + row.count, 0);
+                statusBox.innerHTML = `Total Download: <strong>${totalDownloads}</strong> | Groups: ${rows.length}`;
+                if (!rows.length) {
+                    tableBox.innerHTML = `<div style="background:#ecfdf5; border:1.5px solid #86efac; border-radius:14px; padding:14px; color:#047857; font-size:0.8rem; font-weight:900; text-align:center; margin-top:10px;">Is filter me koi download record nahi mila.</div>`;
+                    return;
+                }
+                let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.3fr 1.1fr 0.9fr 0.7fr;"><div>DIVISION</div><div>DC</div><div>DATE</div><div>COUNT</div></div>`;
+                rows.forEach((row) => {
+                    html += `<div class="summary-table-row" style="grid-template-columns: 1.3fr 1.1fr 0.9fr 0.7fr;"><div>${escapeHtml(row.division)}</div><div>${escapeHtml(row.dc)}</div><div>${escapeHtml(row.date)}</div><div class="font-black">${row.count}</div></div>`;
+                });
+                html += `</div>`;
+                tableBox.innerHTML = html;
+            } catch (error) {
+                progress.stop();
+                statusBox.innerHTML = "Report load nahi ho payi";
+            }
+        }
+
+        function setVrDownloadLogDownloadState(isLoading, message = "", ok = true) {
+            const pdfBtn = document.getElementById("vr-download-log-pdf-btn");
+            const excelBtn = document.getElementById("vr-download-log-excel-btn");
+            const statusBox = document.getElementById("vr-download-log-download-status");
+            const statusMessage = normalizeActionStatusMessage(message, isLoading, ok);
+            [pdfBtn, excelBtn].forEach((btn) => {
+                if (!btn) return;
+                btn.disabled = isLoading;
+                btn.style.opacity = isLoading ? "0.65" : "1";
+                btn.style.pointerEvents = isLoading ? "none" : "auto";
+            });
+            if (!statusBox) return;
+            statusBox.style.display = statusMessage ? "block" : "none";
+            statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
+            statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
+            statusBox.style.color = ok ? "#166534" : "#991b1b";
+            statusBox.innerHTML = escapeHtml(statusMessage);
+        }
+
+        function downloadVrDownloadLog(type) {
+            const rows = buildVrDownloadLogGroupedRows();
+            if (!rows.length) return showToast("Download ke liye data nahi hai", false);
+            setVrDownloadLogDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
+            try {
+                const headers = ["DIVISION", "DC", "DATE", "NO OF DOWNLOADED REPORT"];
+                const bodyRows = rows.map((row) => [row.division, row.dc, row.date, row.count]);
+                const totalDownloads = rows.reduce((sum, row) => sum + row.count, 0);
+                const reportTitle = "VR Calculation - Download Log Report";
+                const divisionValue = document.getElementById("vr-download-log-division")?.value || "All Divisions";
+                const dateValue = vrDownloadLogMode === "DATE" ? formatRevenueDateIndian(normalizeRevenueReportDate(document.getElementById("vr-download-log-date")?.value || getCurrentDateDDMMYYYY())) : "All Time";
+                const scopeLine = `Division: ${divisionValue}  |  Period: ${dateValue}  |  Total Download: ${totalDownloads}`;
+                const suffix = vrDownloadLogMode === "DATE" ? (document.getElementById("vr-download-log-date")?.value || getTodayIsoDate()) : "ALL-TIME";
+                const fileName = `VR-Download-Log-${suffix}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (type === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setVrDownloadLogDownloadState(false, "PDF library load nahi hui", false); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
+                    doc.autoTable({ startY: 25, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                    setVrDownloadLogDownloadState(false, "PDF download ho chuki hai", true);
+                    return;
+                }
+                const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                const csv = [[reportTitle], [scopeLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = `${fileName}.csv`;
+                link.click();
+                setVrDownloadLogDownloadState(false, "Excel download ho chuki hai", true);
+            } catch (error) {
+                setVrDownloadLogDownloadState(false, "Download nahi ho paya", false);
+                showToast(error?.message || "Report download nahi ho payi", false);
+            }
         }
 
         function vrDownloadExcel() {
@@ -14766,6 +15188,9 @@
                 if (id === "vr-calculation") {
                     initVrCalculation();
                 }
+                if (id === "vr-download-log") {
+                    initVrDownloadLog();
+                }
                 if (id === "shms-progress") {
                     initShmsProgressDashboard();
                 }
@@ -14786,6 +15211,7 @@
                 if (id === "vehicle-reading") headerTitle = "VEHICLE READING";
                 if (id === "stm-complaint") headerTitle = "STM COMPLAINT";
                 if (id === "vr-calculation") headerTitle = "VR CALCULATION";
+                if (id === "vr-download-log") headerTitle = "VR DOWNLOAD LOG";
                 if (id === "stock-material") headerTitle = "STOCK MATERIAL";
                 if (id === "shms-entry") headerTitle = "SHMS ENTRY";
                 if (id === "shms-progress") headerTitle = "DAILY PROGRESS";
@@ -14941,6 +15367,8 @@
                 popRevenueTargetDrill();
             } else if (act === "revenue-live-progress-view" || act === "revenue-report-download-view" || act === "revenue-hq-village-view" || act === "revenue-target-achievement-view" || act === "revenue-top-defaulters-view" || act === "revenue-cash-reconcile-view" || act === "revenue-pending-list-view" || act === "revenue-paid-upload-view") {
                 switchView("revenue-collection");
+            } else if (act === "vr-download-log-view") {
+                switchView("vr-calculation");
             } else if (act === "mobile-update-report-view") {
                 switchView("mobile-update");
             } else if (act === "dc-dashboard-view" || act === "mobile-update-view" || act === "revenue-collection-view") {
