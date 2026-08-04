@@ -2269,15 +2269,18 @@
         // flow, wahi lastRevenueProgressBoxData (mode/filterValue) reuse hota hai. Inke
         // saath HQ/Village/Category/Net Bill Slab/Govt-NonGovt - "Pending DO List" jaisa
         // filter set bhi rahega, taaki koi bhi combination nikal sake.
-        let progressNonPayeeFilterState = { hq: "", village: "", category: "", slab: "", govt: "" };
+        let progressNonPayeeFilterState = { dc: "", hq: "", village: "", category: "", slab: "", govt: "" };
 
         function resetProgressNonPayeeFilterState() {
-            progressNonPayeeFilterState = { hq: "", village: "", category: "", slab: "", govt: "" };
+            progressNonPayeeFilterState = { dc: "", hq: "", village: "", category: "", slab: "", govt: "" };
         }
 
         function setProgressNonPayeeFilter(key, value) {
             if (!(key in progressNonPayeeFilterState)) return;
             progressNonPayeeFilterState[key] = value || "";
+            // DC badalne par HQ/Village dono reset - warna purani DC ki HQ/Village select
+            // rah jaati hai jo nayi DC me exist hi nahi karti.
+            if (key === "dc") { progressNonPayeeFilterState.hq = ""; progressNonPayeeFilterState.village = ""; }
             if (key === "hq") progressNonPayeeFilterState.village = "";
             const body = document.getElementById("progress-revenue-body");
             if (body) body.innerHTML = renderProgressRevenueBodyInner();
@@ -2299,7 +2302,8 @@
             const allRows = buildRevenueNonPayeeRows(mode, filterValue, bucket);
             const f = progressNonPayeeFilterState;
             const rows = allRows.filter((row) => (
-                (!f.hq || normalizeLookupValue(row.hqName) === normalizeLookupValue(f.hq))
+                (!f.dc || normalizeDcName(row.dcName) === normalizeDcName(f.dc))
+                && (!f.hq || normalizeLookupValue(row.hqName) === normalizeLookupValue(f.hq))
                 && (!f.village || normalizeLookupValue(row.village) === normalizeLookupValue(f.village))
                 && (!f.category || normalizeLookupValue(row.tariffCategory) === normalizeLookupValue(f.category))
                 && isProgressNonPayeeNetBillInSlab(row, f.slab)
@@ -2320,13 +2324,21 @@
             const f = progressNonPayeeFilterState;
             const bucketLabel = getRevenueNonPayeeBucketLabel(bucket);
             const totalPending = rows.reduce((sum, r) => sum + Number(r.pendingAmount || 0), 0);
-            const villageScoped = allRows.filter((row) => !f.hq || normalizeLookupValue(row.hqName) === normalizeLookupValue(f.hq));
-            const hqOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(allRows, "hqName"), f.hq, "All HQ Names");
+            // Division/Circle level me ek hi HQ naam alag-alag DC me repeat ho sakta hai,
+            // isliye HQ/Village se pehle DC chunna zaroori hai - warna baaki dropdown sahi
+            // se kaam nahi karte. DC-level view me pehle se ek hi DC scope me hai, isliye
+            // wahan yeh extra dropdown dikhane ki zaroorat nahi.
+            const showDcDropdown = activeViewLevel !== "DC";
+            const dcScoped = allRows.filter((row) => !f.dc || normalizeDcName(row.dcName) === normalizeDcName(f.dc));
+            const villageScoped = dcScoped.filter((row) => !f.hq || normalizeLookupValue(row.hqName) === normalizeLookupValue(f.hq));
+            const dcOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(allRows, "dcName"), f.dc, "All DC");
+            const hqOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(dcScoped, "hqName"), f.hq, "All HQ Names");
             const villageOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(villageScoped, "village"), f.village, "All Villages");
             const categoryOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(allRows, "tariffCategory"), f.category, "All Categories");
             const selectStyle = "width:100%; height:46px; margin:8px auto 0; display:block; border:1.5px solid #fb923c; border-radius:14px; padding:0 12px; font-size:0.8rem; font-weight:900; color:#0f172a; background:#ffffff;";
             let html = `
                 <div style="font-size:0.75rem; font-weight:950; color:#9f1239; text-align:center;">${escapeHtml(bucketLabel)}</div>
+                ${showDcDropdown ? `<select onchange="setProgressNonPayeeFilter('dc', this.value)" style="${selectStyle}">${dcOptionsHtml}</select>` : ""}
                 <select onchange="setProgressNonPayeeFilter('hq', this.value)" style="${selectStyle}">${hqOptionsHtml}</select>
                 <select onchange="setProgressNonPayeeFilter('village', this.value)" style="${selectStyle}">${villageOptionsHtml}</select>
                 <select onchange="setProgressNonPayeeFilter('category', this.value)" style="${selectStyle}">${categoryOptionsHtml}</select>
@@ -2378,8 +2390,14 @@
                 const { mode, filterValue } = lastRevenueProgressBoxData;
                 const { rows } = getProgressNonPayeeFilteredRows(mode || "DAILY", filterValue || "", bucket);
                 if (!rows.length) { setProgressCategoryDownloadState(false, "Download ke liye data nahi hai"); return; }
-                const headers = ["IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO", bucket === "SINCE_CONNECTION" ? "STATUS" : "MONTHS SINCE PAYMENT", "LAST PAYMENT DATE", "PENDING AMOUNT"];
+                const showDcColumn = activeViewLevel !== "DC";
+                const headers = [
+                    ...(showDcColumn ? ["DC NAME"] : []),
+                    "IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO",
+                    bucket === "SINCE_CONNECTION" ? "STATUS" : "MONTHS SINCE PAYMENT", "LAST PAYMENT DATE", "PENDING AMOUNT"
+                ];
                 const bodyRows = rows.map((row) => [
+                    ...(showDcColumn ? [row.dcName || ""] : []),
                     row.ivrsNo || "", row.consumerName || "", row.hqName || "", row.village || "", row.tariffCategory || "",
                     row.govtFlag ? "GOVT" : "NON GOVT", row.mobileNo || "",
                     bucket === "SINCE_CONNECTION" ? "Never Paid" : `${row.monthsSincePayment}`,
@@ -2388,7 +2406,7 @@
                 ]);
                 const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
                 const f = progressNonPayeeFilterState;
-                const filterLine = `HQ: ${f.hq || "All"}  |  Village: ${f.village || "All"}  |  Category: ${f.category || "All"}  |  Net Bill Slab: ${f.slab || "All"}  |  Type: ${f.govt === "GOVT" ? "Govt" : (f.govt === "NONGOVT" ? "Non Govt" : "All")}`;
+                const filterLine = `${showDcColumn ? `DC: ${f.dc || "All"}  |  ` : ""}HQ: ${f.hq || "All"}  |  Village: ${f.village || "All"}  |  Category: ${f.category || "All"}  |  Net Bill Slab: ${f.slab || "All"}  |  Type: ${f.govt === "GOVT" ? "Govt" : (f.govt === "NONGOVT" ? "Non Govt" : "All")}`;
                 const reportTitle = `${getRevenueNonPayeeBucketLabel(bucket)} - ${scope}`;
                 const asOfLine = `As of: ${formatRevenueDateIndian(normalizeRevenueReportDate(getCurrentDateDDMMYYYY()))}`;
                 const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
