@@ -15664,11 +15664,11 @@
 
         const billCalcSelectStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #f9a8d4; border-radius:14px; padding:0 12px; font-size:0.78rem; font-weight:900; color:#0f172a; background:#ffffff;";
         const billCalcInputStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #f9a8d4; border-radius:14px; padding:0 12px; font-size:0.85rem; font-weight:900; color:#0f172a; background:#ffffff; text-align:center;";
-        const billCalcLabelStyle = "display:block; font-size:0.62rem; font-weight:850; color:#be185d; margin-top:10px;";
+        const billCalcLabelStyle = "display:block; font-size:0.62rem; font-weight:900; color:#1d4ed8; margin-top:10px;";
 
         function billCalcUnitsField(placeholder) {
-            return `<label style="${billCalcLabelStyle}">Total Units (is mahine ki khapat)</label>
-                <input id="bc-units" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="${placeholder}" value="0">`;
+            return `<label style="${billCalcLabelStyle}">Total Unit (Consumption)</label>
+                <input id="bc-units" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="${placeholder}">`;
         }
         function billCalcLoadField(labelText, placeholder) {
             return `<label style="${billCalcLabelStyle}">${labelText}</label>
@@ -15688,8 +15688,8 @@
         function billCalcSubsidyField() {
             return `<label style="${billCalcLabelStyle}">Griha Jyoti Subsidy Applicable?</label>
                 <select id="bc-subsidy-toggle" class="ivrs-input" style="${billCalcSelectStyle}">
-                    <option value="YES">Haan (eligible consumer)</option>
-                    <option value="NO">Nahi</option>
+                    <option value="YES">YES (Eligible)</option>
+                    <option value="NO">NO (Not Eligible)</option>
                 </select>`;
         }
 
