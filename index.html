@@ -165,18 +165,25 @@
                     <div style="font-size:0.6rem; font-weight:800; color:#6d28d9; margin-top:4px; line-height:1.5;">MPERC Retail Supply Tariff Order FY 2026-27 + NGB Ledger se nikali dar ke anusaar (approx. estimate). F.C.A. aur Electricity Duty ab automatic calculate hote hain. PF surcharge, seasonal LT industry, DTR-metered jaise special-case charges is calculator me shamil nahi hain.</div>
                 </div>
 
-                <select id="bc-category" class="ivrs-input" style="text-align:left; padding:0 14px; font-size:0.85rem;" onchange="renderBillCalculatorFields()">
+                <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-bottom:4px;">CATEGORY</label>
+                <select id="bc-category" class="ivrs-input" style="text-align:left; padding:0 14px; font-size:0.85rem; margin-top:0;" onchange="onBillCalculatorCategoryChange()">
                     <option value="">-- Category Chunein --</option>
-                    <option value="LV1">LV1 - Domestic</option>
-                    <option value="LV2">LV2 - Non-Domestic</option>
+                    <option value="LV1">LV1 - Domestic (घरेलू)</option>
+                    <option value="LV2">LV2 - Non-Domestic (गैर-घरेलू)</option>
                     <option value="LV3">LV3 - Public Water Works / Street Light</option>
-                    <option value="LV4">LV4 - LT Industrial</option>
-                    <option value="LV5">LV5 - Agriculture</option>
+                    <option value="LV4">LV4 - LT Industrial (उद्योग)</option>
+                    <option value="LV5">LV5 - Agriculture (कृषि)</option>
+                    <option value="LV6">LV6 - EV Charging</option>
                 </select>
+
+                <div id="bc-tariffcode-wrap" style="display:none;">
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin:10px 0 4px;">TARIFF CODE</label>
+                    <select id="bc-tariffcode" class="ivrs-input" style="text-align:left; padding:0 14px; font-size:0.82rem; margin-top:0;" onchange="renderBillCalculatorFields()"></select>
+                </div>
 
                 <div id="bc-fields" style="width:100%; max-width:380px;"></div>
 
-                <button class="btn-unique" style="width:100%; max-width:380px; margin-top:6px; background:linear-gradient(135deg,#7c3aed 0%,#4c1d95 100%);" onclick="calculateBillEstimate()">BILL CALCULATE KAREN</button>
+                <button class="dashboard-btn" style="width:100%; max-width:380px; margin-top:14px; background:linear-gradient(135deg,#7c3aed 0%,#4c1d95 100%); font-size:0.95rem; padding:18px;" onclick="calculateBillEstimate()">BILL CALCULATE KAREN</button>
 
                 <div id="bc-result" style="width:100%; max-width:380px; margin-top:14px;"></div>
             </div>
