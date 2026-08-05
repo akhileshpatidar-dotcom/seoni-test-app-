@@ -15232,6 +15232,9 @@
                 if (id === "dc-dashboard") {
                     checkRevenueUploadFreshness();
                 }
+                if (id === "bill-calculator") {
+                    resetBillCalculator();
+                }
                 document.getElementById("back-btn").style.display = id === "home" ? "none" : "flex";
                 let headerTitle = "SEONI CIRCLE";
                 if (id === "dc-selection") headerTitle = activeDiv;
@@ -15268,6 +15271,7 @@
                 if (id === "mobile-update") headerTitle = "UPDATE MOBILE NO";
                 if (id === "mobile-update-report") headerTitle = "MOBILE UPDATE REPORT";
                 if (id === "summary") headerTitle = "PROGRESS REPORT";
+                if (id === "bill-calculator") headerTitle = "BIJLEE BILL CALCULATOR";
                 document.getElementById("main-header-title").innerText = headerTitle;
                 const header = document.getElementById("app-header");
                 const headerMenuWrap = document.getElementById("header-menu-wrap");
@@ -15338,6 +15342,12 @@
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)";
                     const courtBtn = document.getElementById("court-search-btn");
                     if (courtBtn) courtBtn.style.background = "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)";
+                } else if (id === "bill-calculator") {
+                    document.documentElement.style.setProperty("--theme-color", "#5b21b6");
+                    document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)");
+                    header.className = "app-header";
+                    header.style.background = "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)";
+                    if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)";
                 } else {
                     header.className = "app-header " + activeGrad;
                     if (searchBtn) searchBtn.style.background = "var(--theme-grad)";
@@ -15382,6 +15392,8 @@
                 switchView("subdn-chhapara");
             } else if (act === "court-case-view") {
                 resetCourtCaseForm();
+                switchView("dc-dashboard");
+            } else if (act === "bill-calculator-view") {
                 switchView("dc-dashboard");
             } else if (act === "material-list-view" || act === "material-receive-view" || act === "material-issue-view" || act === "live-stock-view" || act === "low-stock-view" || act === "stock-report-view") {
                 switchView("stock-material");
@@ -15442,4 +15454,427 @@
                 input.value = getTodayIsoDate();
             }
             refreshSummary();
+        }
+
+        // =====================================================================
+        // BIJLEE BILL CALCULATOR (DC Dashboard, "Revenue Collection" ke turant
+        // niche) - MPERC Retail Supply Tariff Order FY 2026-27 (Annexure-2,
+        // Tariff Schedule LV-1 se LV-5, source PDF "TERRIFF ORDER.pdf" pages
+        // 200-212) ke slabs par based APPROXIMATE monthly bill estimator.
+        //
+        // Formula NGB_CONSUMER_LEDGER_CHHAPARA-2_JUNE-2026.xlsx (10,100 rows)
+        // se reverse-engineer/verify kiya gaya hai:
+        //   - Net Bill = Month Bill + Arrear + SurchargeDemanded (100% exact,
+        //     saari 10,100 rows par).
+        //   - Month Bill = Energy Charge + F.C.A. + Fixed Charge + Electricity
+        //     Duty + PF Charge + CCB Adjustment + Other & TOD Adjustment +
+        //     Employee Rebate + Prompt Payment Incentive + Meter Rent
+        //     - Subsidy - Load Factor Incentive - S.D. Interest - Lock Credit
+        //     - Online Payment Rebate - Advance Payment Incentive, round-off
+        //     nearest रुपया (>=50 paisa upar) - is formula se 8,756/10,100
+        //     (87%) rows EXACT match hui thi, baaki zyada-tar chhoti
+        //     rounding-fraction wali LV5 (flat-rate) rows hain.
+        //   - "Additional Fixed Charge upto/120-130/above130" columns Fixed
+        //     Charge ka hi breakdown/mirror hain (99.5% rows me dono barabar) -
+        //     isliye alag se nahi jode jaate, warna double-count ho jaata.
+        //   - Electricity Duty ledger me empirically ~9% of (Energy Charge +
+        //     F.C.A.) nikla (LV1 rural/urban dono me median ~9.0-9.1%).
+        //
+        // LIMITATIONS (v1 me jaan-boojh kar chhoda gaya hai):
+        //   - F.C.A. (Fuel Cost Adjustment) ki dar Tariff Order me nahi hoti -
+        //     DISCOM har mahine alag se notify karta hai. Isliye ye ek MANUAL
+        //     input hai (paise/unit) - current mahine ki dar khud daalni hogi.
+        //   - Power Factor surcharge/incentive (LV-1 ke alawa sabhi category
+        //     par lagu ho sakta hai) is calculator me shamil NAHI hai.
+        //   - Demand-based tariff (LV2/LV3/LV5 me connected load 10kW/25HP se
+        //     upar) aur LV-4 Seasonal (4.2) tariff shamil NAHI hai - sirf
+        //     sanctioned-load/non-seasonal based tariff calculate hota hai.
+        //   - Griha Jyoti Subsidy (LV1) ki asli eligibility average
+        //     consumption/BPL status par bhi depend karti hai (sirf current
+        //     month ki units par nahi) - Tariff Order me ye rule nahi hai,
+        //     isliye ye ek MANUAL "Subsidy Applicable?" toggle hai. Amount
+        //     NGB ledger ki 8,700+ subsidy>0 wali LV1 rows se nikala gaya
+        //     empirical interpolation-table hai (0-150 units), 150 se upar
+        //     policy ke anusaar subsidy hamesha 0 hai.
+        // =====================================================================
+
+        function billRoundOff(value) {
+            return Math.floor(Number(value || 0) + 0.5);
+        }
+
+        // Griha Jyoti subsidy - LV1 metered consumers, NGB_CONSUMER_LEDGER
+        // (Chhapara-2, June-2026) ki LV1 rows (Subsidy>0) ko exact Billed
+        // Unit ke hisaab se group karke median subsidy nikali gayi, phir
+        // in breakpoints ke beech linear-interpolate karte hain. Source:
+        // is session me hui data-analysis, koi official rate-card nahi mila.
+        const BILL_LV1_SUBSIDY_TABLE = [
+            [0, 0], [10, 20], [20, 73], [30, 126], [40, 178], [50, 232],
+            [60, 340], [70, 402], [80, 465], [90, 531], [100, 594],
+            [110, 592], [120, 592], [130, 596], [140, 593], [150, 593]
+        ];
+
+        function lookupBillLv1Subsidy(units) {
+            const u = Math.max(0, Number(units || 0));
+            if (u > 150) return 0;
+            const table = BILL_LV1_SUBSIDY_TABLE;
+            for (let i = 0; i < table.length - 1; i++) {
+                const u1 = table[i][0], s1 = table[i][1], u2 = table[i + 1][0], s2 = table[i + 1][1];
+                if (u >= u1 && u <= u2) {
+                    if (u2 === u1) return s1;
+                    return s1 + (s2 - s1) * (u - u1) / (u2 - u1);
+                }
+            }
+            return table[table.length - 1][1];
+        }
+
+        function resetBillCalculator() {
+            const catSelect = document.getElementById("bc-category");
+            if (catSelect) catSelect.value = "";
+            const fieldsBox = document.getElementById("bc-fields");
+            if (fieldsBox) fieldsBox.innerHTML = "";
+            const resultBox = document.getElementById("bc-result");
+            if (resultBox) resultBox.innerHTML = "";
+        }
+
+        const billCalcSelectStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #a78bfa; border-radius:14px; padding:0 12px; font-size:0.78rem; font-weight:900; color:#0f172a; background:#ffffff;";
+        const billCalcInputStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #a78bfa; border-radius:14px; padding:0 12px; font-size:0.85rem; font-weight:900; color:#0f172a; background:#ffffff; text-align:center;";
+
+        function billCalcFcaFieldHtml() {
+            return `
+                <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">F.C.A. / Fuel Cost Adjustment (paise/unit) - is mahine ki dar khud daalein</label>
+                <input id="bc-fca" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 15" value="0">
+            `;
+        }
+
+        function renderBillCalculatorFields() {
+            const category = document.getElementById("bc-category")?.value || "";
+            const fieldsBox = document.getElementById("bc-fields");
+            const resultBox = document.getElementById("bc-result");
+            if (resultBox) resultBox.innerHTML = "";
+            if (!fieldsBox) return;
+            if (category === "LV1") {
+                fieldsBox.innerHTML = `
+                    <select id="bc-area" class="ivrs-input" style="${billCalcSelectStyle}">
+                        <option value="URBAN">Urban</option>
+                        <option value="RURAL">Rural</option>
+                    </select>
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Total Units (is mahine ki khapat)</label>
+                    <input id="bc-units" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 120" value="0">
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Griha Jyoti Subsidy Applicable?</label>
+                    <select id="bc-subsidy-toggle" class="ivrs-input" style="${billCalcSelectStyle}">
+                        <option value="YES">Haan (eligible consumer)</option>
+                        <option value="NO">Nahi</option>
+                    </select>
+                    ${billCalcFcaFieldHtml()}
+                `;
+            } else if (category === "LV2") {
+                fieldsBox.innerHTML = `
+                    <select id="bc-subcat" class="ivrs-input" style="${billCalcSelectStyle}">
+                        <option value="2.1">LV 2.1 - School / Hostel / Educational</option>
+                        <option value="2.2">LV 2.2 - Shop / Office / Hospital / General</option>
+                    </select>
+                    <select id="bc-area" class="ivrs-input" style="${billCalcSelectStyle}">
+                        <option value="URBAN">Urban</option>
+                        <option value="RURAL">Rural</option>
+                    </select>
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Sanctioned Load (kW, 10kW tak)</label>
+                    <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 2" value="1">
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Total Units (is mahine ki khapat)</label>
+                    <input id="bc-units" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 80" value="0">
+                    ${billCalcFcaFieldHtml()}
+                `;
+            } else if (category === "LV3") {
+                fieldsBox.innerHTML = `
+                    <select id="bc-subcat" class="ivrs-input" style="${billCalcSelectStyle}">
+                        <option value="MUNICIPAL">Municipal Corp / Cantonment / Municipality / Nagar Panchayat</option>
+                        <option value="GRAM">Gram Panchayat</option>
+                    </select>
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Sanctioned Load (kW)</label>
+                    <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 5" value="1">
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Total Units (is mahine ki khapat)</label>
+                    <input id="bc-units" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 300" value="0">
+                    ${billCalcFcaFieldHtml()}
+                `;
+            } else if (category === "LV4") {
+                fieldsBox.innerHTML = `
+                    <select id="bc-area" class="ivrs-input" style="${billCalcSelectStyle}">
+                        <option value="URBAN">Urban</option>
+                        <option value="RURAL">Rural</option>
+                    </select>
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Contract Demand (kW)</label>
+                    <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 20" value="1">
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Total Units (is mahine ki khapat)</label>
+                    <input id="bc-units" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 558" value="0">
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Contract Demand 20HP/15kW se kam hai? (30% rebate)</label>
+                    <select id="bc-rebate30" class="ivrs-input" style="${billCalcSelectStyle}">
+                        <option value="NO">Nahi</option>
+                        <option value="YES">Haan</option>
+                    </select>
+                    ${billCalcFcaFieldHtml()}
+                `;
+            } else if (category === "LV5") {
+                fieldsBox.innerHTML = `
+                    <select id="bc-subcat" class="ivrs-input" style="${billCalcSelectStyle}" onchange="updateBillCalculatorLv5Extra()">
+                        <option value="5.1">LV 5.1 - Metered (Pump/Irrigation)</option>
+                        <option value="5.4">LV 5.4 - Flat Rate (Unmetered)</option>
+                    </select>
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Sanctioned Load (HP)</label>
+                    <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 5" value="1">
+                    <div id="bc-lv5-extra"></div>
+                    ${billCalcFcaFieldHtml()}
+                `;
+                updateBillCalculatorLv5Extra();
+            } else {
+                fieldsBox.innerHTML = "";
+            }
+        }
+
+        function updateBillCalculatorLv5Extra() {
+            const subcat = document.getElementById("bc-subcat")?.value || "5.1";
+            const extraBox = document.getElementById("bc-lv5-extra");
+            if (!extraBox) return;
+            if (subcat === "5.4") {
+                extraBox.innerHTML = `
+                    <select id="bc-phase" class="ivrs-input" style="${billCalcSelectStyle}">
+                        <option value="3P">Three Phase</option>
+                        <option value="1P">Single Phase</option>
+                    </select>
+                    <select id="bc-season" class="ivrs-input" style="${billCalcSelectStyle}">
+                        <option value="APR_SEP">April - September</option>
+                        <option value="OCT_MAR">October - March</option>
+                    </select>
+                `;
+            } else {
+                extraBox.innerHTML = `
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Total Units (is mahine ki khapat)</label>
+                    <input id="bc-units" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 350" value="0">
+                `;
+            }
+        }
+
+        // Telescopic slab sum: har slab ke andar aane wale units usi slab ki
+        // paise/unit rate par charge hote hain (na ki poori consumption top
+        // slab ki rate par) - jaise LV1.2 aur LV5.1 ke tariff table me likha
+        // "Energy Charge with telescopic benefit". slabs = [[uptoUnits, paise], ...],
+        // aakhri slab ki uptoUnits Infinity honi chahiye.
+        function billTelescopicSum(units, slabs) {
+            let remaining = Math.max(0, Number(units || 0));
+            let prevLimit = 0;
+            let totalRupees = 0;
+            for (const [upto, paise] of slabs) {
+                if (remaining <= 0) break;
+                const slabSize = upto - prevLimit;
+                const unitsInSlab = Math.min(remaining, slabSize);
+                totalRupees += unitsInSlab * paise / 100;
+                remaining -= unitsInSlab;
+                prevLimit = upto;
+            }
+            return totalRupees;
+        }
+
+        // LV1.2 (metered) - source: Tariff Order page 200
+        function computeBillLv1(inputs) {
+            const units = Math.max(0, Number(inputs.units || 0));
+            const area = inputs.area === "RURAL" ? "RURAL" : "URBAN";
+            const energyCharge = billTelescopicSum(units, [[50, 471], [150, 567], [300, 705], [Infinity, 724]]);
+            let fixedCharge;
+            if (units <= 50) fixedCharge = area === "URBAN" ? 81 : 67;
+            else if (units <= 150) fixedCharge = area === "URBAN" ? 134 : 111;
+            else {
+                // 151+ units: fixed charge per "virtual load" block - har 15 unit
+                // (ya uska hissa) 0.1kW ke barabar mana jaata hai (Tariff Order
+                // illustration, page 200), sanctioned load se nahi.
+                const blocksOf0p1kW = Math.ceil(units / 15);
+                fixedCharge = blocksOf0p1kW * (area === "URBAN" ? 30 : 28);
+            }
+            const fca = units * Number(inputs.fcaPaise || 0) / 100;
+            const electricityDuty = 0.09 * (energyCharge + fca);
+            const subsidy = inputs.subsidyApplicable ? lookupBillLv1Subsidy(units) : 0;
+            const components = [
+                ["Energy Charge", energyCharge],
+                ["F.C.A.", fca],
+                ["Fixed Charge", fixedCharge],
+                ["Electricity Duty (~9%)", electricityDuty],
+                ["Subsidy (Griha Jyoti)", -subsidy]
+            ];
+            const total = energyCharge + fca + fixedCharge + electricityDuty - subsidy;
+            return { components, total: billRoundOff(total) };
+        }
+
+        // LV2.1 / LV2.2 (sanctioned load based, connected load <=10kW) - source: page 202-203
+        function computeBillLv2(inputs) {
+            const units = Math.max(0, Number(inputs.units || 0));
+            const area = inputs.area === "RURAL" ? "RURAL" : "URBAN";
+            const load = Math.max(0, Number(inputs.load || 0));
+            let energyRatePaise, fixedRatePerKw;
+            if (inputs.subcat === "2.1") {
+                energyRatePaise = 700;
+                fixedRatePerKw = area === "URBAN" ? 172 : 141;
+            } else {
+                if (units <= 50) { energyRatePaise = 680; fixedRatePerKw = area === "URBAN" ? 98 : 83; }
+                else { energyRatePaise = 830; fixedRatePerKw = area === "URBAN" ? 154 : 133; }
+            }
+            const energyCharge = units * energyRatePaise / 100;
+            const fixedCharge = load * fixedRatePerKw;
+            const fca = units * Number(inputs.fcaPaise || 0) / 100;
+            const electricityDuty = 0.09 * (energyCharge + fca);
+            const components = [
+                ["Energy Charge", energyCharge],
+                ["F.C.A.", fca],
+                ["Fixed Charge", fixedCharge],
+                ["Electricity Duty (~9%)", electricityDuty]
+            ];
+            const total = energyCharge + fca + fixedCharge + electricityDuty;
+            return { components, total: billRoundOff(total) };
+        }
+
+        // LV3 (Public Water Works / Street Light) - source: page 205
+        function computeBillLv3(inputs) {
+            const units = Math.max(0, Number(inputs.units || 0));
+            const load = Math.max(0, Number(inputs.load || 0));
+            const isMunicipal = inputs.subcat !== "GRAM";
+            const energyRatePaise = isMunicipal ? 638 : 610;
+            const fixedRatePerKw = isMunicipal ? 389 : 208;
+            const energyCharge = units * energyRatePaise / 100;
+            const fixedCharge = load * fixedRatePerKw;
+            const fca = units * Number(inputs.fcaPaise || 0) / 100;
+            const electricityDuty = 0.09 * (energyCharge + fca);
+            const components = [
+                ["Energy Charge", energyCharge],
+                ["F.C.A.", fca],
+                ["Fixed Charge", fixedCharge],
+                ["Electricity Duty (~9%)", electricityDuty]
+            ];
+            const total = energyCharge + fca + fixedCharge + electricityDuty;
+            return { components, total: billRoundOff(total) };
+        }
+
+        // LV4 (LT Industrial, Non-seasonal, demand-based tariff) - source: page 206-207
+        function computeBillLv4(inputs) {
+            const units = Math.max(0, Number(inputs.units || 0));
+            const area = inputs.area === "RURAL" ? "RURAL" : "URBAN";
+            const demand = Math.max(0, Number(inputs.load || 0));
+            let energyRatePaise = 705;
+            let fixedRatePerKw = area === "URBAN" ? 336 : 221;
+            if (inputs.rebate30) {
+                energyRatePaise *= 0.7;
+                fixedRatePerKw *= 0.7;
+            }
+            const energyCharge = units * energyRatePaise / 100;
+            const fixedCharge = demand * fixedRatePerKw;
+            const fca = units * Number(inputs.fcaPaise || 0) / 100;
+            const electricityDuty = 0.09 * (energyCharge + fca);
+            const components = [
+                ["Energy Charge", energyCharge],
+                ["F.C.A.", fca],
+                ["Fixed Charge (Demand)", fixedCharge],
+                ["Electricity Duty (~9%)", electricityDuty]
+            ];
+            const total = energyCharge + fca + fixedCharge + electricityDuty;
+            return { components, total: billRoundOff(total) };
+        }
+
+        // LV5.1 (metered, telescopic) aur LV5.4 (unmetered flat-rate, season ke
+        // hisaab se assessed units) - source: page 210-211
+        function computeBillLv5(inputs) {
+            const load = Math.max(0, Number(inputs.load || 0));
+            let units;
+            if (inputs.subcat === "5.4") {
+                const perHp = inputs.season === "OCT_MAR"
+                    ? (inputs.phase === "1P" ? 180 : 170)
+                    : (inputs.phase === "1P" ? 95 : 95);
+                units = load * perHp;
+            } else {
+                units = Math.max(0, Number(inputs.units || 0));
+            }
+            const fixedRatePerHp = units <= 300 ? 77 : (units <= 750 ? 93 : 101);
+            const energyCharge = billTelescopicSum(units, [[300, 533], [750, 636], [Infinity, 664]]);
+            const fixedCharge = load * fixedRatePerHp;
+            const fca = units * Number(inputs.fcaPaise || 0) / 100;
+            const electricityDuty = 0.09 * (energyCharge + fca);
+            const components = [
+                ["Assessed/Billed Units", units],
+                ["Energy Charge", energyCharge],
+                ["F.C.A.", fca],
+                ["Fixed Charge", fixedCharge],
+                ["Electricity Duty (~9%)", electricityDuty]
+            ];
+            const total = energyCharge + fca + fixedCharge + electricityDuty;
+            return { components, total: billRoundOff(total), unitsUsed: units };
+        }
+
+        function calculateBillEstimate() {
+            const category = document.getElementById("bc-category")?.value || "";
+            const resultBox = document.getElementById("bc-result");
+            if (!resultBox) return;
+            if (!category) { showToast("Pehle category chunein", false); return; }
+            const fcaPaise = Number(document.getElementById("bc-fca")?.value || 0);
+            let result;
+            if (category === "LV1") {
+                result = computeBillLv1({
+                    units: document.getElementById("bc-units")?.value,
+                    area: document.getElementById("bc-area")?.value,
+                    load: document.getElementById("bc-load")?.value,
+                    subsidyApplicable: document.getElementById("bc-subsidy-toggle")?.value === "YES",
+                    fcaPaise
+                });
+            } else if (category === "LV2") {
+                result = computeBillLv2({
+                    units: document.getElementById("bc-units")?.value,
+                    area: document.getElementById("bc-area")?.value,
+                    load: document.getElementById("bc-load")?.value,
+                    subcat: document.getElementById("bc-subcat")?.value,
+                    fcaPaise
+                });
+            } else if (category === "LV3") {
+                result = computeBillLv3({
+                    units: document.getElementById("bc-units")?.value,
+                    load: document.getElementById("bc-load")?.value,
+                    subcat: document.getElementById("bc-subcat")?.value,
+                    fcaPaise
+                });
+            } else if (category === "LV4") {
+                result = computeBillLv4({
+                    units: document.getElementById("bc-units")?.value,
+                    area: document.getElementById("bc-area")?.value,
+                    load: document.getElementById("bc-load")?.value,
+                    rebate30: document.getElementById("bc-rebate30")?.value === "YES",
+                    fcaPaise
+                });
+            } else if (category === "LV5") {
+                result = computeBillLv5({
+                    units: document.getElementById("bc-units")?.value,
+                    load: document.getElementById("bc-load")?.value,
+                    subcat: document.getElementById("bc-subcat")?.value,
+                    phase: document.getElementById("bc-phase")?.value,
+                    season: document.getElementById("bc-season")?.value,
+                    fcaPaise
+                });
+            } else {
+                return;
+            }
+            resultBox.innerHTML = renderBillCalculatorResultHtml(result);
+        }
+
+        function renderBillCalculatorResultHtml(result) {
+            const rows = result.components.map(([label, value]) => {
+                const isUnitRow = label === "Assessed/Billed Units";
+                const isNegative = value < 0;
+                const color = isNegative ? "#166534" : "#0f172a";
+                const displayValue = isUnitRow
+                    ? `${billRoundOff(value).toLocaleString("en-IN")} units`
+                    : (isNegative ? "-₹" : "₹") + Math.abs(billRoundOff(value)).toLocaleString("en-IN");
+                return `<div class="summary-table-row" style="grid-template-columns: 1.4fr 1fr;"><div>${escapeHtml(label)}</div><div class="font-black" style="color:${color};">${displayValue}</div></div>`;
+            }).join("");
+            return `
+                <div class="summary-wrapper">
+                    <div class="summary-table-header" style="grid-template-columns: 1.4fr 1fr;"><div>COMPONENT</div><div>AMOUNT</div></div>
+                    ${rows}
+                </div>
+                <div class="summary-footer" style="margin-top:10px;">
+                    <div class="font-black text-slate-800 text-center">ESTIMATED MONTH BILL</div>
+                    <div style="text-align:center; font-size:1.4rem; font-weight:950; color:#5b21b6; margin-top:6px;">₹${result.total.toLocaleString("en-IN")}</div>
+                </div>
+                <div style="font-size:0.58rem; font-weight:800; color:#94a3b8; text-align:center; margin-top:10px; line-height:1.5;">Ye ek approximate estimate hai (F.C.A. manual, PF surcharge/demand-tariff shamil nahi). Arrear/Surcharge is total me shamil nahi hai.</div>
+            `;
         }

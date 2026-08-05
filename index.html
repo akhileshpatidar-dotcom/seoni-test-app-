@@ -151,9 +151,34 @@
                 <button class="dashboard-btn btn-update-red" onclick="switchView('mobile-update')">Mobile No Update</button>
                 <button class="dashboard-btn btn-revenue-blue" onclick="switchView('revenue-collection')">Revenue Collection</button>
                 <div id="revenue-upload-freshness-ticker" class="ticker-wrap" style="display:none; margin-top:6px;"><span class="ticker-text" style="color:#ffffff;"></span></div>
+                <button class="dashboard-btn" style="background: linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%);" onclick="switchView('bill-calculator')">Bijlee Bill Calculator</button>
           <button class="dashboard-btn btn-court-case" onclick="switchView('court-case')" style="display:none;">Lok Adalat Notice</button>
                 <button class="dashboard-btn btn-vr-calculation" onclick="switchView('vr-calculation')">VR Calculation</button>
                 <button class="dashboard-btn btn-progress-black" onclick="askPassword('DC')">Daily Progress</button>
+            </div>
+        </main>
+
+        <main id="bill-calculator-view" class="view">
+            <div class="search-panel" style="padding-top:14px;">
+                <div style="width:100%; max-width:380px; background:#f5f3ff; border:1.5px solid #c4b5fd; border-radius:16px; padding:12px; text-align:center; margin-bottom:12px;">
+                    <div style="font-size:0.8rem; font-weight:950; color:#5b21b6;">MONTHLY BIJLEE BILL CALCULATOR</div>
+                    <div style="font-size:0.6rem; font-weight:800; color:#6d28d9; margin-top:4px; line-height:1.5;">MPERC Retail Supply Tariff Order FY 2026-27 ke anusaar (approx. estimate) &mdash; F.C.A. aur kuch special-case charges (PF surcharge, seasonal LT industry, DTR-metered) is calculator me shamil nahi hain.</div>
+                </div>
+
+                <select id="bc-category" class="ivrs-input" style="text-align:left; padding:0 14px; font-size:0.85rem;" onchange="renderBillCalculatorFields()">
+                    <option value="">-- Category Chunein --</option>
+                    <option value="LV1">LV1 - Domestic</option>
+                    <option value="LV2">LV2 - Non-Domestic</option>
+                    <option value="LV3">LV3 - Public Water Works / Street Light</option>
+                    <option value="LV4">LV4 - LT Industrial</option>
+                    <option value="LV5">LV5 - Agriculture</option>
+                </select>
+
+                <div id="bc-fields" style="width:100%; max-width:380px;"></div>
+
+                <button class="btn-unique" style="width:100%; max-width:380px; margin-top:6px; background:linear-gradient(135deg,#7c3aed 0%,#4c1d95 100%);" onclick="calculateBillEstimate()">BILL CALCULATE KAREN</button>
+
+                <div id="bc-result" style="width:100%; max-width:380px; margin-top:14px;"></div>
             </div>
         </main>
 
