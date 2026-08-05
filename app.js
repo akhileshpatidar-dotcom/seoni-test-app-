@@ -15635,6 +15635,8 @@
             if (resultBox) resultBox.innerHTML = "";
             lastBillCalcResult = null;
             lastBillCalcMeta = null;
+            const introDesc = document.getElementById("bc-intro-desc");
+            if (introDesc) introDesc.style.display = "block";
         }
 
         function onBillCalculatorCategoryChange() {
@@ -15643,8 +15645,10 @@
             const codeSelect = document.getElementById("bc-tariffcode");
             const fieldsBox = document.getElementById("bc-fields");
             const resultBox = document.getElementById("bc-result");
+            const introDesc = document.getElementById("bc-intro-desc");
             if (resultBox) resultBox.innerHTML = "";
             if (fieldsBox) fieldsBox.innerHTML = "";
+            if (introDesc) introDesc.style.display = category ? "none" : "block";
             if (!category || !BILL_TARIFF_CODES[category]) {
                 if (codeWrap) codeWrap.style.display = "none";
                 if (codeSelect) codeSelect.innerHTML = "";
@@ -16007,35 +16011,77 @@
             } else {
                 return;
             }
-            const category = document.getElementById("bc-category")?.value || "";
-            const tariffLabel = (BILL_TARIFF_CODES[category] || []).find((c) => c.code === tariffCode)?.label || tariffCode;
+            // PDF me Devanagari font support nahi hai (jsPDF default font), isliye
+            // input-summary sirf ASCII/romanized text me capture karte hain -
+            // category/tariff-code dropdown ke Hindi/Devanagari options se text
+            // nikal ke stripDevanagariForPdf() se saaf kar dete hain.
+            const categorySelect = document.getElementById("bc-category");
+            const tariffSelect = document.getElementById("bc-tariffcode");
+            const fieldsBox = document.getElementById("bc-fields");
+            const inputRows = [
+                ["Category", stripDevanagariForPdf(categorySelect?.options[categorySelect.selectedIndex]?.text || tariffCode)],
+                ["Tariff Code", stripDevanagariForPdf(tariffSelect?.options[tariffSelect.selectedIndex]?.text || tariffCode)]
+            ];
+            (fieldsBox ? Array.from(fieldsBox.querySelectorAll("label")) : []).forEach((lbl) => {
+                const field = lbl.nextElementSibling;
+                if (!field) return;
+                let val = "";
+                if (field.tagName === "SELECT") val = field.options[field.selectedIndex]?.text || field.value;
+                else if (field.tagName === "INPUT") val = field.value;
+                else return;
+                inputRows.push([stripDevanagariForPdf(lbl.textContent), stripDevanagariForPdf(val)]);
+            });
             lastBillCalcResult = result;
-            lastBillCalcMeta = { tariffLabel, units, billingDays };
+            lastBillCalcMeta = { inputRows };
             resultBox.innerHTML = renderBillCalculatorResultHtml(result);
         }
 
         let lastBillCalcResult = null;
         let lastBillCalcMeta = null;
 
+        function stripDevanagariForPdf(text) {
+            return String(text || "")
+                .replace(/[ऀ-ॿ]+/g, "")
+                .replace(/\(\s*\)/g, "")
+                .replace(/\s{2,}/g, " ")
+                .replace(/\s+([,)])/g, "$1")
+                .replace(/-\s*-/g, "-")
+                .replace(/^[\s\-]+|[\s\-]+$/g, "")
+                .trim();
+        }
+
         function downloadBillCalculatorPdf() {
             if (!lastBillCalcResult) { showToast("Pehle bill calculate karein", false); return; }
             if (!window.jspdf?.jsPDF) { showToast("PDF library load nahi hui", false); return; }
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
+            const consumerName = document.getElementById("bc-consumer-name")?.value?.trim() || "";
             doc.setFontSize(7);
             doc.setTextColor(100);
             doc.text("SEONI CIRCLE APP - BIJLEE BILL CALCULATOR", 14, 10);
             doc.setFontSize(15);
             doc.setTextColor(0);
             doc.text("MONTHLY BIJLEE BILL ESTIMATE", 105, 20, { align: "center" });
-            doc.setFontSize(10);
-            doc.setTextColor(80);
-            doc.text(lastBillCalcMeta?.tariffLabel || "", 105, 28, { align: "center" });
-            doc.setFontSize(8);
+            doc.setFontSize(9);
             doc.setTextColor(120);
-            doc.text(`Billing Period: ${lastBillCalcMeta?.billingDays || 30} din | Generated: ${new Date().toLocaleDateString("en-IN")}`, 105, 34, { align: "center" });
+            doc.text(`Generated: ${new Date().toLocaleDateString("en-IN")}`, 105, 27, { align: "center" });
+            let nextY = 33;
+            if (consumerName) {
+                doc.setFontSize(11);
+                doc.setTextColor(0);
+                doc.text(`Consumer Name: ${consumerName}`, 105, nextY, { align: "center" });
+                nextY += 8;
+            }
             doc.autoTable({
-                startY: 42,
+                startY: nextY,
+                head: [["INPUT PARAMETER", "VALUE"]],
+                body: (lastBillCalcMeta?.inputRows || []).filter(([, v]) => v),
+                theme: "grid",
+                headStyles: { fillColor: [236, 72, 153], halign: "center" },
+                columnStyles: { 0: { halign: "left" }, 1: { halign: "right" } }
+            });
+            doc.autoTable({
+                startY: doc.lastAutoTable.finalY + 6,
                 head: [["COMPONENT", "AMOUNT (Rs.)"]],
                 body: lastBillCalcResult.components.map(([label, value]) => [label, billRoundOff(value).toLocaleString("en-IN")]),
                 foot: [["ESTIMATED MONTH BILL", lastBillCalcResult.total.toLocaleString("en-IN")]],
@@ -16047,7 +16093,7 @@
             doc.setFontSize(7);
             doc.setTextColor(140);
             doc.text("Ye ek approximate estimate hai (PF surcharge/seasonal/DTR-metered shamil nahi). Arrear/Surcharge is total me shamil nahi hai.", 14, doc.lastAutoTable.finalY + 10);
-            savePdfDocumentForDevice(doc, `Bijlee_Bill_Estimate_${Date.now()}.pdf`);
+            savePdfDocumentForDevice(doc, `Bijlee_Bill_Estimate_${consumerName ? consumerName.replace(/[^a-zA-Z0-9]/g, "_") + "_" : ""}${Date.now()}.pdf`);
         }
 
         function renderBillCalculatorResultHtml(result) {
@@ -16070,7 +16116,9 @@
                     <div class="font-black text-slate-800 text-center">ESTIMATED MONTH BILL</div>
                     <div style="text-align:center; font-size:1.4rem; font-weight:950; color:#9d174d; margin-top:6px;">₹${result.total.toLocaleString("en-IN")}</div>
                 </div>
-                <button class="dashboard-btn" style="width:100%; margin-top:12px; background:linear-gradient(135deg,#fbcfe8 0%,#f9a8d4 100%); color:#831843 !important; font-size:0.8rem; padding:14px;" onclick="downloadBillCalculatorPdf()">PDF DOWNLOAD KAREN</button>
+                <label style="${billCalcLabelStyle}">Consumer Name (Optional) - Report pehchanne ke liye</label>
+                <input id="bc-consumer-name" type="text" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. Ramesh Kumar">
+                <button class="dashboard-btn" style="width:100%; margin-top:12px; background:linear-gradient(135deg,#ef4444 0%,#b91c1c 100%); color:#ffffff !important; font-size:0.8rem; padding:14px;" onclick="downloadBillCalculatorPdf()">DOWNLOAD PDF</button>
                 <div style="font-size:0.58rem; font-weight:800; color:#94a3b8; text-align:center; margin-top:10px; line-height:1.5;">Ye ek approximate estimate hai (PF surcharge/seasonal/DTR-metered shamil nahi). Arrear/Surcharge is total me shamil nahi hai.</div>
             `;
         }
