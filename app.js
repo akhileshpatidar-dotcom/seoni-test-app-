@@ -15343,11 +15343,10 @@
                     const courtBtn = document.getElementById("court-search-btn");
                     if (courtBtn) courtBtn.style.background = "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)";
                 } else if (id === "bill-calculator") {
-                    document.documentElement.style.setProperty("--theme-color", "#5b21b6");
-                    document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)");
-                    header.className = "app-header";
-                    header.style.background = "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)";
-                    if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%)";
+                    document.documentElement.style.setProperty("--theme-color", "#ec4899");
+                    document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%)");
+                    header.className = "app-header btn-feeder-light-pink";
+                    if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%)";
                 } else {
                     header.className = "app-header " + activeGrad;
                     if (searchBtn) searchBtn.style.background = "var(--theme-grad)";
@@ -15524,6 +15523,14 @@
             return Math.floor(Number(value || 0) + 0.5);
         }
 
+        function billCalcRoundLoad(load) {
+            return Math.max(1, Math.round(Number(load || 0)));
+        }
+
+        function billCalcFloorLoad(load) {
+            return Math.max(1, Math.floor(Number(load || 0)));
+        }
+
         function billTelescopicSum(units, slabs) {
             let remaining = Math.max(0, Number(units || 0));
             let prevLimit = 0;
@@ -15626,6 +15633,8 @@
             if (fieldsBox) fieldsBox.innerHTML = "";
             const resultBox = document.getElementById("bc-result");
             if (resultBox) resultBox.innerHTML = "";
+            lastBillCalcResult = null;
+            lastBillCalcMeta = null;
         }
 
         function onBillCalculatorCategoryChange() {
@@ -15649,9 +15658,9 @@
             renderBillCalculatorFields();
         }
 
-        const billCalcSelectStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #a78bfa; border-radius:14px; padding:0 12px; font-size:0.78rem; font-weight:900; color:#0f172a; background:#ffffff;";
-        const billCalcInputStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #a78bfa; border-radius:14px; padding:0 12px; font-size:0.85rem; font-weight:900; color:#0f172a; background:#ffffff; text-align:center;";
-        const billCalcLabelStyle = "display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;";
+        const billCalcSelectStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #f9a8d4; border-radius:14px; padding:0 12px; font-size:0.78rem; font-weight:900; color:#0f172a; background:#ffffff;";
+        const billCalcInputStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #f9a8d4; border-radius:14px; padding:0 12px; font-size:0.85rem; font-weight:900; color:#0f172a; background:#ffffff; text-align:center;";
+        const billCalcLabelStyle = "display:block; font-size:0.62rem; font-weight:850; color:#be185d; margin-top:10px;";
 
         function billCalcUnitsField(placeholder) {
             return `<label style="${billCalcLabelStyle}">Total Units (is mahine ki khapat)</label>
@@ -15667,6 +15676,10 @@
                     <option value="URBAN">Urban</option>
                     <option value="RURAL">Rural</option>
                 </select>`;
+        }
+        function billCalcBillingDaysField() {
+            return `<label style="${billCalcLabelStyle}">Billing Period (Din) - is mahine ka reading cycle kitne din ka tha</label>
+                <input id="bc-billing-days" type="number" inputmode="numeric" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 30" value="30">`;
         }
         function billCalcSubsidyField() {
             return `<label style="${billCalcLabelStyle}">Griha Jyoti Subsidy Applicable?</label>
@@ -15685,7 +15698,7 @@
             if (!tariffCode) { fieldsBox.innerHTML = ""; return; }
 
             if (tariffCode === "LV1.2U" || tariffCode === "LV1.2R") {
-                fieldsBox.innerHTML = billCalcUnitsField("e.g. 120") + billCalcSubsidyField();
+                fieldsBox.innerHTML = billCalcUnitsField("e.g. 120") + billCalcBillingDaysField() + billCalcSubsidyField();
             } else if (tariffCode === "LV1.1") {
                 fieldsBox.innerHTML = billCalcUnitsField("0 se 30 ke beech") + billCalcSubsidyField();
             } else if (tariffCode === "LV1.UM") {
@@ -15731,11 +15744,17 @@
             }
         }
 
-        function computeBillLv1Metered(units, area, subsidyApplicable) {
-            const energyCharge = billTelescopicSum(units, [[50, 471], [150, 567], [300, 705], [Infinity, 724]]);
+        function computeBillLv1Metered(units, area, subsidyApplicable, billingDays) {
+            // Tariff Order ke anusar agar billing cycle 30 din ka na ho to
+            // energy/fixed charge ki slab-boundaries (50/150/300) proportionally
+            // prorate hoti hain (jaise 36-din cycle me 50->60, 150->180, 300->360).
+            const days = Number(billingDays || 30) || 30;
+            const ratio = days / 30;
+            const b1 = 50 * ratio, b2 = 150 * ratio, b3 = 300 * ratio;
+            const energyCharge = billTelescopicSum(units, [[b1, 471], [b2, 567], [b3, 705], [Infinity, 724]]);
             let fixedCharge;
-            if (units <= 50) fixedCharge = area === "URBAN" ? 81 : 67;
-            else if (units <= 150) fixedCharge = area === "URBAN" ? 134 : 111;
+            if (units <= b1) fixedCharge = area === "URBAN" ? 81 : 67;
+            else if (units <= b2) fixedCharge = area === "URBAN" ? 134 : 111;
             else {
                 const blocksOf0p1kW = Math.ceil(units / 15);
                 fixedCharge = blocksOf0p1kW * (area === "URBAN" ? 30 : 28);
@@ -15793,7 +15812,7 @@
 
         function computeBillLv21(units, area, load) {
             const energyCharge = units * 700 / 100;
-            const fixedCharge = load * (area === "URBAN" ? 172 : 141);
+            const fixedCharge = billCalcRoundLoad(load) * (area === "URBAN" ? 172 : 141);
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "EXEMPT");
             const components = [
@@ -15808,7 +15827,7 @@
 
         function computeBillLv21Demand(units, area, demand) {
             const energyCharge = units * 720 / 100;
-            const fixedCharge = demand * (area === "URBAN" ? 291 : 251);
+            const fixedCharge = billCalcRoundLoad(demand) * (area === "URBAN" ? 291 : 251);
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "EXEMPT");
             const components = [
@@ -15825,7 +15844,7 @@
             const energyRatePaise = units <= 50 ? 680 : 830;
             const fixedRatePerKw = units <= 50 ? (area === "URBAN" ? 98 : 83) : (area === "URBAN" ? 154 : 133);
             const energyCharge = units * energyRatePaise / 100;
-            const fixedCharge = load * fixedRatePerKw;
+            const fixedCharge = billCalcRoundLoad(load) * fixedRatePerKw;
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "FLAT");
             const components = [
@@ -15840,7 +15859,7 @@
 
         function computeBillLv22Demand(units, area, demand) {
             const energyCharge = units * 740 / 100;
-            const fixedCharge = demand * (area === "URBAN" ? 312 : 230);
+            const fixedCharge = billCalcRoundLoad(demand) * (area === "URBAN" ? 312 : 230);
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "FLAT");
             const components = [
@@ -15875,7 +15894,13 @@
             let fixedRatePerKw = area === "URBAN" ? 336 : 221;
             if (discounted) { energyRatePaise *= 0.7; fixedRatePerKw *= 0.7; }
             const energyCharge = units * energyRatePaise / 100;
-            const fixedCharge = demand * fixedRatePerKw;
+            // LV4 (Contract Demand based) me ledger analysis me pata chala ki
+            // billed demand = floor(Contract Demand, min 1) - normal (no MD
+            // exceedance) case me ye 93% match deta hai. Agar actual Maximum
+            // Demand contract se zyada nikle to alag 120%/130% surcharge lagta
+            // hai jo is calculator me shamil nahi hai (kyoki future MD pehle
+            // se pata nahi hota).
+            const fixedCharge = billCalcFloorLoad(demand) * fixedRatePerKw;
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "FLAT");
             const components = [
@@ -15956,9 +15981,10 @@
             const load = Number(document.getElementById("bc-load")?.value || 0);
             const area = document.getElementById("bc-area")?.value === "RURAL" ? "RURAL" : "URBAN";
             const subsidyApplicable = document.getElementById("bc-subsidy-toggle")?.value === "YES";
+            const billingDays = Number(document.getElementById("bc-billing-days")?.value || 30) || 30;
             let result;
-            if (tariffCode === "LV1.2U") result = computeBillLv1Metered(units, "URBAN", subsidyApplicable);
-            else if (tariffCode === "LV1.2R") result = computeBillLv1Metered(units, "RURAL", subsidyApplicable);
+            if (tariffCode === "LV1.2U") result = computeBillLv1Metered(units, "URBAN", subsidyApplicable, billingDays);
+            else if (tariffCode === "LV1.2R") result = computeBillLv1Metered(units, "RURAL", subsidyApplicable, billingDays);
             else if (tariffCode === "LV1.1") result = computeBillLv1Bpl(units, subsidyApplicable);
             else if (tariffCode === "LV1.UM") result = computeBillLv1Unmetered(subsidyApplicable);
             else if (tariffCode === "LV2.1") result = computeBillLv21(units, area, load);
@@ -15981,7 +16007,47 @@
             } else {
                 return;
             }
+            const category = document.getElementById("bc-category")?.value || "";
+            const tariffLabel = (BILL_TARIFF_CODES[category] || []).find((c) => c.code === tariffCode)?.label || tariffCode;
+            lastBillCalcResult = result;
+            lastBillCalcMeta = { tariffLabel, units, billingDays };
             resultBox.innerHTML = renderBillCalculatorResultHtml(result);
+        }
+
+        let lastBillCalcResult = null;
+        let lastBillCalcMeta = null;
+
+        function downloadBillCalculatorPdf() {
+            if (!lastBillCalcResult) { showToast("Pehle bill calculate karein", false); return; }
+            if (!window.jspdf?.jsPDF) { showToast("PDF library load nahi hui", false); return; }
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            doc.setFontSize(7);
+            doc.setTextColor(100);
+            doc.text("SEONI CIRCLE APP - BIJLEE BILL CALCULATOR", 14, 10);
+            doc.setFontSize(15);
+            doc.setTextColor(0);
+            doc.text("MONTHLY BIJLEE BILL ESTIMATE", 105, 20, { align: "center" });
+            doc.setFontSize(10);
+            doc.setTextColor(80);
+            doc.text(lastBillCalcMeta?.tariffLabel || "", 105, 28, { align: "center" });
+            doc.setFontSize(8);
+            doc.setTextColor(120);
+            doc.text(`Billing Period: ${lastBillCalcMeta?.billingDays || 30} din | Generated: ${new Date().toLocaleDateString("en-IN")}`, 105, 34, { align: "center" });
+            doc.autoTable({
+                startY: 42,
+                head: [["COMPONENT", "AMOUNT (Rs.)"]],
+                body: lastBillCalcResult.components.map(([label, value]) => [label, billRoundOff(value).toLocaleString("en-IN")]),
+                foot: [["ESTIMATED MONTH BILL", lastBillCalcResult.total.toLocaleString("en-IN")]],
+                theme: "grid",
+                headStyles: { fillColor: [236, 72, 153], halign: "center" },
+                columnStyles: { 0: { halign: "left" }, 1: { halign: "right" } },
+                footStyles: { fillColor: [253, 242, 248], textColor: [157, 23, 77], fontStyle: "bold", halign: "right" }
+            });
+            doc.setFontSize(7);
+            doc.setTextColor(140);
+            doc.text("Ye ek approximate estimate hai (PF surcharge/seasonal/DTR-metered shamil nahi). Arrear/Surcharge is total me shamil nahi hai.", 14, doc.lastAutoTable.finalY + 10);
+            savePdfDocumentForDevice(doc, `Bijlee_Bill_Estimate_${Date.now()}.pdf`);
         }
 
         function renderBillCalculatorResultHtml(result) {
@@ -16002,8 +16068,9 @@
                 </div>
                 <div class="summary-footer" style="margin-top:10px;">
                     <div class="font-black text-slate-800 text-center">ESTIMATED MONTH BILL</div>
-                    <div style="text-align:center; font-size:1.4rem; font-weight:950; color:#5b21b6; margin-top:6px;">₹${result.total.toLocaleString("en-IN")}</div>
+                    <div style="text-align:center; font-size:1.4rem; font-weight:950; color:#9d174d; margin-top:6px;">₹${result.total.toLocaleString("en-IN")}</div>
                 </div>
+                <button class="dashboard-btn" style="width:100%; margin-top:12px; background:linear-gradient(135deg,#fbcfe8 0%,#f9a8d4 100%); color:#831843 !important; font-size:0.8rem; padding:14px;" onclick="downloadBillCalculatorPdf()">PDF DOWNLOAD KAREN</button>
                 <div style="font-size:0.58rem; font-weight:800; color:#94a3b8; text-align:center; margin-top:10px; line-height:1.5;">Ye ek approximate estimate hai (PF surcharge/seasonal/DTR-metered shamil nahi). Arrear/Surcharge is total me shamil nahi hai.</div>
             `;
         }

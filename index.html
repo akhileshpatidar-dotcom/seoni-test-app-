@@ -151,7 +151,7 @@
                 <button class="dashboard-btn btn-update-red" onclick="switchView('mobile-update')">Mobile No Update</button>
                 <button class="dashboard-btn btn-revenue-blue" onclick="switchView('revenue-collection')">Revenue Collection</button>
                 <div id="revenue-upload-freshness-ticker" class="ticker-wrap" style="display:none; margin-top:6px;"><span class="ticker-text" style="color:#ffffff;"></span></div>
-                <button class="dashboard-btn" style="background: linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%);" onclick="switchView('bill-calculator')">Bijlee Bill Calculator</button>
+                <button class="dashboard-btn" style="background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%); color:#831843 !important;" onclick="switchView('bill-calculator')">Bijlee Bill Calculator</button>
           <button class="dashboard-btn btn-court-case" onclick="switchView('court-case')" style="display:none;">Lok Adalat Notice</button>
                 <button class="dashboard-btn btn-vr-calculation" onclick="switchView('vr-calculation')">VR Calculation</button>
                 <button class="dashboard-btn btn-progress-black" onclick="askPassword('DC')">Daily Progress</button>
@@ -160,12 +160,12 @@
 
         <main id="bill-calculator-view" class="view">
             <div class="search-panel" style="padding-top:14px;">
-                <div style="width:100%; max-width:380px; background:#f5f3ff; border:1.5px solid #c4b5fd; border-radius:16px; padding:12px; text-align:center; margin-bottom:12px;">
-                    <div style="font-size:0.8rem; font-weight:950; color:#5b21b6;">MONTHLY BIJLEE BILL CALCULATOR</div>
-                    <div style="font-size:0.6rem; font-weight:800; color:#6d28d9; margin-top:4px; line-height:1.5;">MPERC Retail Supply Tariff Order FY 2026-27 + NGB Ledger se nikali dar ke anusaar (approx. estimate). F.C.A. aur Electricity Duty ab automatic calculate hote hain. PF surcharge, seasonal LT industry, DTR-metered jaise special-case charges is calculator me shamil nahi hain.</div>
+                <div style="width:100%; max-width:380px; background:#fdf2f8; border:1.5px solid #f9a8d4; border-radius:16px; padding:12px; text-align:center; margin-bottom:12px;">
+                    <div style="font-size:0.8rem; font-weight:950; color:#9d174d;">MONTHLY BIJLEE BILL CALCULATOR</div>
+                    <div style="font-size:0.6rem; font-weight:800; color:#be185d; margin-top:4px; line-height:1.5;">MPERC Retail Supply Tariff Order FY 2026-27 + NGB Ledger se nikali dar ke anusaar (approx. estimate). F.C.A. aur Electricity Duty ab automatic calculate hote hain. PF surcharge, seasonal LT industry, DTR-metered jaise special-case charges is calculator me shamil nahi hain.</div>
                 </div>
 
-                <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-bottom:4px;">CATEGORY</label>
+                <label style="display:block; font-size:0.62rem; font-weight:850; color:#be185d; margin-bottom:4px;">CATEGORY</label>
                 <select id="bc-category" class="ivrs-input" style="text-align:left; padding:0 14px; font-size:0.85rem; margin-top:0;" onchange="onBillCalculatorCategoryChange()">
                     <option value="">-- Category Chunein --</option>
                     <option value="LV1">LV1 - Domestic (घरेलू)</option>
@@ -177,13 +177,13 @@
                 </select>
 
                 <div id="bc-tariffcode-wrap" style="display:none;">
-                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin:10px 0 4px;">TARIFF CODE</label>
+                    <label style="display:block; font-size:0.62rem; font-weight:850; color:#be185d; margin:10px 0 4px;">TARIFF CODE</label>
                     <select id="bc-tariffcode" class="ivrs-input" style="text-align:left; padding:0 14px; font-size:0.82rem; margin-top:0;" onchange="renderBillCalculatorFields()"></select>
                 </div>
 
                 <div id="bc-fields" style="width:100%; max-width:380px;"></div>
 
-                <button class="dashboard-btn" style="width:100%; max-width:380px; margin-top:14px; background:linear-gradient(135deg,#7c3aed 0%,#4c1d95 100%); font-size:0.95rem; padding:18px;" onclick="calculateBillEstimate()">BILL CALCULATE KAREN</button>
+                <button class="dashboard-btn" style="width:100%; max-width:380px; margin-top:14px; background:linear-gradient(135deg,#fbcfe8 0%,#f9a8d4 100%); color:#831843 !important; font-size:0.95rem; padding:18px;" onclick="calculateBillEstimate()">BILL CALCULATE KAREN</button>
 
                 <div id="bc-result" style="width:100%; max-width:380px; margin-top:14px;"></div>
             </div>
