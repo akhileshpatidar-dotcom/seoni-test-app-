@@ -15539,11 +15539,49 @@
         const billCalcSelectStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #a78bfa; border-radius:14px; padding:0 12px; font-size:0.78rem; font-weight:900; color:#0f172a; background:#ffffff;";
         const billCalcInputStyle = "width:100%; height:48px; margin-top:10px; display:block; border:1.5px solid #a78bfa; border-radius:14px; padding:0 12px; font-size:0.85rem; font-weight:900; color:#0f172a; background:#ffffff; text-align:center;";
 
-        function billCalcFcaFieldHtml() {
-            return `
-                <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">F.C.A. / Fuel Cost Adjustment (paise/unit) - is mahine ki dar khud daalein</label>
-                <input id="bc-fca" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 15" value="0">
-            `;
+        // F.C.A. (Fuel Cost Adjustment) - pehle ye manual input tha, ab user ke
+        // kehne par NGB_CONSUMER_LEDGER (Chhapara-2, June-2026) se hi automatic
+        // nikal rahe hain. Ledger me F.C.A. dar (Energy Charge ka %) Bill Date
+        // ke hisaab se roz badalti hui mili (24-Jun ko ~3.91%, 9-Jul (sabse
+        // recent, sabse zyada rows) ko ~2.81%) - isliye is calculator me sabse
+        // recent bill-date wali dar (2.81% of Energy Charge) fixed rakhi hai.
+        // DISCOM jab agli baar F.C.A. dar badlega to ye constant bhi update
+        // karni padegi - ledger se hi dobara nikaal sakte hain.
+        const BILL_FCA_RATIO_OF_ENERGY_CHARGE = 0.0281;
+
+        function billCalcFcaAuto(energyCharge) {
+            return Number(energyCharge || 0) * BILL_FCA_RATIO_OF_ENERGY_CHARGE;
+        }
+
+        // Electricity Duty (ED) bhi ledger me flat 9% nahi nikli - Energy
+        // Charge ka jo ratio hai wo units badhne ke saath dheere-dheere badhta
+        // hai (LV1 rows, Billed Unit ke hisaab se median ED/EnergyCharge).
+        // Yahan bhi interpolation-table use karte hain, jaisा subsidy ke liye
+        // kiya tha.
+        const BILL_ED_RATIO_TABLE = [
+            [0, 0.085], [10, 0.085], [20, 0.0955], [30, 0.092], [40, 0.0902],
+            [50, 0.0934], [70, 0.093], [100, 0.0928], [110, 0.096], [120, 0.0985],
+            [130, 0.1004], [140, 0.1024], [150, 0.1038], [160, 0.1053], [170, 0.1068],
+            [180, 0.1082], [200, 0.1105], [220, 0.111], [250, 0.1134], [280, 0.1143],
+            [300, 0.1153], [320, 0.1159], [400, 0.1175]
+        ];
+
+        function lookupBillEdRatio(units) {
+            const u = Math.max(0, Number(units || 0));
+            const table = BILL_ED_RATIO_TABLE;
+            if (u <= table[0][0]) return table[0][1];
+            for (let i = 0; i < table.length - 1; i++) {
+                const u1 = table[i][0], r1 = table[i][1], u2 = table[i + 1][0], r2 = table[i + 1][1];
+                if (u >= u1 && u <= u2) {
+                    if (u2 === u1) return r1;
+                    return r1 + (r2 - r1) * (u - u1) / (u2 - u1);
+                }
+            }
+            return table[table.length - 1][1];
+        }
+
+        function billCalcEdAuto(energyCharge, units) {
+            return Number(energyCharge || 0) * lookupBillEdRatio(units);
         }
 
         function renderBillCalculatorFields() {
@@ -15565,7 +15603,6 @@
                         <option value="YES">Haan (eligible consumer)</option>
                         <option value="NO">Nahi</option>
                     </select>
-                    ${billCalcFcaFieldHtml()}
                 `;
             } else if (category === "LV2") {
                 fieldsBox.innerHTML = `
@@ -15581,7 +15618,6 @@
                     <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 2" value="1">
                     <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Total Units (is mahine ki khapat)</label>
                     <input id="bc-units" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 80" value="0">
-                    ${billCalcFcaFieldHtml()}
                 `;
             } else if (category === "LV3") {
                 fieldsBox.innerHTML = `
@@ -15593,7 +15629,6 @@
                     <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 5" value="1">
                     <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Total Units (is mahine ki khapat)</label>
                     <input id="bc-units" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 300" value="0">
-                    ${billCalcFcaFieldHtml()}
                 `;
             } else if (category === "LV4") {
                 fieldsBox.innerHTML = `
@@ -15610,7 +15645,6 @@
                         <option value="NO">Nahi</option>
                         <option value="YES">Haan</option>
                     </select>
-                    ${billCalcFcaFieldHtml()}
                 `;
             } else if (category === "LV5") {
                 fieldsBox.innerHTML = `
@@ -15621,7 +15655,6 @@
                     <label style="display:block; font-size:0.62rem; font-weight:850; color:#6d28d9; margin-top:10px;">Sanctioned Load (HP)</label>
                     <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 5" value="1">
                     <div id="bc-lv5-extra"></div>
-                    ${billCalcFcaFieldHtml()}
                 `;
                 updateBillCalculatorLv5Extra();
             } else {
@@ -15687,14 +15720,14 @@
                 const blocksOf0p1kW = Math.ceil(units / 15);
                 fixedCharge = blocksOf0p1kW * (area === "URBAN" ? 30 : 28);
             }
-            const fca = units * Number(inputs.fcaPaise || 0) / 100;
-            const electricityDuty = 0.09 * (energyCharge + fca);
+            const fca = billCalcFcaAuto(energyCharge);
+            const electricityDuty = billCalcEdAuto(energyCharge, units);
             const subsidy = inputs.subsidyApplicable ? lookupBillLv1Subsidy(units) : 0;
             const components = [
                 ["Energy Charge", energyCharge],
-                ["F.C.A.", fca],
+                ["F.C.A. (auto)", fca],
                 ["Fixed Charge", fixedCharge],
-                ["Electricity Duty (~9%)", electricityDuty],
+                ["Electricity Duty", electricityDuty],
                 ["Subsidy (Griha Jyoti)", -subsidy]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty - subsidy;
@@ -15716,13 +15749,13 @@
             }
             const energyCharge = units * energyRatePaise / 100;
             const fixedCharge = load * fixedRatePerKw;
-            const fca = units * Number(inputs.fcaPaise || 0) / 100;
-            const electricityDuty = 0.09 * (energyCharge + fca);
+            const fca = billCalcFcaAuto(energyCharge);
+            const electricityDuty = billCalcEdAuto(energyCharge, units);
             const components = [
                 ["Energy Charge", energyCharge],
-                ["F.C.A.", fca],
+                ["F.C.A. (auto)", fca],
                 ["Fixed Charge", fixedCharge],
-                ["Electricity Duty (~9%)", electricityDuty]
+                ["Electricity Duty", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
             return { components, total: billRoundOff(total) };
@@ -15737,13 +15770,13 @@
             const fixedRatePerKw = isMunicipal ? 389 : 208;
             const energyCharge = units * energyRatePaise / 100;
             const fixedCharge = load * fixedRatePerKw;
-            const fca = units * Number(inputs.fcaPaise || 0) / 100;
-            const electricityDuty = 0.09 * (energyCharge + fca);
+            const fca = billCalcFcaAuto(energyCharge);
+            const electricityDuty = billCalcEdAuto(energyCharge, units);
             const components = [
                 ["Energy Charge", energyCharge],
-                ["F.C.A.", fca],
+                ["F.C.A. (auto)", fca],
                 ["Fixed Charge", fixedCharge],
-                ["Electricity Duty (~9%)", electricityDuty]
+                ["Electricity Duty", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
             return { components, total: billRoundOff(total) };
@@ -15762,13 +15795,13 @@
             }
             const energyCharge = units * energyRatePaise / 100;
             const fixedCharge = demand * fixedRatePerKw;
-            const fca = units * Number(inputs.fcaPaise || 0) / 100;
-            const electricityDuty = 0.09 * (energyCharge + fca);
+            const fca = billCalcFcaAuto(energyCharge);
+            const electricityDuty = billCalcEdAuto(energyCharge, units);
             const components = [
                 ["Energy Charge", energyCharge],
-                ["F.C.A.", fca],
+                ["F.C.A. (auto)", fca],
                 ["Fixed Charge (Demand)", fixedCharge],
-                ["Electricity Duty (~9%)", electricityDuty]
+                ["Electricity Duty", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
             return { components, total: billRoundOff(total) };
@@ -15790,14 +15823,14 @@
             const fixedRatePerHp = units <= 300 ? 77 : (units <= 750 ? 93 : 101);
             const energyCharge = billTelescopicSum(units, [[300, 533], [750, 636], [Infinity, 664]]);
             const fixedCharge = load * fixedRatePerHp;
-            const fca = units * Number(inputs.fcaPaise || 0) / 100;
-            const electricityDuty = 0.09 * (energyCharge + fca);
+            const fca = billCalcFcaAuto(energyCharge);
+            const electricityDuty = billCalcEdAuto(energyCharge, units);
             const components = [
                 ["Assessed/Billed Units", units],
                 ["Energy Charge", energyCharge],
-                ["F.C.A.", fca],
+                ["F.C.A. (auto)", fca],
                 ["Fixed Charge", fixedCharge],
-                ["Electricity Duty (~9%)", electricityDuty]
+                ["Electricity Duty", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
             return { components, total: billRoundOff(total), unitsUsed: units };
@@ -15808,38 +15841,33 @@
             const resultBox = document.getElementById("bc-result");
             if (!resultBox) return;
             if (!category) { showToast("Pehle category chunein", false); return; }
-            const fcaPaise = Number(document.getElementById("bc-fca")?.value || 0);
             let result;
             if (category === "LV1") {
                 result = computeBillLv1({
                     units: document.getElementById("bc-units")?.value,
                     area: document.getElementById("bc-area")?.value,
                     load: document.getElementById("bc-load")?.value,
-                    subsidyApplicable: document.getElementById("bc-subsidy-toggle")?.value === "YES",
-                    fcaPaise
+                    subsidyApplicable: document.getElementById("bc-subsidy-toggle")?.value === "YES"
                 });
             } else if (category === "LV2") {
                 result = computeBillLv2({
                     units: document.getElementById("bc-units")?.value,
                     area: document.getElementById("bc-area")?.value,
                     load: document.getElementById("bc-load")?.value,
-                    subcat: document.getElementById("bc-subcat")?.value,
-                    fcaPaise
+                    subcat: document.getElementById("bc-subcat")?.value
                 });
             } else if (category === "LV3") {
                 result = computeBillLv3({
                     units: document.getElementById("bc-units")?.value,
                     load: document.getElementById("bc-load")?.value,
-                    subcat: document.getElementById("bc-subcat")?.value,
-                    fcaPaise
+                    subcat: document.getElementById("bc-subcat")?.value
                 });
             } else if (category === "LV4") {
                 result = computeBillLv4({
                     units: document.getElementById("bc-units")?.value,
                     area: document.getElementById("bc-area")?.value,
                     load: document.getElementById("bc-load")?.value,
-                    rebate30: document.getElementById("bc-rebate30")?.value === "YES",
-                    fcaPaise
+                    rebate30: document.getElementById("bc-rebate30")?.value === "YES"
                 });
             } else if (category === "LV5") {
                 result = computeBillLv5({
@@ -15847,8 +15875,7 @@
                     load: document.getElementById("bc-load")?.value,
                     subcat: document.getElementById("bc-subcat")?.value,
                     phase: document.getElementById("bc-phase")?.value,
-                    season: document.getElementById("bc-season")?.value,
-                    fcaPaise
+                    season: document.getElementById("bc-season")?.value
                 });
             } else {
                 return;
