@@ -150,6 +150,13 @@
         let revenuePendingIndex = { hqMap: new Map(), villageMap: new Map(), categoryMap: new Map(), rowsMap: new Map() };
         let revenuePendingPaidIvrsSet = new Set();
         let revenuePendingPaidRefreshToken = 0;
+        let revenuePendingPaidDataIncomplete = false;
+        // Deep-diagnostic counters (user ne SEONI (T) me galat Pending count report
+        // kiya, timeout badhane ke baad bhi theek nahi hua - isliye ab yahan asli
+        // numbers (kitne uploaded-paid fetch hue, kitne live-paid fetch hue, kitne
+        // total master consumer hain) status line me dikhayenge taaki exactly pata
+        // chale kaunsa hissa galat/adhura hai.
+        let revenuePendingDiag = { liveTotal: 0, liveDcMatched: 0, uploadedFetched: 0, masterRows: 0 };
         let revenuePendingDownloadInProgress = false;
         let revenueReportRenderToken = 0;
         let revenueLiveDownloadInProgress = false;
@@ -1507,10 +1514,18 @@
         // hai. Agar backend abhi purana hi hai (naya action nahi mila), to
         // fetchUploadedPaidEntriesWithRetry_ (purana, poora data) par fallback
         // ho jaata hai - koi cheez toot nahi ti.
-        async function fetchUploadedPaidIvrsListWithRetry_(dcName, attempts = 2) {
+        async function fetchUploadedPaidIvrsListWithRetry_(dcName, attempts = 3) {
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 60000);
+                // BUG FIX (user report): SEONI (T) jaisi bade DC (34,000+ consumer) me
+                // pehle sirf 60 second ka per-attempt timeout tha - itne bade sheet ko
+                // Apps Script se slow/mobile network par padhne-bhejne me isse zyada
+                // time lag sakta hai, isliye yeh call beech me hi cut ho jaata tha aur
+                // adhura/khali local fallback data use hota tha (isi wajah se Pending
+                // count bahut zyada galat aata tha). Ab 150 second (2.5 minute) diya hai
+                // taaki bade DC ko poora sync hone ka pura mauka mile, chahe thoda time
+                // lage.
+                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 150000);
                 try {
                     const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidIvrsList&dc_name=${encodeURIComponent(dcName)}&t=${Date.now()}`, controller ? { signal: controller.signal } : {});
                     const parsed = await response.json();
@@ -5824,23 +5839,30 @@
                     photoMimeType = file.type || "image/jpeg";
                 }
 
-                 const payload = new URLSearchParams();
-                 payload.append("substation", selectedStmComplaintSubstation);
-                 payload.append("operator_name", activeStmComplaintOperator.fullName || "");
-                 payload.append("mobile_no", activeStmComplaintOperator.mobileNo || "");
-                 payload.append("information_shared_at", sharedMode);
-                 payload.append("date", dateValue);
-                 payload.append("time", timeValue);
-                 payload.append("calling_info", callingInfo);
-                payload.append("complaint_details", complaintDetails);
-                payload.append("photo_base64", photoBase64);
-                payload.append("photo_name", photoName);
-                payload.append("photo_mime_type", photoMimeType);
+                // Hindi/Devanagari complaint text ko reliably UTF-8 me bhejne ke liye
+                // ab JSON body use kar rahe hain (form-urlencoded me kabhi-kabhi
+                // Unicode galat decode ho raha tha, jisse mail me "?" boxes aa rahe
+                // the). Content-Type "text/plain" rakha hai taki browser CORS
+                // preflight na bheje (Apps Script Web App OPTIONS handle nahi karta),
+                // server side body ko JSON hi maan ke parse karta hai.
+                const payload = {
+                    substation: selectedStmComplaintSubstation,
+                    operator_name: activeStmComplaintOperator.fullName || "",
+                    mobile_no: activeStmComplaintOperator.mobileNo || "",
+                    information_shared_at: sharedMode,
+                    date: dateValue,
+                    time: timeValue,
+                    calling_info: callingInfo,
+                    complaint_details: complaintDetails,
+                    photo_base64: photoBase64,
+                    photo_name: photoName,
+                    photo_mime_type: photoMimeType
+                };
 
                 const response = await fetch(stmComplaintScriptUrl, {
                     method: "POST",
-                    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-                    body: payload.toString()
+                    headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify(payload)
                 });
 
                 const responseText = await response.text();
@@ -9756,7 +9778,20 @@
             };
         }
 
-        async function syncRevenueTdEntriesFromSheet(attempts = 3) {
+        // syncRevenueLiveEntriesFromSheet jaisa hi shared 60-second TTL cache -
+        // ek report me TD entries sync ho jaane ke baad dusri report (jo bhi isi
+        // function ko call kare) usi cache ko reuse karegi.
+        let revenueTdEntriesSyncedAt = 0;
+        // RESET (user request): shared 60-second caching disable kar diya hai -
+        // isi caching ke baad se Pending DO List / Cash Reconcile me SEONI (T)
+        // jaisi bade DC me galat count aana shuru hua tha, aur kai targeted fix
+        // ke baad bhi theek nahi hua, isliye TTL=0 karke purana "hamesha fresh
+        // sync karo" wala reliable behaviour wapas kar diya hai.
+        const REVENUE_TD_ENTRIES_SYNC_TTL_MS = 0;
+        async function syncRevenueTdEntriesFromSheet(attempts = 3, forceRefresh = false) {
+            if (!forceRefresh && revenueTdEntriesSyncedAt && Date.now() - revenueTdEntriesSyncedAt < REVENUE_TD_ENTRIES_SYNC_TTL_MS) {
+                return getRevenueTdEntriesLocal();
+            }
             if (!revenueCollectionSubmitScriptUrl) return getRevenueTdEntriesLocal();
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 try {
@@ -9768,6 +9803,7 @@
                     if (parsed && parsed.status === "success" && Array.isArray(sourceRows)) {
                         const rows = sourceRows.map(mapRevenueTdSheetEntry).filter((row) => normalizeRevenueIvrs(row.ivrsNo));
                         setRevenueTdEntriesLocal(rows);
+                        revenueTdEntriesSyncedAt = Date.now();
                         return rows;
                     }
                 } catch (_) {}
@@ -10795,7 +10831,18 @@
                 ]);
                 if (refreshToken !== revenuePendingPaidRefreshToken) { if (pendingListProgress) pendingListProgress.stop(); return; }
                 revenuePendingPaidIvrsSet = paidSet;
+                // Bade DC (SEONI (T) jaise) me kabhi-kabhi backend se poori "paid" list
+                // sync fail ho jaati hai (network/timeout) aur app chup-chap adhura/local
+                // data dikha deta - isse Pending count galat (bahut zyada) dikhta tha
+                // bina kisi warning ke. Ab agar poora backend sync nahi ho paaya to
+                // status line me saaf warning dikhayenge, taaki number par bharosa na
+                // kiya jaaye aur user dobara try kar sake.
+                const pendingDcKey = normalizeLookupValue(activeDC || "");
+                revenuePendingPaidDataIncomplete = !revenueUploadedPaidMasterRowsCache
+                    || revenueUploadedPaidMasterRowsCache.dcKey !== pendingDcKey
+                    || !revenueUploadedPaidMasterRowsCache.backendSynced;
                 const loadedRows = freshRows.length ? freshRows : fallbackRows;
+                revenuePendingDiag.masterRows = loadedRows.length;
                 const assignedHq = revenueMessageSelectionMode ? String(revenueMessageSession?.staff?.hq_name || "").trim() : "";
                 revenuePendingBaseRows = loadedRows.filter((row) => (
                     getRevenuePendingNetBillAmount(row) > 0
@@ -10973,7 +11020,20 @@
                 renderRevenueMessagePendingSelection(rows, statusBox, listBox);
                 return;
             }
-            statusBox.innerHTML = `Pending Consumer: <strong>${rows.length}</strong> | HQ: ${escapeHtml(hqValue || "ALL")} | Village: ${escapeHtml(villageValue || "ALL")} | Category: ${escapeHtml(categoryValue || "ALL")} | Net Bill Slab: ${escapeHtml(slabValue || "ALL")} | Type: ${escapeHtml(govtLabel)} | IVRS: ${escapeHtml(ivrsSearch || "ALL")}`;
+            const incompleteWarning = revenuePendingPaidDataIncomplete ? `
+                <div style="background:#fff1f2; border:1.5px solid #fda4af; border-radius:12px; padding:10px; color:#991b1b; font-size:0.74rem; font-weight:900; text-align:center; margin-bottom:8px;">
+                    ⚠️ Paid (Cash List) data poora sync nahi ho paaya - yeh number galat/zyada ho sakta hai. Kripya internet check karke wapas is report par aayein taaki dobara sync ho.
+                </div>
+            ` : "";
+            // Deep-diagnostic line - SEONI (T) jaisi galat count wali DC me exactly
+            // yeh dekhne ke liye ki dikkat kahan hai: Master (total consumer jinka
+            // net bill > 0 hai), Uploaded Cash List fetch (backend se jitne "paid"
+            // rows mile), aur Live entries (app se manually paid). Agar Uploaded
+            // Fetch bahut kam/0 hai to backend/sheet me dikkat hai; agar fetch to
+            // poora hai lekin fir bhi Pending zyada hai to IVRS format/matching me
+            // dikkat hai.
+            const diagLine = `<div style="font-size:0.66rem; color:#64748b; margin-top:4px;">Diagnostic - Master: ${revenuePendingDiag.masterRows} | Uploaded Paid Fetched: ${revenuePendingDiag.uploadedFetched} | Live Paid Fetched: ${revenuePendingDiag.liveDcMatched} (of ${revenuePendingDiag.liveTotal} all-DC)</div>`;
+            statusBox.innerHTML = `${incompleteWarning}Pending Consumer: <strong>${rows.length}</strong> | HQ: ${escapeHtml(hqValue || "ALL")} | Village: ${escapeHtml(villageValue || "ALL")} | Category: ${escapeHtml(categoryValue || "ALL")} | Net Bill Slab: ${escapeHtml(slabValue || "ALL")} | Type: ${escapeHtml(govtLabel)} | IVRS: ${escapeHtml(ivrsSearch || "ALL")}${diagLine}`;
             listBox.innerHTML = rows.length ? `
                 <div style="display:flex; gap:10px; width:100%; margin:0 auto;">
                     <button id="revenue-pending-pdf-btn" onclick="downloadRevenuePendingList('PDF')" style="flex:1; height:44px; border:none; border-radius:14px; background:#ef4444; color:#ffffff; font-size:0.78rem; font-weight:950;">PDF</button>
@@ -11102,13 +11162,33 @@
         async function getRevenuePendingPaidIvrsSet() {
             const paidSet = new Set();
             try {
-                const liveRows = await withTimeout(syncRevenueLiveEntriesFromSheet(), 3500, getRevenueLiveEntries());
+                // NOTE (bug fix): yahan pehle sirf 3.5 second ka withTimeout tha - Live
+                // Entries endpoint SABHI DC ka combined data ek saath deta hai, bade DC
+                // (jaise SEONI (T)) ke waqt is response me itna time lag jaata tha ki
+                // 3.5 second me timeout ho jaata aur purana/khali local cache (getRevenueLiveEntries)
+                // turant fallback ho jaata - isi wajah se sync "turant 100%" dikhta tha
+                // lekin asal me sahi data sync hi nahi hota tha, aur bahut saare already-paid
+                // consumer galti se "pending" dikh jaate the (jaise 1200 ki jagah 19276).
+                // BUG FIX (user report): 45-second cap bhi bade DC (SEONI (T),
+                // 34,000+ consumer) ke liye kaafi nahi tha - syncRevenueLiveEntriesFromSheet
+                // apne andar hi 3 attempt + retry-delay karta hai, jisse poora sync
+                // 45 second se zyada le sakta hai, aur bahar ka timeout use beech me
+                // hi cut karke adhura local data thop deta tha. Ab koi outer timeout
+                // nahi laga rahe - syncRevenueLiveEntriesFromSheet() ko jitna time
+                // chahiye utna lene denge (uske apne 3 attempt khud hi ek waqt ke
+                // baad give up kar dete hain), taaki bade DC me bhi poora sahi data
+                // mile chahe thoda zyada time lage.
+                const liveRows = await syncRevenueLiveEntriesFromSheet();
+                revenuePendingDiag.liveTotal = liveRows.length;
+                let liveDcMatched = 0;
                 liveRows.forEach((row) => {
                     if (normalizeLookupValue(row.dcName || "") === normalizeLookupValue(activeDC || "")) {
+                        liveDcMatched++;
                         const ivrsNo = normalizeRevenueIvrs(row.ivrsNo);
                         if (ivrsNo) paidSet.add(ivrsNo);
                     }
                 });
+                revenuePendingDiag.liveDcMatched = liveDcMatched;
             } catch (_) {}
 
             // NOTE: pehle yahan uploaded-paid-entries fetch ko sirf 3.5 second ka
@@ -11121,6 +11201,7 @@
             // Wise/HQ-Village report jaisa hi robust fetch (45 second + 2 retry) use
             // karte hain, taaki bade DC ke liye bhi latest uploaded paid data sahi mile.
             const uploadedRows = await getRevenueUploadedPaidMasterRows();
+            revenuePendingDiag.uploadedFetched = uploadedRows.length;
             uploadedRows.forEach((row) => {
                 const ivrsNo = normalizeRevenueIvrs(row.ivrs_no || row.ivrsNo || row.consumerNo);
                 if (ivrsNo) paidSet.add(ivrsNo);
@@ -11155,7 +11236,35 @@
             });
         }
 
-        async function getRevenueUploadedPaidMasterRows() {
+        // Cash Reconcile aur Pending DO List dono isi function se "uploaded cash
+        // list" (kaun-kaun paid hai NGB me) laate hain. Pehle har call par poora
+        // backend fetch hota tha, isliye ek report me sync hone ke baad dusri
+        // report par jaane par bhi dobara fetch hota tha. Ab DC-scoped 60-second
+        // shared TTL cache hai - same DC ke liye 60 second ke andar dusri report
+        // usi cache ko turant reuse karegi.
+        let revenueUploadedPaidMasterRowsCache = null; // { dcKey, rows, syncedAt, backendSynced }
+        // RESET (user request): dekhein REVENUE_TD_ENTRIES_SYNC_TTL_MS wali note -
+        // shared caching disable kar diya, hamesha fresh backend sync hoga.
+        const REVENUE_UPLOADED_PAID_MASTER_SYNC_TTL_MS = 0;
+        async function getRevenueUploadedPaidMasterRows(forceRefresh = false) {
+            const dcKey = normalizeLookupValue(activeDC || "");
+            // NOTE (bug fix): pehle yahan har outcome - chahe backend se poora sync
+            // safal hua ho ya (bade DC jaise SEONI (T) me) fetch fail/timeout hoke
+            // sirf adhura local fallback mila ho - dono ko ek jaisa 60-second "fresh"
+            // cache maan liya jaata tha. Isse agar ek baar sync fail ho jaaye to
+            // adhuri paid list (bahut kam ya khali) 60 second tak "sahi/fresh" maan
+            // kar Pending DO List/Cash Reconcile jaisi SABHI reports me reuse hoti
+            // rahti thi - jisse Pending count bahut zyada galat (jaise 1200 ki jagah
+            // 19276) dikhta tha. Ab sirf backendSynced:true wale cache ko hi "fresh"
+            // maante hain; adhura/fallback result cache to hota hai (turant dikhane
+            // ke liye) lekin usko fresh nahi maana jaata, isliye agla call turant
+            // dobara backend se poora sahi data laane ki koshish karega.
+            if (!forceRefresh && revenueUploadedPaidMasterRowsCache
+                && revenueUploadedPaidMasterRowsCache.dcKey === dcKey
+                && revenueUploadedPaidMasterRowsCache.backendSynced
+                && Date.now() - revenueUploadedPaidMasterRowsCache.syncedAt < REVENUE_UPLOADED_PAID_MASTER_SYNC_TTL_MS) {
+                return revenueUploadedPaidMasterRowsCache.rows;
+            }
             // Upload ke turant baad local cache me entries turant save ho jaati hain
             // (saveRevenueUploadedPaidEntriesLocalBulk), backend fetch se pehle hi -
             // isliye yahan backend call se pehle current local rows capture kar lete
@@ -11190,10 +11299,17 @@
                             const key = normalizeRevenueIvrs(row.ivrs_no || row.ivrsNo || row.consumerNo);
                             if (key) merged.set(key, row);
                         });
-                        return Array.from(merged.values());
+                        const finalRows = Array.from(merged.values());
+                        revenueUploadedPaidMasterRowsCache = { dcKey, rows: finalRows, syncedAt: Date.now(), backendSynced: true };
+                        return finalRows;
                     }
                 } catch (_) {}
             }
+            // Backend se poora sync nahi ho paaya (fail/timeout/purana backend) -
+            // turant dikhane ke liye local fallback rows cache to karte hain, lekin
+            // backendSynced:false rakhte hain taaki isse "fresh"/authoritative na
+            // maana jaaye aur agla call turant fir se poora backend fetch try kare.
+            revenueUploadedPaidMasterRowsCache = { dcKey, rows: localRowsBeforeSync, syncedAt: Date.now(), backendSynced: false };
             return localRowsBeforeSync;
         }
 
@@ -12154,7 +12270,21 @@
             };
         }
 
-        async function syncRevenueLiveEntriesFromSheet(attempts = 3) {
+        // Live Progress, Cash Reconcile aur Pending DO List - teeno reports isi ek
+        // function se "paid entries" laate hain. Pehle har report apna alag timer
+        // rakhta tha, isliye ek report me sync ho jaane ke baad bhi dusri report
+        // par jaane par dobara poora network sync ho jaata tha. Ab yahan hi ek
+        // SHARED 60-second TTL cache hai - jis bhi report ne pehle sync kiya ho,
+        // baaki sabhi report usi cache ko turant reuse karenge jab tak app se
+        // bahar nahi jaate / 60 second se zyada time nahi beetta.
+        let revenueLiveEntriesSyncedAt = 0;
+        // RESET (user request): dekhein REVENUE_TD_ENTRIES_SYNC_TTL_MS wali note -
+        // shared caching disable kar diya, hamesha fresh backend sync hoga.
+        const REVENUE_LIVE_ENTRIES_SYNC_TTL_MS = 0;
+        async function syncRevenueLiveEntriesFromSheet(attempts = 3, forceRefresh = false) {
+            if (!forceRefresh && revenueLiveEntriesSyncedAt && Date.now() - revenueLiveEntriesSyncedAt < REVENUE_LIVE_ENTRIES_SYNC_TTL_MS) {
+                return getRevenueLiveEntries();
+            }
             if (!revenueCollectionSubmitScriptUrl) return getRevenueLiveEntries();
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 try {
@@ -12166,6 +12296,7 @@
                     if (parsed && parsed.status === "success" && Array.isArray(sourceRows)) {
                         const rows = sourceRows.map(mapRevenueSheetEntry).filter((row) => normalizeRevenueIvrs(row.ivrsNo));
                         setRevenueLiveEntries(rows);
+                        revenueLiveEntriesSyncedAt = Date.now();
                         return rows;
                     }
                 } catch (_) {}
@@ -12471,6 +12602,15 @@
         }
 
         let revenueLiveProgressToken = 0;
+        // syncRevenueLiveEntriesFromSheet aur syncRevenueTdEntriesFromSheet dono
+        // ab apna-apna shared 60-second TTL rakhte hain (dekhein unki definition).
+        // Ye helper dono ke fresh-hone ka combined check deta hai, taaki Live
+        // Progress aur baaki reports ek hi cache-state par bharosa kar saken.
+        function isRevenueLiveAndTdDataFresh() {
+            const now = Date.now();
+            return !!revenueLiveEntriesSyncedAt && (now - revenueLiveEntriesSyncedAt < REVENUE_LIVE_ENTRIES_SYNC_TTL_MS)
+                && !!revenueTdEntriesSyncedAt && (now - revenueTdEntriesSyncedAt < REVENUE_TD_ENTRIES_SYNC_TTL_MS);
+        }
         async function renderRevenueLiveProgress() {
             const tableBox = document.getElementById("revenue-live-table");
             if (!tableBox) return;
@@ -12482,6 +12622,18 @@
             else activeViewLevel = "CIRCLE";
             const dcLabelBox = document.getElementById("revenue-live-dc-label");
             if (dcLabelBox) dcLabelBox.innerText = activeDC ? `DC: ${activeDC}` : getRevenueReportScopeLabel();
+            // syncRevenueLiveEntriesFromSheet/syncRevenueTdEntriesFromSheet ab khud
+            // ek shared 60-second cache rakhte hain (Cash Reconcile/Pending DO List
+            // jaisi kisi bhi report ne pehle hi sync kiya ho to bhi). Yahan check kar
+            // lete hain ki dono fresh hain kya - agar haan to progress-bar UI bhi
+            // dikhaye bina turant re-render kar dete hain.
+            const needsSync = !isRevenueLiveAndTdDataFresh();
+            if (!needsSync) {
+                const rows = getRevenueCombinedFilteredEntries("DAILY", getCurrentDateDDMMYYYY());
+                const groupedRows = buildProgressRevenueSummaryRows(rows);
+                tableBox.innerHTML = renderRevenueLiveSummaryTable(groupedRows);
+                return;
+            }
             const progress = renderSyncingProgress(tableBox, () => myToken === revenueLiveProgressToken, "SYNCING LATEST REPORT...");
             await Promise.all([syncRevenueLiveEntriesFromSheet(), syncRevenueTdEntriesFromSheet()]);
             if (myToken !== revenueLiveProgressToken) { progress.stop(); return; }
@@ -12716,6 +12868,22 @@
         let revenueCashReconcileMode = "DAILY";
         let revenueCashReconcileRows = [];
         let revenueCashReconcileRenderToken = 0;
+        // Pehle date/month/HQ/status dropdown me kuch bhi change karte hi poori
+        // report dobara poore network se sync ho jaati thi, chahe kuch second
+        // pehle hi wahi data aa chuka ho (ya Live Progress/Pending DO List me
+        // pehle hi sync ho chuka ho) - isse anaawashyak time lagta tha. Ab
+        // syncRevenueLiveEntriesFromSheet/getRevenueUploadedPaidMasterRows dono
+        // apna shared 60-second cache khud rakhte hain (dekhein unki definition),
+        // isliye yahan sirf check karte hain ki dono is DC ke liye fresh hain ya
+        // nahi - agar haan to network call/progress-bar UI dikhaye bina turant
+        // re-render karte hain.
+        function isRevenueCashReconcileDataFresh() {
+            const dcKey = normalizeLookupValue(activeDC || "");
+            return !!revenueLiveEntriesSyncedAt && (Date.now() - revenueLiveEntriesSyncedAt < REVENUE_LIVE_ENTRIES_SYNC_TTL_MS)
+                && !!revenueUploadedPaidMasterRowsCache && revenueUploadedPaidMasterRowsCache.dcKey === dcKey
+                && !!revenueUploadedPaidMasterRowsCache.backendSynced
+                && (Date.now() - revenueUploadedPaidMasterRowsCache.syncedAt < REVENUE_UPLOADED_PAID_MASTER_SYNC_TTL_MS);
+        }
 
         function initRevenueReportDownload() {
             const dateInput = document.getElementById("revenue-report-date");
@@ -12886,6 +13054,27 @@
 
         function getRevenueCashUploadedIvrsSet() {
             const set = new Set();
+            // BUG FIX: yeh function pehle SIRF do purane local-only cache
+            // (getRevenueUploadedPaidCache / getRevenueCategoryRawPaymentRows) se
+            // data leta tha - dono sirf tabhi bharte hain jab is DEVICE par kabhi
+            // Admin Upload ya Category Wise/Defaulters jaisi report chali ho.
+            // renderRevenueCashReconcile() jo asli network sync karta hai
+            // (syncRevenueLiveEntriesFromSheet + getRevenueUploadedPaidMasterRows),
+            // uska result kahin bhi is function tak nahi pahunch raha tha - matlab
+            // "sync" ho jaane ke baad bhi NGB-matching purane/khali data se hi ho
+            // rahi thi, isliye "Paid by Staff vs NGB Cash List" me galat count
+            // (jaise sab "Balance/Not Updated" dikhna) aata tha. Ab sabse pehle
+            // wahi taaza, sahi-sync hui revenueUploadedPaidMasterRowsCache (jo
+            // getRevenueUploadedPaidMasterRows abhi-abhi backend se laaya) use
+            // karte hain, baaki purane local cache extra safety ke liye union
+            // me jode rehte hain.
+            const dcKey = normalizeLookupValue(activeDC || "");
+            if (revenueUploadedPaidMasterRowsCache && revenueUploadedPaidMasterRowsCache.dcKey === dcKey) {
+                (revenueUploadedPaidMasterRowsCache.rows || []).forEach((row) => {
+                    const ivrs = normalizeRevenueIvrs(row.ivrs_no || row.ivrsNo || row.consumerNo);
+                    if (ivrs) set.add(ivrs);
+                });
+            }
             const addRow = (row) => {
                 const ivrs = getRevenueUploadedPaidRowIvrs(row);
                 if (ivrs) set.add(ivrs);
@@ -12971,6 +13160,15 @@
             return `<div style="background:#ffffff; border:1.5px solid #fdba74; border-radius:16px; padding:10px; overflow:hidden;"><div style="font-size:0.72rem; font-weight:950; color:#c2410c; text-align:center; margin-bottom:8px;">IVRS Matching Only | DC: ${escapeHtml(activeDC || "-")}</div><table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:0.55rem; font-weight:850; color:#1e293b; text-align:center;"><thead><tr style="background:#fed7aa; color:#7c2d12;"><th style="border:1px solid #fdba74; padding:5px;">HQ Name</th><th style="border:1px solid #fdba74; padding:5px;">Paid by Staff</th><th style="border:1px solid #fdba74; padding:5px;">NGB Update</th><th style="border:1px solid #fdba74; padding:5px;">Balance</th></tr></thead><tbody>${body}</tbody><tfoot><tr style="background:#fff7ed; font-weight:950;"><td style="border:1px solid #fdba74; padding:5px;">TOTAL</td><td style="border:1px solid #fdba74; padding:5px;">${totals.staffCount}<br>${escapeHtml(formatRevenueAmount(totals.staffAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#047857;">${totals.ngbCount}<br>${escapeHtml(formatRevenueAmount(totals.ngbAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#b91c1c;">${totals.balanceCount}<br>${escapeHtml(formatRevenueAmount(totals.balanceAmount))}</td></tr></tfoot></table></div>`;
         }
 
+        function getRevenueCashDataIncompleteWarningHtml() {
+            const dcKey = normalizeLookupValue(activeDC || "");
+            const incomplete = !revenueUploadedPaidMasterRowsCache
+                || revenueUploadedPaidMasterRowsCache.dcKey !== dcKey
+                || !revenueUploadedPaidMasterRowsCache.backendSynced;
+            if (!incomplete) return "";
+            return `<div style="background:#fff1f2; border:1.5px solid #fda4af; border-radius:12px; padding:10px; color:#991b1b; font-size:0.74rem; font-weight:900; text-align:center; margin-bottom:8px;">⚠️ NGB Cash List data poora sync nahi ho paaya - "NGB Update"/"Balance" number galat ho sakte hain. Internet check karke wapas is report par aayein.</div>`;
+        }
+
         async function renderRevenueCashReconcile() {
             const tableBox = document.getElementById("revenue-cash-table");
             const statusBox = document.getElementById("revenue-cash-download-status");
@@ -12978,6 +13176,25 @@
             const renderToken = ++revenueCashReconcileRenderToken;
             if (statusBox) statusBox.style.display = "none";
             const isRenderValid = () => renderToken === revenueCashReconcileRenderToken && document.getElementById("revenue-cash-reconcile-view")?.classList.contains("active");
+            const dataFresh = isRevenueCashReconcileDataFresh();
+            if (dataFresh && revenueCashReconcileRows.length) {
+                // Data pehle se fresh hai (isi report me ya Live Progress/Pending DO
+                // List me pehle hi sync ho chuka hai) - date/month/HQ/status dropdown
+                // change sirf local filter hai, network re-fetch skip karke turant
+                // re-render ho jaata hai.
+                tableBox.innerHTML = getRevenueCashDataIncompleteWarningHtml() + renderRevenueCashSummary(getRevenueCashFilteredRows());
+                if (statusBox) statusBox.style.display = "none";
+                return;
+            }
+            if (dataFresh) {
+                // Dusri report ne pehle hi network sync kar diya hai, is view ke
+                // liye sirf pehli baar rows build karne hain - network call nahi.
+                revenueCashReconcileRows = buildRevenueCashReconcileRows();
+                populateRevenueCashHqOptions(revenueCashReconcileRows);
+                tableBox.innerHTML = getRevenueCashDataIncompleteWarningHtml() + renderRevenueCashSummary(getRevenueCashFilteredRows());
+                if (statusBox) statusBox.style.display = "none";
+                return;
+            }
             // Ab baaki sabhi reports jaisa hi shared renderSyncingProgress use karte hain
             // (pehle iski apni alag copy-paste ki hui orange-themed progress bar thi -
             // renderRevenueCashSyncingProgress - jo hata di gayi hai).
@@ -12989,7 +13206,7 @@
                 populateRevenueCashHqOptions(revenueCashReconcileRows);
                 await progress.finish();
                 if (renderToken !== revenueCashReconcileRenderToken) return;
-                tableBox.innerHTML = renderRevenueCashSummary(getRevenueCashFilteredRows());
+                tableBox.innerHTML = getRevenueCashDataIncompleteWarningHtml() + renderRevenueCashSummary(getRevenueCashFilteredRows());
                 if (statusBox) statusBox.style.display = "none";
             } catch (_) {
                 progress.stop();
@@ -14317,7 +14534,15 @@
             draftSealDesignation: "Assistant Engineer (O&M)",
             draftSealLocation: "",
             showReferenceInfo: false,
-            menuOpen: false
+            menuOpen: false,
+            // Jab user "Saved Feeder Maps" se koi map Load karta hai, tab flow
+            // badal jaata hai - manual "+ Add to List" / node-list wala point-by-
+            // point banane wala form hide ho jaata hai, aur sirf "Proposed Point
+            // Do Existing Points Ke Beech Jodein" wala form dikhta hai (kyoki map
+            // pehle se bana hua hai, sirf usme proposed load jodna hai). Naya map
+            // fresh banate waqt ya "Edit" se kholne par yeh false rehta hai, taaki
+            // pehle jaisa poora manual flow (point add + SLD + calc + seal) dikhe.
+            proposedInsertOnly: false
         };
 
         function vrNextLabel(n) {
@@ -14639,7 +14864,7 @@
             const totalRowLabel = nodes.length > 0 ? ("TOTAL (" + nodes[0].label + "-" + nodes[nodes.length - 1].label + ")") : "TOTAL";
             const sectionCombosCaption = sectionRows.map((r) => "(" + r.label + ")").join("") +
                 (nodes.length > 2 ? "(" + nodes[0].label + "-" + nodes[nodes.length - 1].label + ")" : "");
-            const reportTitleLine1 = lineStatus + " " + (vrLineTypeLabels[lineType] || "33 kV") + " LINE";
+            const reportTitleLine1 = lineStatus + " " + (vrLineTypeLabels[lineType] || "33 kV") + " FEEDER";
 
             return { conductorOptions, conductorObj, cc, isHT, df, dfNote, sectionRows, totalKvaKm, totalVr, limit, exceedsLimit, totalRowLabel, sectionCombosCaption, reportTitleLine1 };
         }
@@ -14649,6 +14874,32 @@
             if (!container) return;
             const nodes = vrCalcState.nodes;
             const isProposedStatus = vrCalcState.lineStatus === "PROPOSED";
+
+            // Saved map "Load" karne ke baad manual point-add flow (heading +
+            // "+ Add to List" form + node-list) chhupa dete hain - sirf neeche
+            // wala "Insert Proposed Point" form dikhta hai. Fresh map banate
+            // waqt ya "Edit" se khole gaye map me yeh sab pehle jaisa dikhta hai.
+            const manualHeading = document.getElementById("vr-manual-points-heading");
+            const draftForm = document.getElementById("vr-draft-form");
+            const showManualFlow = !vrCalcState.proposedInsertOnly;
+            if (manualHeading) manualHeading.style.display = showManualFlow ? "" : "none";
+            if (draftForm) draftForm.style.display = showManualFlow ? "" : "none";
+            container.style.display = showManualFlow ? "" : "none";
+            // Points daalte hi (fresh map banate waqt) yahin niche "Save Current as
+            // Map" ka option dikhta hai - ab three-dots menu tak jaane ki zaroorat
+            // nahi. Agar koi saved map "Edit" mode me khula hai, to iski jagah
+            // "Update Map / Cancel" banner dikhta hai. Load karke proposed-insert
+            // mode me dono hide rehte hain.
+            const inlineSaveWrap = document.getElementById("vr-inline-save-wrap");
+            const editBanner = document.getElementById("vr-map-edit-banner");
+            const isEditingMap = !!vrEditingMapId;
+            if (inlineSaveWrap) inlineSaveWrap.style.display = (showManualFlow && nodes.length > 0 && !isEditingMap) ? "block" : "none";
+            if (editBanner) editBanner.style.display = (showManualFlow && isEditingMap) ? "flex" : "none";
+            if (!showManualFlow) {
+                vrRenderInsertProposedForm();
+                return;
+            }
+
             const nameLabelEl = document.getElementById("vr-draft-name-label");
             const kvaWrap = document.getElementById("vr-draft-kva-wrap");
             const distWrap = document.getElementById("vr-draft-dist-wrap");
@@ -14690,6 +14941,253 @@
             }).join("");
 
             container.innerHTML = html;
+            vrRenderInsertProposedForm();
+        }
+
+        // =====================================================================
+        // SAVED FEEDER MAPS (Existing SLD reuse) - ek baar existing feeder ka
+        // poora point-chain bana kar save kar lena hai, taaki future me naya
+        // connection aane par sirf woh map load karke, do existing points ke
+        // beech proposed load jodkar seedhe VR nikal saken - sabhi points
+        // dobara manually na daalne padein. Abhi sirf is device/browser tak
+        // (localStorage) limited hai, DC-wise alag rehta hai.
+        // =====================================================================
+        const vrSavedMapsStorageKey = "vr_saved_feeder_maps_v1";
+
+        function vrGetAllSavedMaps() {
+            try {
+                return JSON.parse(localStorage.getItem(vrSavedMapsStorageKey) || "[]") || [];
+            } catch (_) {
+                return [];
+            }
+        }
+
+        function vrSaveAllSavedMaps(maps) {
+            try {
+                localStorage.setItem(vrSavedMapsStorageKey, JSON.stringify(maps));
+            } catch (_) {}
+        }
+
+        function vrGetSavedMapsForDc() {
+            const dcKey = normalizeLookupValue(activeDC || "");
+            return vrGetAllSavedMaps().filter((m) => normalizeLookupValue(m.dcName || "") === dcKey);
+        }
+
+        function vrSaveCurrentAsMap(nameInputId) {
+            const nameEl = document.getElementById(nameInputId || "vr-map-save-name");
+            const name = (nameEl?.value || "").trim();
+            if (!name) { showToast("Map ka naam dijiye", false); return; }
+            if (!vrCalcState.nodes.length) { showToast("Pehle points add karein", false); return; }
+            const maps = vrGetAllSavedMaps();
+            const newMap = {
+                id: `vrmap_${Date.now()}`,
+                dcName: activeDC || "",
+                name,
+                lineType: vrCalcState.lineType,
+                conductorType: vrCalcState.conductorType,
+                dfType: vrCalcState.dfType,
+                headerDescription: vrCalcState.headerDescription,
+                // Saved map hamesha "clean existing" state me rakhte hain - koi bhi
+                // is session me flag kiya hua proposed point save nahi hota, taaki
+                // agli baar load karne par sirf asli existing chain mile.
+                nodes: JSON.parse(JSON.stringify(vrCalcState.nodes.map((n) => ({ ...n, isProposed: false, proposedNote: "" })))),
+                savedAt: Date.now()
+            };
+            maps.push(newMap);
+            vrSaveAllSavedMaps(maps);
+            if (nameEl) nameEl.value = "";
+            vrRenderSavedMapsList();
+            showToast(`"${name}" map save ho gaya`, true);
+        }
+
+        function vrLoadSavedMap(id) {
+            const map = vrGetAllSavedMaps().find((m) => m.id === id);
+            if (!map) { showToast("Map nahi mila", false); return; }
+            vrEditingMapId = null;
+            vrCalcState.proposedInsertOnly = true;
+            vrCalcState.lineType = map.lineType || vrCalcState.lineType;
+            vrCalcState.conductorType = map.conductorType || vrCalcState.conductorType;
+            vrCalcState.dfType = map.dfType || vrCalcState.dfType;
+            vrCalcState.headerDescription = map.headerDescription || vrCalcState.headerDescription;
+            vrCalcState.nodes = JSON.parse(JSON.stringify(map.nodes || []));
+            vrCalcState.lineStatus = "PROPOSED";
+            const statusSel = document.getElementById("vr-line-status");
+            if (statusSel) statusSel.value = "PROPOSED";
+            const typeSel = document.getElementById("vr-line-type");
+            if (typeSel) typeSel.value = vrCalcState.lineType;
+            const headerEl = document.getElementById("vr-header-desc");
+            if (headerEl) headerEl.value = vrCalcState.headerDescription;
+            vrToggleSavedMapsModal(false);
+            vrRenderNodeList();
+            vrRenderCalc();
+            vrRenderSavedMapsList();
+            showToast(`"${map.name}" map open ho gaya - ab proposed point jodein`, true);
+        }
+
+        // Ek baar map ban jaane ke baad usko delete karne ka option jaan-boojh
+        // kar nahi diya gaya hai (map hamesha list me dikhega, taaki koi galti
+        // se apna poora existing feeder SLD kho na de). Agar us map me sudhaar
+        // karna ho (points ghatana/badhana/naam-load-distance badalna) to "Edit"
+        // button se use edit-mode me kholiye - neeche wahi node-list (jo Insert
+        // Proposed wale form ke upar hai) editable ban jaati hai, jahan har point
+        // ke saamne wale ✕ se use hataya ja sakta hai (jaise 50 points me se 45
+        // hatakar sirf 5 rakhne hain), naye point jode ja sakte hain, ya kisi bhi
+        // point ka naam/load/distance seedhe badla ja sakta hai. Changes karne ke
+        // baad "Update Map" dabane par wahi saved map (same id/naam) overwrite ho
+        // jaata hai - koi naya duplicate map nahi banta.
+        let vrEditingMapId = null;
+
+        function vrEditSavedMap(id) {
+            const map = vrGetAllSavedMaps().find((m) => m.id === id);
+            if (!map) { showToast("Map nahi mila", false); return; }
+            vrEditingMapId = id;
+            vrCalcState.proposedInsertOnly = false;
+            vrCalcState.lineType = map.lineType || vrCalcState.lineType;
+            vrCalcState.conductorType = map.conductorType || vrCalcState.conductorType;
+            vrCalcState.dfType = map.dfType || vrCalcState.dfType;
+            vrCalcState.headerDescription = map.headerDescription || vrCalcState.headerDescription;
+            vrCalcState.nodes = JSON.parse(JSON.stringify(map.nodes || []));
+            vrCalcState.lineStatus = "EXISTING";
+            const statusSel = document.getElementById("vr-line-status");
+            if (statusSel) statusSel.value = "EXISTING";
+            const typeSel = document.getElementById("vr-line-type");
+            if (typeSel) typeSel.value = vrCalcState.lineType;
+            const headerEl = document.getElementById("vr-header-desc");
+            if (headerEl) headerEl.value = vrCalcState.headerDescription;
+            vrToggleSavedMapsModal(false);
+            vrRenderNodeList();
+            vrRenderCalc();
+            vrRenderSavedMapsList();
+            showToast(`"${map.name}" edit mode me khul gaya - upar points add/remove/edit karke "Update Map" dabayein`, true);
+        }
+
+        function vrUpdateEditingMap() {
+            if (!vrEditingMapId) return;
+            if (!vrCalcState.nodes.length) { showToast("Kam se kam ek point to rehna chahiye", false); return; }
+            const maps = vrGetAllSavedMaps();
+            const idx = maps.findIndex((m) => m.id === vrEditingMapId);
+            if (idx === -1) { showToast("Map nahi mila", false); vrEditingMapId = null; vrRenderSavedMapsList(); return; }
+            const mapName = maps[idx].name;
+            maps[idx] = {
+                ...maps[idx],
+                lineType: vrCalcState.lineType,
+                conductorType: vrCalcState.conductorType,
+                dfType: vrCalcState.dfType,
+                headerDescription: vrCalcState.headerDescription,
+                nodes: JSON.parse(JSON.stringify(vrCalcState.nodes.map((n) => ({ ...n, isProposed: false, proposedNote: "" })))),
+                updatedAt: Date.now()
+            };
+            vrSaveAllSavedMaps(maps);
+            vrEditingMapId = null;
+            vrRenderNodeList();
+            vrRenderSavedMapsList();
+            showToast(`"${mapName}" map update ho gaya`, true);
+        }
+
+        function vrCancelEditingMap() {
+            vrEditingMapId = null;
+            vrRenderNodeList();
+            vrRenderSavedMapsList();
+        }
+
+        function vrRenderSavedMapsList() {
+            const container = document.getElementById("vr-saved-maps-list");
+            const banner = document.getElementById("vr-map-edit-banner");
+            const bannerNameEl = document.getElementById("vr-map-edit-name");
+            if (banner) banner.style.display = vrEditingMapId ? "flex" : "none";
+            if (bannerNameEl && vrEditingMapId) {
+                const editingMap = vrGetAllSavedMaps().find((m) => m.id === vrEditingMapId);
+                bannerNameEl.innerText = editingMap ? editingMap.name : "";
+            }
+            if (!container) return;
+            const maps = vrGetSavedMapsForDc();
+            if (!maps.length) {
+                container.innerHTML = '<div style="text-align:center; padding:14px; color:#888; font-size:12px;">Is DC ke liye abhi koi saved map nahi hai.</div>';
+                return;
+            }
+            container.innerHTML = maps.map((m) => {
+                const isEditing = m.id === vrEditingMapId;
+                return `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; border:1.5px solid ${isEditing ? "#2563eb" : "#e2e8f0"}; border-radius:12px; margin-bottom:8px; background:${isEditing ? "#eff6ff" : "#fff"};">
+                    <div style="text-align:left;">
+                        <div style="font-weight:900; font-size:0.8rem; color:#0f172a;">${escapeHtml(m.name)}${isEditing ? ' <span style="color:#2563eb; font-size:0.65rem;">(EDITING)</span>' : ""}</div>
+                        <div style="font-size:0.65rem; color:#64748b; margin-top:2px;">${m.nodes.length} points · ${escapeHtml(vrLineTypeLabels[m.lineType] || m.lineType)} · ${escapeHtml(new Date(m.savedAt).toLocaleDateString("en-IN"))}</div>
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button class="btn vr-btn-primary" style="padding:6px 12px; font-size:0.7rem;" onclick="vrLoadSavedMap('${m.id}')">Open Map</button>
+                        <button class="btn" style="padding:6px 12px; font-size:0.7rem; background:#f1f5f9; color:#334155;" onclick="vrEditSavedMap('${m.id}')">Edit</button>
+                    </div>
+                </div>`;
+            }).join("");
+        }
+
+        // =====================================================================
+        // INSERT PROPOSED POINT BETWEEN TWO EXISTING POINTS - user do existing
+        // points chunta hai (jaise Point 45 -> Point 46), naya proposed point ka
+        // naam/load/pehle-point-se-distance deta hai. App automatic us segment
+        // ki asli distance ko split kar deta hai: pehle point se jo distance di
+        // gayi, aur baaki bacha hua doosre (far) point tak reh jaata hai - baaki
+        // sabhi points/distances bilkul same rehte hain.
+        // =====================================================================
+        function vrRenderInsertProposedForm() {
+            const wrap = document.getElementById("vr-insert-proposed-wrap");
+            const pairSelect = document.getElementById("vr-insert-pair-select");
+            if (!wrap || !pairSelect) return;
+            const nodes = vrCalcState.nodes;
+            if (!vrCalcState.proposedInsertOnly || nodes.length < 2) {
+                wrap.style.display = "none";
+                return;
+            }
+            wrap.style.display = "block";
+            const currentValue = pairSelect.value;
+            const options = nodes.slice(0, -1).map((n, i) => {
+                const far = nodes[i + 1];
+                return `<option value="${i}">${escapeHtml(n.name)} → ${escapeHtml(far.name)} (${far.distance} KM)</option>`;
+            }).join("");
+            pairSelect.innerHTML = `<option value="">-- Points select karein --</option>` + options;
+            if (currentValue && Number(currentValue) < nodes.length - 1) pairSelect.value = currentValue;
+        }
+
+        function vrInsertProposedNode() {
+            const pairSelect = document.getElementById("vr-insert-pair-select");
+            const nameEl = document.getElementById("vr-insert-name");
+            const kvaEl = document.getElementById("vr-insert-kva");
+            const distEl = document.getElementById("vr-insert-dist");
+            if (!pairSelect || pairSelect.value === "") { showToast("Pehle points ka pair select karein", false); return; }
+            const pairIndex = parseInt(pairSelect.value, 10);
+            const nodes = vrCalcState.nodes;
+            const nearNode = nodes[pairIndex];
+            const farNode = nodes[pairIndex + 1];
+            if (!nearNode || !farNode) { showToast("Selection valid nahi hai", false); return; }
+            const name = (nameEl?.value || "").trim() || "Proposed Point";
+            const kva = parseFloat(kvaEl?.value) || 0;
+            const distFromNear = parseFloat(distEl?.value) || 0;
+            const originalSegmentDistance = farNode.distance;
+            if (distFromNear <= 0 || distFromNear >= originalSegmentDistance) {
+                showToast(`Distance ${nearNode.name} aur ${farNode.name} ke beech ki ${originalSegmentDistance} KM se kam honi chahiye`, false);
+                return;
+            }
+            const newNode = {
+                label: "",
+                name,
+                kva,
+                distance: distFromNear,
+                isProposed: true,
+                proposedNote: name
+            };
+            farNode.distance = Number((originalSegmentDistance - distFromNear).toFixed(3));
+            nodes.splice(pairIndex + 1, 0, newNode);
+            nodes.forEach((n, i) => { n.label = vrNextLabel(i); });
+            vrCalcState.lineStatus = "PROPOSED";
+            const statusSel = document.getElementById("vr-line-status");
+            if (statusSel) statusSel.value = "PROPOSED";
+            if (nameEl) nameEl.value = "";
+            if (kvaEl) kvaEl.value = "";
+            if (distEl) distEl.value = "";
+            if (pairSelect) pairSelect.value = "";
+            vrRenderNodeList();
+            vrRenderCalc();
+            showToast(`"${name}" jud gaya - ${nearNode.name} se ${distFromNear} KM, ${farNode.name} tak ab ${farNode.distance} KM`, true);
         }
 
         function vrRenderSeals() {
@@ -14752,7 +15250,7 @@
 
             const title1 = document.getElementById("vr-report-title-1");
             const title2 = document.getElementById("vr-report-title-2");
-            if (title1) title1.innerText = "VOLTAGE REGULATION CALCULATION – " + calc.reportTitleLine1;
+            if (title1) title1.innerText = "VOLTAGE REGULATION CALCULATION OF " + calc.reportTitleLine1;
             if (title2) title2.innerText = headerDescription || "";
 
             const printTitle1a = document.getElementById("vr-print-title-1a");
@@ -14761,7 +15259,7 @@
             const printTitle2b = document.getElementById("vr-print-title-2b");
             if (printTitle1a) printTitle1a.innerText = "SINGLE LINE DIAGRAM – " + calc.reportTitleLine1;
             if (printTitle1b) printTitle1b.innerText = headerDescription || "";
-            if (printTitle2a) printTitle2a.innerText = "VOLTAGE REGULATION CALCULATION – " + calc.reportTitleLine1;
+            if (printTitle2a) printTitle2a.innerText = "VOLTAGE REGULATION CALCULATION OF " + calc.reportTitleLine1;
             if (printTitle2b) printTitle2b.innerText = headerDescription || "";
 
             const rowsBody = document.getElementById("vr-section-rows");
@@ -14902,15 +15400,39 @@
             if (dd) dd.style.display = vrCalcState.menuOpen ? "block" : "none";
         }
 
-        function vrToggleReferenceInfo() {
-            vrCalcState.showReferenceInfo = !vrCalcState.showReferenceInfo;
-            vrCalcState.menuOpen = false;
-            const box = document.getElementById("vr-reference-info");
-            if (box) box.style.display = vrCalcState.showReferenceInfo ? "block" : "none";
-            const dd = document.getElementById("vr-menu-dropdown");
-            if (dd) dd.style.display = "none";
-            const btn = document.getElementById("vr-menu-toggle-ref-btn");
-            if (btn) btn.innerText = vrCalcState.showReferenceInfo ? "Hide Limits & CC Reference Table" : "Show Limits & CC Reference Table";
+        function vrToggleSavedMapsModal(show) {
+            const modal = document.getElementById("vr-saved-maps-modal");
+            if (!modal) return;
+            modal.style.display = show ? "flex" : "none";
+            if (show) vrRenderSavedMapsList();
+        }
+
+        // App ke main header (⋮ menu) se VR Calculation ke teeno options trigger
+        // karne wale wrappers - pehle inka apna alag chhota ⋮ button/dropdown
+        // VR card ke andar tha, ab baaki features (Mobile No Update, Revenue
+        // Collection) jaisa hi shared main header menu use hota hai.
+        function openVrSavedMapsMenu() {
+            closeHeaderMenu();
+            vrToggleSavedMapsModal(true);
+        }
+
+        function openVrReferenceInfoMenu() {
+            closeHeaderMenu();
+            vrShowReferenceInfoModal(true);
+        }
+
+        function openVrDownloadLogMenu() {
+            closeHeaderMenu();
+            openVrDownloadLog();
+        }
+
+        // Limits & CC Reference Table ab home screen par inline show/hide nahi
+        // hota - alag se dialog (modal) me khulta hai aur cross (✕) button se
+        // band hota hai, jaisa Saved Feeder Maps modal me hai.
+        function vrShowReferenceInfoModal(show) {
+            vrCalcState.showReferenceInfo = !!show;
+            const modal = document.getElementById("vr-reference-info-modal");
+            if (modal) modal.style.display = show ? "flex" : "none";
         }
 
         function initVrCalculation() {
@@ -14923,6 +15445,7 @@
             vrRenderNodeList();
             vrRenderSeals();
             vrRenderCalc();
+            vrRenderSavedMapsList();
         }
 
         function vrSetDownloadStatus(message, ok) {
@@ -15277,9 +15800,11 @@
                 const headerMenuWrap = document.getElementById("header-menu-wrap");
                 const revenueMenuVisible = (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-target-achievement" || id === "revenue-top-defaulters" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload");
                 const mobileUpdateMenuVisible = (id === "mobile-update");
-                if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || mobileUpdateMenuVisible || id === "subdn-chhapara") ? "block" : "none";
+                const vrMenuVisible = (id === "vr-calculation");
+                if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || mobileUpdateMenuVisible || vrMenuVisible || id === "subdn-chhapara") ? "block" : "none";
                 document.querySelectorAll(".revenue-header-menu-item").forEach((item) => item.style.display = revenueMenuVisible ? "block" : "none");
                 document.querySelectorAll(".mobile-update-header-menu-item").forEach((item) => item.style.display = mobileUpdateMenuVisible ? "block" : "none");
+                document.querySelectorAll(".vr-header-menu-item").forEach((item) => item.style.display = vrMenuVisible ? "block" : "none");
                 const staffAdminMenuItem = document.getElementById("staff-admin-header-menu-item");
                 if (staffAdminMenuItem) staffAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 closeHeaderMenu();
@@ -15672,7 +16197,7 @@
         }
         function billCalcLoadField(labelText, placeholder) {
             return `<label style="${billCalcLabelStyle}">${labelText}</label>
-                <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="${placeholder}" value="1">`;
+                <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="${placeholder}">`;
         }
         function billCalcAreaField() {
             return `<label style="${billCalcLabelStyle}">Area Type</label>
@@ -15722,7 +16247,7 @@
             } else if (tariffCode === "LV5.4") {
                 fieldsBox.innerHTML = `
                     <label style="${billCalcLabelStyle}">Sanctioned Load (HP)</label>
-                    <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 5" value="1">
+                    <input id="bc-load" type="number" inputmode="decimal" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. 5">
                     <label style="${billCalcLabelStyle}">Phase</label>
                     <select id="bc-phase" class="ivrs-input" style="${billCalcSelectStyle}">
                         <option value="3P">Three Phase</option>
