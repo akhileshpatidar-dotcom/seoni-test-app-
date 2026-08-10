@@ -159,6 +159,11 @@
         let revenuePendingDiag = { liveTotal: 0, liveDcMatched: 0, uploadedFetched: 0, masterRows: 0 };
         let revenuePendingDownloadInProgress = false;
         let revenueReportRenderToken = 0;
+        // Cash Reconcile jaisa hi fix: ek baar is view me kisi scope (DC/Division/
+        // Circle) ke liye data sync ho jaaye, uske baad usi view-session ke andar
+        // DATE WISE/MONTH WISE toggle ya HQ/TYPE dropdown sirf local filter hain -
+        // dobara sync (background wala bhi) ki koi zaroorat nahi.
+        let revenueReportLoadedScopeKey = null;
         let revenueLiveDownloadInProgress = false;
         let revenueReportDownloadInProgress = false;
         let revenuePaidUploadInProgress = false;
@@ -329,6 +334,7 @@
                 item.onclick = () => {
                     activeDC = normalizeDcName(dc);
                     ensureDcDataLoaded(activeDC);
+                    prefetchRevenueBackgroundDataForDc(activeDC);
                     document.getElementById("selected-dc-label").innerText = dc;
                     toggleDropdown();
                     switchView("dc-dashboard");
@@ -796,6 +802,12 @@
                 activeViewLevel = level;
                 switchView("summary");
                 refreshSummary();
+                // Daily Progress DC/Division/Circle - yahan bhi bina UI block kiye
+                // background me shared revenue cache warm kar dete hain (Live/TD
+                // Entries DC-agnostic hain - sabhi DC ka data ek saath aata hai, isliye
+                // Circle/Division level par bhi useful hai; Uploaded Paid Master
+                // activeDC set hone par usi DC ke liye warm hota hai).
+                prefetchRevenueBackgroundDataForDc(activeDC || level);
                 return;
             }
             pendingLevel = level;
@@ -1220,7 +1232,7 @@
         }
 
         function getRevenueProgressColumnLabel() {
-            if (activeViewLevel === "DC") return "HQ NAME";
+            if (activeViewLevel === "DC") return revenueHqLabelUpper();
             if (activeViewLevel === "DIVISION") return "DC NAME";
             return "DC NAME";
         }
@@ -1832,7 +1844,7 @@
 
         function exportRevenueCategorySummary(fmt, rows, label, reportType, diagnostic = null) {
             const levelT = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
-            const firstCols = activeViewLevel === "CIRCLE" ? ["DIVISION", "DC NAME"] : [activeViewLevel === "DC" ? "HQ NAME" : "DC NAME"];
+            const firstCols = activeViewLevel === "CIRCLE" ? ["DIVISION", "DC NAME"] : [activeViewLevel === "DC" ? revenueHqLabelUpper() : "DC NAME"];
             // Naya layout: saari 5 category (LV1-LV5) + TOTAL ek hi table me cram karne
             // ki jagah, DO ALAG TABLE banate hain - dono me SAARI DC/HQ rows (same order,
             // repeat) rahengi:
@@ -2080,7 +2092,7 @@
             setProgressCategoryDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
             try {
                 const tree = lastRevenueProgressBoxData.hqVillageSummaryData.tree || [];
-                const colLabel = activeViewLevel === "DC" ? "HQ NAME" : "DC NAME";
+                const colLabel = activeViewLevel === "DC" ? revenueHqLabelUpper() : "DC NAME";
                 const headers = [colLabel, "TARGET", "ACHIEVED", "%"];
                 const rows = tree.map((row) => {
                     const target = Number(row.paidAmountTotal || 0) + Number(row.unpaidAmountTotal || 0);
@@ -2142,7 +2154,7 @@
                 const { mode, filterValue } = lastRevenueProgressBoxData;
                 const rows = getProgressDefaultersFilteredRows(mode, filterValue);
                 if (!rows.length) { setProgressCategoryDownloadState(false, "Download ke liye data nahi hai"); return; }
-                const headers = ["RANK", "IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "GOVT/NON GOVT", "MOBILE NO", "PENDING AMOUNT"];
+                const headers = ["RANK", "IVRS NO", "CONSUMER NAME", revenueHqLabelUpper(), revenueVillageLabelUpper(), "GOVT/NON GOVT", "MOBILE NO", "PENDING AMOUNT"];
                 const bodyRows = rows.map((row, index) => [index + 1, row.ivrsNo || "", row.consumerName || "", row.hqName || "", row.village || "", row.govtFlag ? "GOVT" : "NON GOVT", row.mobileNo || "", formatProgressReportAmount(row.pendingAmount)]);
                 const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
                 const govtLabel = progressDefaultersGovtFilter === "GOVT" ? "Govt" : (progressDefaultersGovtFilter === "NONGOVT" ? "Non Govt" : "All");
@@ -2235,7 +2247,7 @@
             const target = Number(data.totals.paidAmountTotal || 0) + Number(data.totals.unpaidAmountTotal || 0);
             const pct = getRevenueAchievementPct(data.totals.paidAmountTotal, target);
             const pctColor = pct >= 75 ? "#166534" : (pct >= 40 ? "#b45309" : "#9f1239");
-            const colLabel = activeViewLevel === "DC" ? "HQ NAME" : "DC NAME";
+            const colLabel = activeViewLevel === "DC" ? revenueHqLabelUpper() : "DC NAME";
             return `
                 <div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Target vs Achievement (Net Bill vs Paid)</div>
                 <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; margin:10px auto 0;">
@@ -2347,8 +2359,8 @@
             const dcScoped = allRows.filter((row) => !f.dc || normalizeDcName(row.dcName) === normalizeDcName(f.dc));
             const villageScoped = dcScoped.filter((row) => !f.hq || normalizeLookupValue(row.hqName) === normalizeLookupValue(f.hq));
             const dcOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(allRows, "dcName"), f.dc, "All DC");
-            const hqOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(dcScoped, "hqName"), f.hq, "All HQ Names");
-            const villageOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(villageScoped, "village"), f.village, "All Villages");
+            const hqOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(dcScoped, "hqName"), f.hq, revenueHqAllLabel(f.dc || activeDC));
+            const villageOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(villageScoped, "village"), f.village, revenueVillageAllLabel(f.dc || activeDC));
             const categoryOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(allRows, "tariffCategory"), f.category, "All Categories");
             const selectStyle = "width:100%; height:46px; margin:8px auto 0; display:block; border:1.5px solid #fb923c; border-radius:14px; padding:0 12px; font-size:0.8rem; font-weight:900; color:#0f172a; background:#ffffff;";
             let html = `
@@ -2408,7 +2420,7 @@
                 const showDcColumn = activeViewLevel !== "DC";
                 const headers = [
                     ...(showDcColumn ? ["DC NAME"] : []),
-                    "IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO",
+                    "IVRS NO", "CONSUMER NAME", revenueHqLabelUpper(), revenueVillageLabelUpper(), "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO",
                     bucket === "SINCE_CONNECTION" ? "STATUS" : "MONTHS SINCE PAYMENT", "LAST PAYMENT DATE", "PENDING AMOUNT"
                 ];
                 const bodyRows = rows.map((row) => [
@@ -2488,7 +2500,7 @@
                 if (!total) return "";
                 return `<div class="summary-table-row" style="grid-template-columns: 1fr 1fr 1fr 1fr;"><div>${escapeHtml(getRevenueCategoryDisplayLabel(cat))}</div><div class="font-black">${total}</div><div class="text-emerald-700 font-black">${c.paid || 0}</div><div class="text-rose-700 font-black">${c.unpaid || 0}</div></div>`;
             }).join("");
-            const colLabel = activeViewLevel === "DC" ? "HQ NAME" : "DC NAME";
+            const colLabel = activeViewLevel === "DC" ? revenueHqLabelUpper() : "DC NAME";
             return `
                 <div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Total / Paid / Unpaid Summary</div>
                 <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; margin:10px auto 0;">
@@ -3406,7 +3418,7 @@
                 const revenueColLabel = getRevenueProgressColumnLabel();
                 const revenueTotals = getRevenueProgressTotals(uiListSummary);
                 const revenueScopeLabel = activeViewLevel === "DC" ? `DC: ${activeDC}` : (activeViewLevel === "DIVISION" ? `Division: ${activeDiv}` : "Circle: SEONI CIRCLE");
-                const revenueFilterLabel = activeViewLevel === "DC" ? "HQ Filter: All HQ" : (activeViewLevel === "DIVISION" ? "DC Filter: All DC" : "Division/DC Filter: All");
+                const revenueFilterLabel = activeViewLevel === "DC" ? `${revenueHqLabel()} Filter: ${revenueHqAllLabel()}` : (activeViewLevel === "DIVISION" ? "DC Filter: All DC" : "Division/DC Filter: All");
                 const showPaid = progressStaffTypeFilter !== "TD";
                 const showTd = progressStaffTypeFilter !== "PAID";
                 const typeLabel = progressStaffTypeFilter === "PAID" ? "Paid by Staff" : (progressStaffTypeFilter === "TD" ? "TD by Staff" : "Paid + TD Both");
@@ -8829,6 +8841,34 @@
             return normalizeLookupValue(dcName || "");
         }
 
+        // SEONI (T) DC ke liye request: underlying data column same rehta hai
+        // (HQ NAME / VILLAGE), sirf iske Revenue reports me DISPLAY label alag
+        // dikhna hai - "HQ Name" ki jagah "Name of Staff", "Village" ki jagah
+        // "Group Dairy". Baaki sabhi 23 DC me pehle jaisa hi "HQ Name"/"Village"
+        // dikhta rahega. Yeh sirf label/heading badalta hai - data/filtering
+        // logic bilkul waisa hi rahega.
+        function isSeoniTDc(dcName = activeDC) {
+            return normalizeLookupValue(dcName || "") === normalizeLookupValue("SEONI (T)");
+        }
+        function revenueHqLabel(dcName = activeDC) {
+            return isSeoniTDc(dcName) ? "Name of Staff" : "HQ Name";
+        }
+        function revenueHqLabelUpper(dcName = activeDC) {
+            return revenueHqLabel(dcName).toUpperCase();
+        }
+        function revenueVillageLabel(dcName = activeDC) {
+            return isSeoniTDc(dcName) ? "Group Dairy" : "Village";
+        }
+        function revenueVillageLabelUpper(dcName = activeDC) {
+            return revenueVillageLabel(dcName).toUpperCase();
+        }
+        function revenueHqAllLabel(dcName = activeDC) {
+            return isSeoniTDc(dcName) ? "All Name of Staff" : "All HQ Names";
+        }
+        function revenueVillageAllLabel(dcName = activeDC) {
+            return isSeoniTDc(dcName) ? "All Group Dairy" : "All Villages";
+        }
+
         function formatRevenueMonthYear(monthValue) {
             const raw = String(monthValue || "").trim();
             const match = raw.match(/^(\d{4})-(\d{2})$/);
@@ -9279,8 +9319,8 @@
                     </div>
 
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">
-                        ${renderRevenueMiniBox("Village", record.village)}
-                        ${renderRevenueMiniBox("HQ Name", record.hqName)}
+                        ${renderRevenueMiniBox(revenueVillageLabel(), record.village)}
+                        ${renderRevenueMiniBox(revenueHqLabel(), record.hqName)}
                         ${renderRevenueMiniBox("Category", record.tariffCategory)}
                         ${renderRevenueMiniBox("Mobile No", normalizeMobileDisplayValue(record.mobileNo))}
                     </div>
@@ -9782,12 +9822,9 @@
         // ek report me TD entries sync ho jaane ke baad dusri report (jo bhi isi
         // function ko call kare) usi cache ko reuse karegi.
         let revenueTdEntriesSyncedAt = 0;
-        // RESET (user request): shared 60-second caching disable kar diya hai -
-        // isi caching ke baad se Pending DO List / Cash Reconcile me SEONI (T)
-        // jaisi bade DC me galat count aana shuru hua tha, aur kai targeted fix
-        // ke baad bhi theek nahi hua, isliye TTL=0 karke purana "hamesha fresh
-        // sync karo" wala reliable behaviour wapas kar diya hai.
-        const REVENUE_TD_ENTRIES_SYNC_TTL_MS = 0;
+        // RESTORED (user confirmed root cause was NGB Cash List upload replacing
+        // old data, not this caching) - shared 60-second TTL cache wapas ON hai.
+        const REVENUE_TD_ENTRIES_SYNC_TTL_MS = 60000;
         async function syncRevenueTdEntriesFromSheet(attempts = 3, forceRefresh = false) {
             if (!forceRefresh && revenueTdEntriesSyncedAt && Date.now() - revenueTdEntriesSyncedAt < REVENUE_TD_ENTRIES_SYNC_TTL_MS) {
                 return getRevenueTdEntriesLocal();
@@ -10404,13 +10441,13 @@
             const hqSelect = document.getElementById("revenue-message-register-hq");
             if (divisionInput) divisionInput.value = getRevenueMessageActiveDivision();
             if (dcInput) dcInput.value = activeDC || "";
-            populateRevenueSelect(hqSelect, [], "Select HQ Name");
+            populateRevenueSelect(hqSelect, [], `Select ${revenueHqLabel()}`);
             try {
                 const dcKey = getRevenueCollectionDcKey(activeDC);
                 const fallbackRows = revenueCollectionRowsByDc[dcKey] || getConsumerRows(activeDC).map(mapRevenueConsumerRow);
                 const loadedRows = await withTimeout(loadRevenueCollectionData(activeDC, true), 45000, []);
                 const rows = loadedRows.length ? loadedRows : fallbackRows;
-                populateRevenueSelect(hqSelect, getRevenueUniqueValues(rows, "hqName"), "Select HQ Name");
+                populateRevenueSelect(hqSelect, getRevenueUniqueValues(rows, "hqName"), `Select ${revenueHqLabel()}`);
                 setRevenueMessageAuthStatus("Apni details bharkar 6-digit PIN banaiye", true);
             } catch (_) {
                 setRevenueMessageAuthStatus("HQ list load nahi hui. Internet check karke dobara try kijiye", false);
@@ -10811,8 +10848,8 @@
                 pendingListProgress = renderSyncingProgress(statusBox, isPendingRenderValid, "PENDING LIST LOAD HO RAHI HAI...");
             }
             if (listBox) listBox.innerHTML = "";
-            populateRevenueSelect(hqSelect, [], "All HQ Names");
-            populateRevenueSelect(document.getElementById("revenue-pending-village"), [], "All Villages");
+            populateRevenueSelect(hqSelect, [], revenueHqAllLabel());
+            populateRevenueSelect(document.getElementById("revenue-pending-village"), [], revenueVillageAllLabel());
             populateRevenueSelect(document.getElementById("revenue-pending-category"), [], "All Categories");
             // NOTE: pehle yahan turant local/purana paid-set (getRevenuePendingPaidIvrsSetLocal)
             // laga ke list render kar dete the, aur sahi (uploaded cash list wala) paid-set
@@ -10849,7 +10886,7 @@
                     && (!assignedHq || normalizeLookupValue(row.hqName) === normalizeLookupValue(assignedHq))
                 ));
                 revenuePendingIndex = buildRevenuePendingIndex(revenuePendingBaseRows);
-                populateRevenueSelect(hqSelect, assignedHq ? [assignedHq] : getRevenueUniqueValues(revenuePendingBaseRows, "hqName"), assignedHq ? "Assigned HQ" : "All HQ Names");
+                populateRevenueSelect(hqSelect, assignedHq ? [assignedHq] : getRevenueUniqueValues(revenuePendingBaseRows, "hqName"), assignedHq ? `Assigned ${revenueHqLabel()}` : revenueHqAllLabel());
                 if (hqSelect) {
                     hqSelect.value = assignedHq || "";
                     hqSelect.disabled = !!assignedHq;
@@ -10857,7 +10894,7 @@
                 }
                 const villageSelect = document.getElementById("revenue-pending-village");
                 const categorySelect = document.getElementById("revenue-pending-category");
-                populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenuePendingBaseRows, "village"), "All Villages");
+                populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenuePendingBaseRows, "village"), revenueVillageAllLabel());
                 populateRevenueSelect(categorySelect, getRevenueUniqueValues(revenuePendingBaseRows, "tariffCategory"), "All Categories");
                 if (villageSelect) villageSelect.value = "";
                 if (categorySelect) categorySelect.value = "";
@@ -10931,7 +10968,7 @@
             const scopedRows = revenuePendingBaseRows.filter((row) => (
                 !hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue)
             ));
-            populateRevenueSelect(document.getElementById("revenue-pending-village"), getRevenueUniqueValues(scopedRows, "village"), "All Villages");
+            populateRevenueSelect(document.getElementById("revenue-pending-village"), getRevenueUniqueValues(scopedRows, "village"), revenueVillageAllLabel());
             populateRevenueSelect(document.getElementById("revenue-pending-category"), getRevenueUniqueValues(scopedRows, "tariffCategory"), "All Categories");
             renderRevenuePendingList();
         }
@@ -11047,7 +11084,7 @@
         }
 
         function getRevenuePendingExportHeaders() {
-            return ["IVRS NO", "CONSUMER NAME", "FATHER NAME", "VILLAGE", "HQ NAME", "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO", "ARREARS", "NET BILL"];
+            return ["IVRS NO", "CONSUMER NAME", "FATHER NAME", revenueVillageLabelUpper(), revenueHqLabelUpper(), "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO", "ARREARS", "NET BILL"];
         }
 
         function getRevenuePendingExportRows(rows) {
@@ -11243,9 +11280,10 @@
         // shared TTL cache hai - same DC ke liye 60 second ke andar dusri report
         // usi cache ko turant reuse karegi.
         let revenueUploadedPaidMasterRowsCache = null; // { dcKey, rows, syncedAt, backendSynced }
-        // RESET (user request): dekhein REVENUE_TD_ENTRIES_SYNC_TTL_MS wali note -
-        // shared caching disable kar diya, hamesha fresh backend sync hoga.
-        const REVENUE_UPLOADED_PAID_MASTER_SYNC_TTL_MS = 0;
+        // RESTORED (user confirmed root cause tha NGB Cash List upload data
+        // replace kar deta tha, is caching me koi dikkat nahi thi) - DC-scoped
+        // shared 60-second TTL cache wapas ON hai.
+        const REVENUE_UPLOADED_PAID_MASTER_SYNC_TTL_MS = 60000;
         async function getRevenueUploadedPaidMasterRows(forceRefresh = false) {
             const dcKey = normalizeLookupValue(activeDC || "");
             // NOTE (bug fix): pehle yahan har outcome - chahe backend se poora sync
@@ -11311,6 +11349,24 @@
             // maana jaaye aur agla call turant fir se poora backend fetch try kare.
             revenueUploadedPaidMasterRowsCache = { dcKey, rows: localRowsBeforeSync, syncedAt: Date.now(), backendSynced: false };
             return localRowsBeforeSync;
+        }
+
+        // User request: DC select karte hi (app khulte hi), background me chup-chap
+        // (bina UI block kiye, koi progress bar dikhaye bina) in teeno shared
+        // cache (Live Entries, TD Entries, Uploaded Paid Master) ko warm kar dete
+        // hain. Isse agar user Revenue me paid entry bhar kar turant Pending DO
+        // List / Cash Reconcile / Live Progress / Date-Month Wise Report kisi bhi
+        // report par jaaye, to backend se data pehle hi (poora ya kam se kam
+        // shuru ho chuka) sync mil jaata hai - report khulne me kam ya bilkul
+        // time nahi lagta, kyunki shared 60-second TTL cache (upar dekhein) usi
+        // pehle se warm data ko reuse kar leta hai.
+        function prefetchRevenueBackgroundDataForDc(dcName) {
+            if (!dcName || !revenueCollectionSubmitScriptUrl) return;
+            Promise.all([
+                syncRevenueLiveEntriesFromSheet(),
+                syncRevenueTdEntriesFromSheet(),
+                getRevenueUploadedPaidMasterRows()
+            ]).catch(() => {});
         }
 
         function initRevenuePaidUpload() {
@@ -11934,6 +11990,13 @@
                 const amount = parseRevenuePaidNumber(row[amountIndex]);
                 if (!ivrsNo || !amount) return null;
                 const paymentDateValue = dateIndex > -1 ? row[dateIndex] : "";
+                const tariffCategory = paidFileType.includes("AG") ? "LV5" : normalizeRevenueCategory(categoryIndex > -1 ? row[categoryIndex] : "");
+                // User ke explicit business rule: NORMAL cash list me LV5 (Agriculture)
+                // consumer nahi lene - LV5 sirf AG (agriculture) file se hi aata hai.
+                // Kabhi-kabhi NORMAL export me galti se LV5 row aa jaati hai, use yahin
+                // skip kar dete hain taaki AG-specific merge logic (neeche) ke saath
+                // conflict na ho.
+                if (!paidFileType.includes("AG") && tariffCategory === "LV5") return null;
                 return {
                     ivrsNo,
                     amount,
@@ -11941,7 +12004,7 @@
                     paymentDateRaw: paymentDateValue,
                     source: sourceIndex > -1 ? String(row[sourceIndex] || "").trim() : "",
                     payMode: modeIndex > -1 ? String(row[modeIndex] || "").trim() : "",
-                    tariffCategory: paidFileType.includes("AG") ? "LV5" : normalizeRevenueCategory(categoryIndex > -1 ? row[categoryIndex] : ""),
+                    tariffCategory,
                     sourceType
                 };
             }).filter(Boolean);
@@ -12278,9 +12341,10 @@
         // baaki sabhi report usi cache ko turant reuse karenge jab tak app se
         // bahar nahi jaate / 60 second se zyada time nahi beetta.
         let revenueLiveEntriesSyncedAt = 0;
-        // RESET (user request): dekhein REVENUE_TD_ENTRIES_SYNC_TTL_MS wali note -
-        // shared caching disable kar diya, hamesha fresh backend sync hoga.
-        const REVENUE_LIVE_ENTRIES_SYNC_TTL_MS = 0;
+        // RESTORED (user confirmed root cause tha NGB Cash List upload data
+        // replace kar deta tha, is caching me koi dikkat nahi thi) - shared
+        // 60-second TTL cache wapas ON hai.
+        const REVENUE_LIVE_ENTRIES_SYNC_TTL_MS = 60000;
         async function syncRevenueLiveEntriesFromSheet(attempts = 3, forceRefresh = false) {
             if (!forceRefresh && revenueLiveEntriesSyncedAt && Date.now() - revenueLiveEntriesSyncedAt < REVENUE_LIVE_ENTRIES_SYNC_TTL_MS) {
                 return getRevenueLiveEntries();
@@ -12482,8 +12546,9 @@
             if (!hqSelect) return;
             const selected = hqSelect.value || "";
             const hqNames = getRevenueUniqueValues(rows || [], "hqName");
-            populateRevenueSelect(hqSelect, hqNames, "All HQ");
-            hqSelect.options[0].text = "All HQ";
+            const allHqLabel = `All ${revenueHqLabel()}`;
+            populateRevenueSelect(hqSelect, hqNames, allHqLabel);
+            hqSelect.options[0].text = allHqLabel;
             if (selected && hqNames.some((name) => normalizeLookupValue(name) === normalizeLookupValue(selected))) {
                 hqSelect.value = selected;
             }
@@ -12576,7 +12641,7 @@
         }
 
         function getRevenueReportHeaders() {
-            return ["TYPE", "IVRS NO", "CONSUMER NAME", "FATHER NAME", "VILLAGE", "HQ NAME", "TARRIF CATEGORY", "MOBILE NO", "ARREARS", "NET BILL", "PAID DATE", "PAID TIME", "PAID AMOUNT", "TD DATE", "TD TIME", "TD AMOUNT", "TD REMARK"];
+            return ["TYPE", "IVRS NO", "CONSUMER NAME", "FATHER NAME", revenueVillageLabelUpper(), revenueHqLabelUpper(), "TARRIF CATEGORY", "MOBILE NO", "ARREARS", "NET BILL", "PAID DATE", "PAID TIME", "PAID AMOUNT", "TD DATE", "TD TIME", "TD AMOUNT", "TD REMARK"];
         }
 
         function getRevenueReportRows(rows) {
@@ -12835,7 +12900,7 @@
                 downloadRevenueRowsReport(type, rows, "Revenue Live Progress", "revenue-live-progress-today.csv", getRevenueReportMeta(
                     "Revenue Live Progress",
                     `Today: ${todayLabel}`,
-                    "HQ Filter: All HQ"
+                    activeViewLevel === "DC" ? `${revenueHqLabel()} Filter: ${revenueHqAllLabel()}` : "HQ Filter: All HQ"
                 ));
                 setRevenueLiveDownloadState(false, `${type === "PDF" ? "PDF" : "Excel"} download ho chuki hai`, true);
             } catch (error) {
@@ -12886,6 +12951,7 @@
         }
 
         function initRevenueReportDownload() {
+            revenueReportLoadedScopeKey = null;
             const dateInput = document.getElementById("revenue-report-date");
             const monthInput = document.getElementById("revenue-report-month");
             if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
@@ -12960,7 +13026,16 @@
                 : getRevenueCombinedFilteredEntries("DAILY", document.getElementById("revenue-report-date")?.value || getTodayIsoDate());
             populateRevenueReportHqOptions(baseRows);
             tableBox.innerHTML = renderRevenueReportHtml(getRevenueSelectedReportRows(), "Selected date/month me paid/TD entry nahi hai.");
+
+            // Is view me is scope (DC/Division/Circle) ke liye ek baar background
+            // sync ho chuka ho to DATE WISE/MONTH WISE toggle ya HQ/TYPE dropdown
+            // dobara koi network sync trigger nahi karenge - sirf upar wala local
+            // filter/re-render hi kaafi hai.
+            const scopeKey = activeDC || activeDiv || "CIRCLE";
+            if (revenueReportLoadedScopeKey === scopeKey) return;
+
             Promise.all([syncRevenueLiveEntriesFromSheet(), syncRevenueTdEntriesFromSheet()]).then(() => {
+                revenueReportLoadedScopeKey = scopeKey;
                 if (renderToken !== revenueReportRenderToken || !document.getElementById("revenue-report-download-view")?.classList.contains("active")) return;
                 const refreshedBaseRows = revenueReportMode === "MONTHLY"
                     ? getRevenueCombinedFilteredEntries("MONTHLY", document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7))
@@ -13011,7 +13086,7 @@
                 const periodLabel = revenueReportMode === "MONTHLY"
                     ? `Month: ${formatRevenueMonthYear(document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7))}`
                     : `Date: ${normalizeRevenueReportDate(document.getElementById("revenue-report-date")?.value || getCurrentDateDDMMYYYY())}`;
-                const filterLabel = `${hqValue && hqValue !== "all-hq" ? `HQ Filter: ${hqValue}` : "HQ Filter: All HQ"}  |  Type: ${getRevenueSelectedReportTypeLabel()}`;
+                const filterLabel = `${hqValue && hqValue !== "all-hq" ? `${revenueHqLabel()} Filter: ${hqValue}` : `${revenueHqLabel()} Filter: ${revenueHqAllLabel()}`}  |  Type: ${getRevenueSelectedReportTypeLabel()}`;
                 const reportTitle = revenueReportMode === "MONTHLY" ? "Revenue Collection Month Report" : "Revenue Collection Date Report";
                 downloadRevenueRowsReport(type, rows, title, `revenue-${revenueReportMode.toLowerCase()}-${suffix}-${hqSuffix}${typeFileSuffix}.csv`, getRevenueReportMeta(
                     reportTitle,
@@ -13025,7 +13100,20 @@
             }
         }
 
+        // Ek baar is view me kisi DC ke liye poora sync/render ho jaaye, uske baad
+        // usi view-session ke andar date/month/HQ/status dropdown sirf local
+        // filter hain - dobara sync ki koi zaroorat nahi. Pehle yeh decision
+        // sirf cross-report shared TTL cache (isRevenueCashReconcileDataFresh)
+        // par depend karta tha, jo bade DC (jaise SEONI (T)) me kabhi-kabhi
+        // backendSynced:false ho jaata to dropdown badalte hi dobara poora sync
+        // shuru ho jaata - user ko irritate karta tha. Ab yeh alag, simple flag
+        // hai jo sirf "is DC ke liye is view me ek baar poora load ho chuka"
+        // track karta hai - jab tak view se bahar jaakar dobara na aayein, dropdown
+        // change par kabhi resync nahi hoga.
+        let revenueCashReconcileLoadedDcKey = null;
+
         function initRevenueCashReconcile() {
+            revenueCashReconcileLoadedDcKey = null;
             const dateInput = document.getElementById("revenue-cash-date");
             const monthInput = document.getElementById("revenue-cash-month");
             if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
@@ -13125,7 +13213,7 @@
             if (!hqSelect) return;
             const selected = hqSelect.value || "";
             const hqNames = getRevenueUniqueValues(rows || [], "hqName");
-            populateRevenueSelect(hqSelect, hqNames, "All HQ");
+            populateRevenueSelect(hqSelect, hqNames, `All ${revenueHqLabel()}`);
             if (selected && hqNames.some((name) => normalizeLookupValue(name) === normalizeLookupValue(selected))) hqSelect.value = selected;
         }
 
@@ -13157,7 +13245,7 @@
                 return acc;
             }, { staffCount: 0, staffAmount: 0, ngbCount: 0, ngbAmount: 0, balanceCount: 0, balanceAmount: 0 });
             const body = summaryRows.map((row) => `<tr><td style="border:1px solid #fdba74; padding:5px; word-break:break-word;">${escapeHtml(row.hqName)}</td><td style="border:1px solid #fdba74; padding:5px;">${row.staffCount}<br>${escapeHtml(formatRevenueAmount(row.staffAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#047857;">${row.ngbCount}<br>${escapeHtml(formatRevenueAmount(row.ngbAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#b91c1c;">${row.balanceCount}<br>${escapeHtml(formatRevenueAmount(row.balanceAmount))}</td></tr>`).join("");
-            return `<div style="background:#ffffff; border:1.5px solid #fdba74; border-radius:16px; padding:10px; overflow:hidden;"><div style="font-size:0.72rem; font-weight:950; color:#c2410c; text-align:center; margin-bottom:8px;">IVRS Matching Only | DC: ${escapeHtml(activeDC || "-")}</div><table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:0.55rem; font-weight:850; color:#1e293b; text-align:center;"><thead><tr style="background:#fed7aa; color:#7c2d12;"><th style="border:1px solid #fdba74; padding:5px;">HQ Name</th><th style="border:1px solid #fdba74; padding:5px;">Paid by Staff</th><th style="border:1px solid #fdba74; padding:5px;">NGB Update</th><th style="border:1px solid #fdba74; padding:5px;">Balance</th></tr></thead><tbody>${body}</tbody><tfoot><tr style="background:#fff7ed; font-weight:950;"><td style="border:1px solid #fdba74; padding:5px;">TOTAL</td><td style="border:1px solid #fdba74; padding:5px;">${totals.staffCount}<br>${escapeHtml(formatRevenueAmount(totals.staffAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#047857;">${totals.ngbCount}<br>${escapeHtml(formatRevenueAmount(totals.ngbAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#b91c1c;">${totals.balanceCount}<br>${escapeHtml(formatRevenueAmount(totals.balanceAmount))}</td></tr></tfoot></table></div>`;
+            return `<div style="background:#ffffff; border:1.5px solid #fdba74; border-radius:16px; padding:10px; overflow:hidden;"><div style="font-size:0.72rem; font-weight:950; color:#c2410c; text-align:center; margin-bottom:8px;">IVRS Matching Only | DC: ${escapeHtml(activeDC || "-")}</div><table style="width:100%; table-layout:fixed; border-collapse:collapse; font-size:0.55rem; font-weight:850; color:#1e293b; text-align:center;"><thead><tr style="background:#fed7aa; color:#7c2d12;"><th style="border:1px solid #fdba74; padding:5px;">${escapeHtml(revenueHqLabel())}</th><th style="border:1px solid #fdba74; padding:5px;">Paid by Staff</th><th style="border:1px solid #fdba74; padding:5px;">NGB Update</th><th style="border:1px solid #fdba74; padding:5px;">Balance</th></tr></thead><tbody>${body}</tbody><tfoot><tr style="background:#fff7ed; font-weight:950;"><td style="border:1px solid #fdba74; padding:5px;">TOTAL</td><td style="border:1px solid #fdba74; padding:5px;">${totals.staffCount}<br>${escapeHtml(formatRevenueAmount(totals.staffAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#047857;">${totals.ngbCount}<br>${escapeHtml(formatRevenueAmount(totals.ngbAmount))}</td><td style="border:1px solid #fdba74; padding:5px; color:#b91c1c;">${totals.balanceCount}<br>${escapeHtml(formatRevenueAmount(totals.balanceAmount))}</td></tr></tfoot></table></div>`;
         }
 
         function getRevenueCashDataIncompleteWarningHtml() {
@@ -13176,12 +13264,22 @@
             const renderToken = ++revenueCashReconcileRenderToken;
             if (statusBox) statusBox.style.display = "none";
             const isRenderValid = () => renderToken === revenueCashReconcileRenderToken && document.getElementById("revenue-cash-reconcile-view")?.classList.contains("active");
+            const dcKey = normalizeLookupValue(activeDC || "");
+            if (revenueCashReconcileLoadedDcKey === dcKey && revenueCashReconcileRows.length) {
+                // Is DC ke liye is view-session me ek baar poora load ho chuka hai -
+                // date/month/HQ/status dropdown sirf local filter hai, kabhi resync
+                // nahi hoga jab tak view se bahar jaakar dobara na aayein.
+                tableBox.innerHTML = getRevenueCashDataIncompleteWarningHtml() + renderRevenueCashSummary(getRevenueCashFilteredRows());
+                if (statusBox) statusBox.style.display = "none";
+                return;
+            }
             const dataFresh = isRevenueCashReconcileDataFresh();
             if (dataFresh && revenueCashReconcileRows.length) {
                 // Data pehle se fresh hai (isi report me ya Live Progress/Pending DO
                 // List me pehle hi sync ho chuka hai) - date/month/HQ/status dropdown
                 // change sirf local filter hai, network re-fetch skip karke turant
                 // re-render ho jaata hai.
+                revenueCashReconcileLoadedDcKey = dcKey;
                 tableBox.innerHTML = getRevenueCashDataIncompleteWarningHtml() + renderRevenueCashSummary(getRevenueCashFilteredRows());
                 if (statusBox) statusBox.style.display = "none";
                 return;
@@ -13191,6 +13289,7 @@
                 // liye sirf pehli baar rows build karne hain - network call nahi.
                 revenueCashReconcileRows = buildRevenueCashReconcileRows();
                 populateRevenueCashHqOptions(revenueCashReconcileRows);
+                revenueCashReconcileLoadedDcKey = dcKey;
                 tableBox.innerHTML = getRevenueCashDataIncompleteWarningHtml() + renderRevenueCashSummary(getRevenueCashFilteredRows());
                 if (statusBox) statusBox.style.display = "none";
                 return;
@@ -13204,6 +13303,7 @@
                 if (renderToken !== revenueCashReconcileRenderToken) { progress.stop(); return; }
                 revenueCashReconcileRows = buildRevenueCashReconcileRows();
                 populateRevenueCashHqOptions(revenueCashReconcileRows);
+                revenueCashReconcileLoadedDcKey = dcKey;
                 await progress.finish();
                 if (renderToken !== revenueCashReconcileRenderToken) return;
                 tableBox.innerHTML = getRevenueCashDataIncompleteWarningHtml() + renderRevenueCashSummary(getRevenueCashFilteredRows());
@@ -13250,7 +13350,7 @@
             if (!rows.length) return showToast("Report ke liye data nahi hai", false);
             setRevenueCashDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
             try {
-                const headers = ["STATUS", "IVRS NO", "CONSUMER NAME", "FATHER NAME", "VILLAGE", "HQ NAME", "CATEGORY", "MOBILE NO", "STAFF PAID DATE", "STAFF PAID TIME", "STAFF PAID AMOUNT", "DC NAME"];
+                const headers = ["STATUS", "IVRS NO", "CONSUMER NAME", "FATHER NAME", revenueVillageLabelUpper(), revenueHqLabelUpper(), "CATEGORY", "MOBILE NO", "STAFF PAID DATE", "STAFF PAID TIME", "STAFF PAID AMOUNT", "DC NAME"];
                 // Baaki reports jaisa hi Indian/readable period label - monthly me
                 // "YYYY-MM" raw ISO ki jagah ab formatRevenueMonthYear se "Month YYYY" banta hai.
                 const periodDisplay = revenueCashReconcileMode === "MONTHLY"
@@ -13424,7 +13524,7 @@
 
         function getRevenueHqVillageColumnLabel() {
             const depth = revenueHqVillageDrillPath.length;
-            if (activeViewLevel === "DC") return depth === 0 ? "HQ NAME" : "VILLAGE";
+            if (activeViewLevel === "DC") return depth === 0 ? revenueHqLabelUpper() : revenueVillageLabelUpper();
             if (depth === 0) return "DC NAME";
             if (depth === 1) return "HQ NAME";
             return "VILLAGE";
@@ -13648,7 +13748,7 @@
             setRevenueHqVillageDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
             try {
                 const headers = activeViewLevel === "DC"
-                    ? ["HQ NAME", "VILLAGE", "PAID", "PAID AMT", "UNPAID", "UNPAID AMT"]
+                    ? [revenueHqLabelUpper(), revenueVillageLabelUpper(), "PAID", "PAID AMT", "UNPAID", "UNPAID AMT"]
                     : ["DC NAME", "HQ NAME", "VILLAGE", "PAID", "PAID AMT", "UNPAID", "UNPAID AMT"];
                 const rows = flatRows.map((r) => [...r.path, r.paidTotal, formatProgressReportAmount(r.paidAmountTotal), r.unpaidTotal, formatProgressReportAmount(r.unpaidAmountTotal)]);
                 const reportTitle = getRevenueHqVillageReportTitle();
@@ -13772,7 +13872,7 @@
 
         function getRevenueTargetColumnLabel() {
             const depth = revenueTargetDrillPath.length;
-            if (activeViewLevel === "DC") return depth === 0 ? "HQ NAME" : "VILLAGE";
+            if (activeViewLevel === "DC") return depth === 0 ? revenueHqLabelUpper() : revenueVillageLabelUpper();
             if (depth === 0) return "DC NAME";
             if (depth === 1) return "HQ NAME";
             return "VILLAGE";
@@ -13842,8 +13942,9 @@
 
         function renderRevenueTargetFlatTable(level) {
             const rows = buildRevenueTargetFlatRows(level);
-            const colLabel = level === "HQ" ? "HQ NAME" : "VILLAGE";
-            let html = `<div class="summary-wrapper"><div style="padding:9px 10px; margin-bottom:6px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:10px; font-size:0.64rem; font-weight:900; color:#1d4ed8; text-align:center;">Sabhi ${colLabel === "HQ NAME" ? "HQ" : "Village"} - Achievement % ke hisab se sorted (best se worst)</div><div class="summary-table-header" style="grid-template-columns: 1.5fr 0.9fr 0.9fr 0.6fr;"><div>${colLabel}</div><div>TARGET</div><div>ACHIEVED</div><div>%</div></div>`;
+            const colLabel = level === "HQ" ? (activeViewLevel === "DC" ? revenueHqLabelUpper() : "HQ NAME") : (activeViewLevel === "DC" ? revenueVillageLabelUpper() : "VILLAGE");
+            const colLabelFriendly = level === "HQ" ? (activeViewLevel === "DC" ? revenueHqLabel() : "HQ") : (activeViewLevel === "DC" ? revenueVillageLabel() : "Village");
+            let html = `<div class="summary-wrapper"><div style="padding:9px 10px; margin-bottom:6px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:10px; font-size:0.64rem; font-weight:900; color:#1d4ed8; text-align:center;">Sabhi ${colLabelFriendly} - Achievement % ke hisab se sorted (best se worst)</div><div class="summary-table-header" style="grid-template-columns: 1.5fr 0.9fr 0.9fr 0.6fr;"><div>${colLabel}</div><div>TARGET</div><div>ACHIEVED</div><div>%</div></div>`;
             if (!rows.length) {
                 html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is scope me data nahi mila.</div></div>`;
             } else {
@@ -14013,7 +14114,7 @@
             if (!flatRows.length) return showToast("Report ke liye data nahi hai", false);
             setRevenueTargetDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
             try {
-                const colLabel = revenueTargetViewBy === "DC" ? "DC NAME" : (revenueTargetViewBy === "HQ" ? "HQ NAME" : "VILLAGE");
+                const colLabel = revenueTargetViewBy === "DC" ? "DC NAME" : (revenueTargetViewBy === "HQ" ? (activeViewLevel === "DC" ? revenueHqLabelUpper() : "HQ NAME") : (activeViewLevel === "DC" ? revenueVillageLabelUpper() : "VILLAGE"));
                 const headers = [colLabel, "TARGET", "ACHIEVED", "%"];
                 const rows = flatRows.map((r) => [r.name, formatProgressReportAmount(r.target), formatProgressReportAmount(r.paidAmountTotal), `${r.pct}%`]);
                 const reportTitle = getRevenueTargetReportTitle();
@@ -14090,7 +14191,7 @@
             const hqValue = document.getElementById("revenue-defaulters-hq")?.value || "";
             const allRows = revenueDefaultersRows;
             const scoped = allRows.filter((row) => !hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue));
-            populateRevenueSelect(document.getElementById("revenue-defaulters-village"), getRevenueUniqueValues(scoped, "village"), "All Villages");
+            populateRevenueSelect(document.getElementById("revenue-defaulters-village"), getRevenueUniqueValues(scoped, "village"), revenueVillageAllLabel());
             renderRevenueDefaultersTable();
         }
 
@@ -14117,7 +14218,7 @@
             const villageValue = document.getElementById("revenue-defaulters-village")?.value || "";
             const govtValue = document.getElementById("revenue-defaulters-govt")?.value || "";
             const govtLabel = govtValue === "GOVT" ? "Govt Only" : (govtValue === "NONGOVT" ? "Non Govt Only" : "All");
-            statusBox.innerHTML = `Showing: <strong>Top ${revenueDefaultersLimit}</strong> | HQ: ${escapeHtml(hqValue || "All HQ")} | Village: ${escapeHtml(villageValue || "All Villages")} | Type: ${escapeHtml(govtLabel)} | Found: ${rows.length}`;
+            statusBox.innerHTML = `Showing: <strong>Top ${revenueDefaultersLimit}</strong> | ${escapeHtml(revenueHqLabel())}: ${escapeHtml(hqValue || revenueHqAllLabel())} | ${escapeHtml(revenueVillageLabel())}: ${escapeHtml(villageValue || revenueVillageAllLabel())} | Type: ${escapeHtml(govtLabel)} | Found: ${rows.length}`;
             if (!rows.length) {
                 tableBox.innerHTML = `<div style="background:#ecfdf5; border:1.5px solid #86efac; border-radius:14px; padding:14px; color:#047857; font-size:0.8rem; font-weight:900; text-align:center; margin-top:10px;">Is filter me koi bakaya consumer nahi mila.</div>`;
                 return;
@@ -14161,8 +14262,8 @@
                 if (!isRenderValid()) return;
                 const hqSelect = document.getElementById("revenue-defaulters-hq");
                 const villageSelect = document.getElementById("revenue-defaulters-village");
-                populateRevenueSelect(hqSelect, getRevenueUniqueValues(revenueDefaultersRows, "hqName"), "All HQ");
-                populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenueDefaultersRows, "village"), "All Villages");
+                populateRevenueSelect(hqSelect, getRevenueUniqueValues(revenueDefaultersRows, "hqName"), revenueHqAllLabel());
+                populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenueDefaultersRows, "village"), revenueVillageAllLabel());
                 if (hqSelect) hqSelect.value = "";
                 if (villageSelect) villageSelect.value = "";
                 const govtSelect = document.getElementById("revenue-defaulters-govt");
@@ -14203,7 +14304,7 @@
             if (!rows.length) return showToast("Download ke liye data nahi hai", false);
             setRevenueDefaultersDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
             try {
-                const headers = ["RANK", "IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "GOVT/NON GOVT", "MOBILE NO", "PENDING AMOUNT"];
+                const headers = ["RANK", "IVRS NO", "CONSUMER NAME", revenueHqLabelUpper(), revenueVillageLabelUpper(), "GOVT/NON GOVT", "MOBILE NO", "PENDING AMOUNT"];
                 const bodyRows = rows.map((row, index) => [index + 1, row.ivrsNo || "", row.consumerName || "", row.hqName || "", row.village || "", row.govtFlag ? "GOVT" : "NON GOVT", row.mobileNo || "", formatProgressReportAmount(row.pendingAmount)]);
                 const reportTitle = getRevenueDefaultersReportTitle();
                 const scopeLine = `Scope: ${activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? `Division - ${activeDiv}` : "Circle - SEONI CIRCLE")}`;
@@ -14340,8 +14441,8 @@
             const categorySelect = document.getElementById("revenue-hq-village-list-category");
             const statusSelect = document.getElementById("revenue-hq-village-list-status");
             const govtSelect = document.getElementById("revenue-hq-village-list-govt");
-            populateRevenueSelect(hqSelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "hqName"), "All HQ");
-            populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "village"), "All Villages");
+            populateRevenueSelect(hqSelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "hqName"), revenueHqAllLabel());
+            populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "village"), revenueVillageAllLabel());
             populateRevenueSelect(categorySelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "tariffCategory"), "All Categories");
             if (hqSelect) hqSelect.value = "";
             if (villageSelect) villageSelect.value = "";
@@ -14354,7 +14455,7 @@
         function onRevenueHqVillageListHqChange() {
             const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "";
             const scoped = revenueHqVillageConsumerRows.filter((row) => !hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue));
-            populateRevenueSelect(document.getElementById("revenue-hq-village-list-village"), getRevenueUniqueValues(scoped, "village"), "All Villages");
+            populateRevenueSelect(document.getElementById("revenue-hq-village-list-village"), getRevenueUniqueValues(scoped, "village"), revenueVillageAllLabel());
             populateRevenueSelect(document.getElementById("revenue-hq-village-list-category"), getRevenueUniqueValues(scoped, "tariffCategory"), "All Categories");
             renderRevenueHqVillageList();
         }
@@ -14398,7 +14499,7 @@
             const categoryLabel = categoryValue ? getRevenueCategoryDisplayLabel(categoryValue) : "All Categories";
             const statusLabel = statusValue === "PAID" ? "Paid Only" : (statusValue === "UNPAID" ? "Unpaid Only" : "All (Paid + Unpaid)");
             const govtLabel = govtValue === "GOVT" ? "Govt Only" : (govtValue === "NONGOVT" ? "Non Govt Only" : "All");
-            statusBox.innerHTML = `Consumer: <strong>${rows.length}</strong> | HQ: ${escapeHtml(hqValue || "All HQ")} | Village: ${escapeHtml(villageValue || "All Villages")} | Category: ${escapeHtml(categoryLabel)} | Status: ${escapeHtml(statusLabel)} | Type: ${escapeHtml(govtLabel)}`;
+            statusBox.innerHTML = `Consumer: <strong>${rows.length}</strong> | ${escapeHtml(revenueHqLabel())}: ${escapeHtml(hqValue || "All " + revenueHqLabel())} | ${escapeHtml(revenueVillageLabel())}: ${escapeHtml(villageValue || "All " + revenueVillageLabel())} | Category: ${escapeHtml(categoryLabel)} | Status: ${escapeHtml(statusLabel)} | Type: ${escapeHtml(govtLabel)}`;
             listBox.innerHTML = rows.length ? `
                 <div style="display:flex; gap:10px; width:100%; margin:10px auto 0;">
                     <button id="revenue-hq-village-list-pdf-btn" onclick="downloadRevenueHqVillageList('PDF')" style="flex:1; height:44px; border:none; border-radius:14px; background:#ef4444; color:#ffffff; font-size:0.78rem; font-weight:950;">PDF</button>
@@ -14409,7 +14510,7 @@
         }
 
         function getRevenueHqVillageListExportHeaders() {
-            return ["STATUS", "IVRS NO", "CONSUMER NAME", "FATHER NAME", "VILLAGE", "HQ NAME", "CATEGORY", "GOVT/NON GOVT", "MOBILE NO", "NET BILL", "PAID AMOUNT", "DC NAME"];
+            return ["STATUS", "IVRS NO", "CONSUMER NAME", "FATHER NAME", revenueVillageLabelUpper(), revenueHqLabelUpper(), "CATEGORY", "GOVT/NON GOVT", "MOBILE NO", "NET BILL", "PAID AMOUNT", "DC NAME"];
         }
 
         function getRevenueHqVillageListExportRows(rows) {
@@ -14464,7 +14565,7 @@
                 const statusLabel = statusValue === "PAID" ? "Paid Only" : (statusValue === "UNPAID" ? "Unpaid Only" : "All (Paid + Unpaid)");
                 const govtLabel = govtValue === "GOVT" ? "Govt Only" : (govtValue === "NONGOVT" ? "Non Govt Only" : "All");
                 const reportTitle = "Consumer List - HQ/Village/Category Wise";
-                const filterLine1 = `HQ: ${hqValue || "All HQ"}  |  Village: ${villageValue || "All Villages"}`;
+                const filterLine1 = `${revenueHqLabel()}: ${hqValue || "All " + revenueHqLabel()}  |  ${revenueVillageLabel()}: ${villageValue || "All " + revenueVillageLabel()}`;
                 const filterLine2 = `Category: ${categoryLabel}  |  Status: ${statusLabel}  |  Type: ${govtLabel}`;
                 const periodLine = `Period: ${getRevenueHqVillagePeriodDisplay()}`;
                 const suffix = revenueHqVillageMode === "MONTHLY"
