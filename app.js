@@ -9597,29 +9597,71 @@
         }
 
         // Excel Automation (Compare Two Excel File) - yeh ek alag, standalone HTML tool
-        // hai (SheetJS-based, Master Data vs Compare File reconcile karta hai). Ab yeh
-        // static GitHub file ki jagah backend (Google Sheet, action=getExternalToolHtml)
-        // se latest content fetch karta hai - Sub DN Chhapara ke 3-dot menu se "Update
-        // Excel Automation Tool" se jab bhi naya .html upload hota hai, yahan sabhi DC
-        // par turant reflect ho jaata hai, GitHub par dobara upload karne ki zaroorat
-        // nahi. Agar backend se fetch fail ho jaaye (network issue ya abhi tak kabhi
-        // upload hi nahi hua), to purani static "excel-automation.html" (GitHub Pages
-        // par isi repo me) par fallback ho jaata hai - feature kabhi bhi poori tarah
-        // tootta nahi.
+        // hai (SheetJS-based, Master Data vs Compare File reconcile karta hai). Content
+        // backend se fetch hota hai (Sub DN Chhapara ke 3-dot menu se "Update Excel
+        // Automation Tool" jab bhi naya .html upload hota hai, sabhi DC par turant
+        // reflect ho jaata hai).
+        // BUG FIX (5-6 taps lagne wala issue): pehle yahan pehle "await fetch(...)" hone
+        // ke BAAD window.open() call hota tha - browsers window.open() ko sirf tabhi
+        // bina block kiye allow karte hain jab wo seedha click handler ke andar,
+        // SYNCHRONOUSLY chale. Await ke baad wala window.open() ek "delayed" call ban
+        // jaata hai jise popup-blocker chupchap रोक deta hai - isiliye pehli baar click
+        // karne par kuch nahi hota tha, aur kabhi-kabhi (jab pichla blocked tab abhi tak
+        // memory me ho ya browser thoda alag react kare) 5-6 baar tap karne par khulta
+        // dikhta tha.
+        // Fix: ab tab click hote hi SYNCHRONOUSLY khol dete hain (isliye turant naya tab
+        // dikhega, popup-blocker rokta nahi) aur usme "Loading..." dikha dete hain; jab
+        // tak backend se content aata hai, button bhi disable/"Opening..." dikhata hai
+        // taaki baar-baar tap na ho. Content aane par usi tab ke andar likh dete hain.
         async function openExcelAutomationTool() {
+            const btn = document.getElementById("excel-automation-open-btn");
+            const originalBtnText = btn ? btn.innerText : "Compare Two Excel File";
+            if (btn) {
+                btn.disabled = true;
+                btn.style.opacity = "0.65";
+                btn.style.pointerEvents = "none";
+                btn.innerText = "Opening...";
+            }
+            const newTab = window.open("", "_blank", "noopener");
+            if (newTab) {
+                try {
+                    newTab.document.write("<!DOCTYPE html><html><head><title>Excel Automation - Loading...</title></head><body style=\"background:#0f172a; color:#e2e8f0; font-family:Arial,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;\"><div style=\"text-align:center;\"><div style=\"font-size:1rem; font-weight:700;\">Excel Automation Tool load ho raha hai...</div></div></body></html>");
+                    newTab.document.close();
+                } catch (_) {}
+            } else {
+                showToast("Naya tab nahi khul paya - browser me popup allow kijiye", false);
+            }
+            const restoreBtn = () => {
+                if (!btn) return;
+                btn.disabled = false;
+                btn.style.opacity = "1";
+                btn.style.pointerEvents = "auto";
+                btn.innerText = originalBtnText;
+            };
             try {
                 const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getExternalToolHtml&tool_key=EXCEL_AUTOMATION&t=${Date.now()}`);
                 const parsed = await response.json();
                 if (parsed && parsed.status === "success" && parsed.html) {
-                    const blob = new Blob([parsed.html], { type: "text/html" });
-                    const blobUrl = URL.createObjectURL(blob);
-                    window.open(blobUrl, "_blank", "noopener");
+                    if (newTab && !newTab.closed) {
+                        newTab.document.open();
+                        newTab.document.write(parsed.html);
+                        newTab.document.close();
+                    } else {
+                        const blob = new Blob([parsed.html], { type: "text/html" });
+                        window.open(URL.createObjectURL(blob), "_blank", "noopener");
+                    }
+                    restoreBtn();
                     return;
                 }
             } catch (_) {}
             const baseUrl = window.location.href.split("#")[0].split("?")[0];
             const toolUrl = baseUrl.replace(/[^/]*$/, "") + "excel-automation.html";
-            window.open(toolUrl, "_blank", "noopener");
+            if (newTab && !newTab.closed) {
+                newTab.location.href = toolUrl;
+            } else {
+                window.open(toolUrl, "_blank", "noopener");
+            }
+            restoreBtn();
         }
 
         function openCurrentRevenueBill() {
