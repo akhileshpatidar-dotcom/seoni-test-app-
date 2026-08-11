@@ -9613,7 +9613,19 @@
         // dikhega, popup-blocker rokta nahi) aur usme "Loading..." dikha dete hain; jab
         // tak backend se content aata hai, button bhi disable/"Opening..." dikhata hai
         // taaki baar-baar tap na ho. Content aane par usi tab ke andar likh dete hain.
+        // FURTHER FIX: backend (script.google.com) kabhi-kabhi bahut slow response deta
+        // hai, jis wajah se pehle yahan "Opening..." der tak atka reh jaata tha aur user
+        // dobara-dobara tap kar deta tha (jisse Chrome ka popup-abuse-blocker activate ho
+        // jaata tha - "Naya tab nahi khul paya" wala error). Ab do cheezein ki hain: (1)
+        // ek module-level "already in progress" flag - dobara click hone par turant
+        // ignore ho jaata hai (button disable ke upar ek extra safety layer), (2) backend
+        // fetch par 8-second ka hard timeout - itni der me jawab na aaye to turant static
+        // GitHub wali file par fallback ho jaata hai (usi already-khule tab me), taaki tab
+        // kabhi bhi "Loading..." par hamesha ke liye atka na rahe.
+        let excelAutomationToolOpening = false;
         async function openExcelAutomationTool() {
+            if (excelAutomationToolOpening) return;
+            excelAutomationToolOpening = true;
             const btn = document.getElementById("excel-automation-open-btn");
             const originalBtnText = btn ? btn.innerText : "Compare Two Excel File";
             if (btn) {
@@ -9622,16 +9634,8 @@
                 btn.style.pointerEvents = "none";
                 btn.innerText = "Opening...";
             }
-            const newTab = window.open("", "_blank", "noopener");
-            if (newTab) {
-                try {
-                    newTab.document.write("<!DOCTYPE html><html><head><title>Excel Automation - Loading...</title></head><body style=\"background:#0f172a; color:#e2e8f0; font-family:Arial,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;\"><div style=\"text-align:center;\"><div style=\"font-size:1rem; font-weight:700;\">Excel Automation Tool load ho raha hai...</div></div></body></html>");
-                    newTab.document.close();
-                } catch (_) {}
-            } else {
-                showToast("Naya tab nahi khul paya - browser me popup allow kijiye", false);
-            }
             const restoreBtn = () => {
+                excelAutomationToolOpening = false;
                 if (!btn) return;
                 btn.disabled = false;
                 btn.style.opacity = "1";
@@ -9639,29 +9643,41 @@
                 btn.innerText = originalBtnText;
             };
             try {
-                const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getExternalToolHtml&tool_key=EXCEL_AUTOMATION&t=${Date.now()}`);
-                const parsed = await response.json();
-                if (parsed && parsed.status === "success" && parsed.html) {
-                    if (newTab && !newTab.closed) {
-                        newTab.document.open();
-                        newTab.document.write(parsed.html);
+                const newTab = window.open("", "_blank", "noopener");
+                if (newTab) {
+                    try {
+                        newTab.document.write("<!DOCTYPE html><html><head><title>Excel Automation - Loading...</title></head><body style=\"background:#0f172a; color:#e2e8f0; font-family:Arial,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;\"><div style=\"text-align:center;\"><div style=\"font-size:1rem; font-weight:700;\">Excel Automation Tool load ho raha hai...</div></div></body></html>");
                         newTab.document.close();
-                    } else {
-                        const blob = new Blob([parsed.html], { type: "text/html" });
-                        window.open(URL.createObjectURL(blob), "_blank", "noopener");
-                    }
-                    restoreBtn();
-                    return;
+                    } catch (_) {}
+                } else {
+                    showToast("Naya tab nahi khul paya - browser me popup allow kijiye", false);
                 }
-            } catch (_) {}
-            const baseUrl = window.location.href.split("#")[0].split("?")[0];
-            const toolUrl = baseUrl.replace(/[^/]*$/, "") + "excel-automation.html";
-            if (newTab && !newTab.closed) {
-                newTab.location.href = toolUrl;
-            } else {
-                window.open(toolUrl, "_blank", "noopener");
+                const baseUrl = window.location.href.split("#")[0].split("?")[0];
+                const toolUrl = baseUrl.replace(/[^/]*$/, "") + "excel-automation.html";
+                try {
+                    const fetchUrl = `${revenueCollectionSubmitScriptUrl}?action=getExternalToolHtml&tool_key=EXCEL_AUTOMATION&t=${Date.now()}`;
+                    const response = await fetchWithTimeout(fetchUrl, {}, 8000);
+                    const parsed = await response.json();
+                    if (parsed && parsed.status === "success" && parsed.html) {
+                        if (newTab && !newTab.closed) {
+                            newTab.document.open();
+                            newTab.document.write(parsed.html);
+                            newTab.document.close();
+                        } else {
+                            const blob = new Blob([parsed.html], { type: "text/html" });
+                            window.open(URL.createObjectURL(blob), "_blank", "noopener");
+                        }
+                        return;
+                    }
+                } catch (_) {}
+                if (newTab && !newTab.closed) {
+                    newTab.location.href = toolUrl;
+                } else {
+                    window.open(toolUrl, "_blank", "noopener");
+                }
+            } finally {
+                restoreBtn();
             }
-            restoreBtn();
         }
 
         function openCurrentRevenueBill() {
