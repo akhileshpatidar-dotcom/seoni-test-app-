@@ -100,6 +100,7 @@
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueMessageCenter()">💬 Send SMS / WhatsApp</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePaidUpload()" style="margin-top:10px; background:#fee2e2; color:#b91c1c; border:1.5px solid #fca5a5; border-top:2px solid #f87171; padding-top:10px;">🔒 Admin Upload Cash List</button>
                     <button id="staff-admin-header-menu-item" type="button" class="header-menu-item" onclick="openStaffAdmin()" style="display:none; background:#fff7ed; color:#c2410c; border:1.5px solid #fdba74;">STAFF ADMIN</button>
+                    <button id="excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openExcelToolAdminUpload()" style="display:none; background:#f0fdf4; color:#14532d; border:1.5px solid #86efac;">🔒 UPDATE EXCEL AUTOMATION TOOL</button>
                     <button type="button" class="header-menu-item vr-header-menu-item" onclick="openVrSavedMapsMenu()" style="display:none;">🗺️ Saved Feeder Maps</button>
                     <button id="vr-menu-toggle-ref-btn" type="button" class="header-menu-item vr-header-menu-item" onclick="openVrReferenceInfoMenu()" style="display:none;">Show Limits &amp; CC Reference Table</button>
                 </div>
@@ -156,7 +157,33 @@
                 <button class="dashboard-btn" style="background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%); color:#831843 !important;" onclick="switchView('bill-calculator')">Bijlee Bill Calculator</button>
           <button class="dashboard-btn btn-court-case" onclick="switchView('court-case')" style="display:none;">Lok Adalat Notice</button>
                 <button class="dashboard-btn btn-vr-calculation" onclick="switchView('vr-calculation')">VR Calculation</button>
+                <button class="dashboard-btn btn-excel-automation" onclick="switchView('excel-automation')">Excel Automation</button>
                 <button class="dashboard-btn btn-progress-black" onclick="askPassword('DC')">Daily Progress</button>
+            </div>
+        </main>
+
+        <main id="excel-automation-view" class="view">
+            <div class="search-panel" style="padding-top:18px;">
+                <div style="width:100%; max-width:360px; background:#f0fdf4; border:1.5px solid #86efac; border-radius:18px; padding:16px; text-align:center; margin-bottom:16px;">
+                    <div style="font-size:0.85rem; font-weight:950; color:#14532d;">EXCEL AUTOMATION</div>
+                    <div style="font-size:0.62rem; font-weight:800; color:#166534; margin-top:6px; line-height:1.6;">Yeh sirf computer/laptop par office work ke liye hai - do Excel files (Master Data + Compare File) ko match/reconcile kar ke ek naya Excel output banata hai. Naye tab me alag se khulta hai.</div>
+                </div>
+                <button class="dashboard-btn btn-excel-automation" style="max-width:360px;" onclick="openExcelAutomationTool()">Compare Two Excel File</button>
+            </div>
+        </main>
+
+        <main id="excel-tool-admin-view" class="view">
+            <div class="search-panel" style="padding-top:18px;">
+                <div style="width:100%; max-width:360px; background:#f0fdf4; border:1.5px solid #86efac; border-radius:18px; padding:16px; text-align:center; margin-bottom:16px;">
+                    <div style="font-size:0.85rem; font-weight:950; color:#14532d;">UPDATE EXCEL AUTOMATION TOOL</div>
+                    <div style="font-size:0.62rem; font-weight:800; color:#166534; margin-top:6px; line-height:1.6;">Yahan .html file upload karne par Excel Automation tool sabhi DC ke "Compare Two Excel File" button me turant update ho jaayega - GitHub par dobara upload karne ki zaroorat nahi.</div>
+                </div>
+                <label style="display:block; width:100%; max-width:360px; margin:0 auto; border:2px dashed #86efac; border-radius:16px; padding:18px; text-align:center; cursor:pointer; background:#f8fafc;">
+                    <span style="font-size:0.72rem; font-weight:900; color:#14532d;">Click karke naya .html file chunein</span>
+                    <input type="file" id="excel-tool-html-input" accept=".html" style="display:none;" onchange="handleExcelToolHtmlUpload(event)">
+                </label>
+                <div id="excel-tool-upload-filename" style="font-size:0.62rem; font-weight:800; color:#1d4ed8; text-align:center; margin-top:10px;"></div>
+                <div id="excel-tool-upload-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
             </div>
         </main>
 

@@ -863,7 +863,7 @@
         }
 
         function verifyPassword() {
-            const pws = { STOCK: "AE123" };
+            const pws = { STOCK: "AE123", EXCEL_TOOL_ADMIN: "AE123" };
             if (document.getElementById("pwd-input").value === pws[pendingLevel]) {
                 activeViewLevel = pendingLevel;
                 closePwdModal();
@@ -871,11 +871,106 @@
                     openStockDashboard();
                     return;
                 }
+                if (pendingLevel === "EXCEL_TOOL_ADMIN") {
+                    initExcelToolAdminUpload();
+                    switchView("excel-tool-admin");
+                    return;
+                }
                 switchView("summary");
                 refreshSummary();
             } else {
                 showToast("Invalid Password!", false);
             }
+        }
+
+        // Sub DN Chhapara ke 3-dot menu se password-protected "Update Excel Automation
+        // Tool" - yahan se ek naya .html file upload karke Excel Automation tool ko
+        // backend (Google Sheet, action=uploadExternalToolHtml) me save kar dete hain.
+        // Har DC ka "Compare Two Excel File" button ab is backend se hi latest content
+        // fetch karta hai (openExcelAutomationTool() dekhiye) - isliye ek jagah upload
+        // karte hi sabhi DC me turant reflect ho jaata hai, GitHub par dobara upload
+        // karne ki zaroorat nahi padti.
+        function openExcelToolAdminUpload() {
+            closeHeaderMenu();
+            askPassword("EXCEL_TOOL_ADMIN");
+        }
+
+        function initExcelToolAdminUpload() {
+            const fileInput = document.getElementById("excel-tool-html-input");
+            const filenameBox = document.getElementById("excel-tool-upload-filename");
+            const statusBox = document.getElementById("excel-tool-upload-status");
+            if (fileInput) fileInput.value = "";
+            if (filenameBox) filenameBox.innerText = "";
+            if (statusBox) statusBox.style.display = "none";
+        }
+
+        function handleExcelToolHtmlUpload(event) {
+            const file = event?.target?.files?.[0];
+            if (!file) return;
+            const filenameBox = document.getElementById("excel-tool-upload-filename");
+            const statusBox = document.getElementById("excel-tool-upload-status");
+            if (filenameBox) filenameBox.innerText = file.name;
+            if (!file.name.toLowerCase().endsWith(".html")) {
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#fff1f2";
+                    statusBox.style.color = "#991b1b";
+                    statusBox.innerText = "Sirf .html file hi upload kijiye";
+                }
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const htmlContent = String(e.target?.result || "");
+                if (!htmlContent.trim()) {
+                    if (statusBox) {
+                        statusBox.style.display = "block";
+                        statusBox.style.background = "#fff1f2";
+                        statusBox.style.color = "#991b1b";
+                        statusBox.innerText = "File khali hai ya padhi nahi ja saki";
+                    }
+                    return;
+                }
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#eff6ff";
+                    statusBox.style.color = "#1d4ed8";
+                    statusBox.innerText = "Upload ho raha hai...";
+                }
+                try {
+                    const p = new URLSearchParams();
+                    p.append("action", "uploadExternalToolHtml");
+                    p.append("tool_key", "EXCEL_AUTOMATION");
+                    p.append("html", htmlContent);
+                    p.append("file_name", file.name);
+                    const response = await fetch(revenueCollectionSubmitScriptUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+                        body: p.toString()
+                    });
+                    const responseText = await response.text();
+                    let parsed = {};
+                    try { parsed = JSON.parse(responseText || "{}"); } catch (_) {}
+                    if (response.ok && parsed.status !== "error") {
+                        if (statusBox) {
+                            statusBox.style.background = "#ecfdf5";
+                            statusBox.style.color = "#047857";
+                            statusBox.innerText = "Excel Automation tool update ho gaya - sabhi DC me turant reflect hoga";
+                        }
+                        showToast("Tool update ho gaya", true);
+                    } else {
+                        throw new Error(parsed.message || "Upload nahi ho paya");
+                    }
+                } catch (error) {
+                    if (statusBox) {
+                        statusBox.style.background = "#fff1f2";
+                        statusBox.style.color = "#991b1b";
+                        statusBox.innerText = error?.message || "Upload nahi ho paya, network check kijiye";
+                    }
+                    showToast("Upload nahi ho paya", false);
+                }
+            };
+            reader.readAsText(file);
         }
 
         async function performSearch() {
@@ -9501,6 +9596,32 @@
             }
         }
 
+        // Excel Automation (Compare Two Excel File) - yeh ek alag, standalone HTML tool
+        // hai (SheetJS-based, Master Data vs Compare File reconcile karta hai). Ab yeh
+        // static GitHub file ki jagah backend (Google Sheet, action=getExternalToolHtml)
+        // se latest content fetch karta hai - Sub DN Chhapara ke 3-dot menu se "Update
+        // Excel Automation Tool" se jab bhi naya .html upload hota hai, yahan sabhi DC
+        // par turant reflect ho jaata hai, GitHub par dobara upload karne ki zaroorat
+        // nahi. Agar backend se fetch fail ho jaaye (network issue ya abhi tak kabhi
+        // upload hi nahi hua), to purani static "excel-automation.html" (GitHub Pages
+        // par isi repo me) par fallback ho jaata hai - feature kabhi bhi poori tarah
+        // tootta nahi.
+        async function openExcelAutomationTool() {
+            try {
+                const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getExternalToolHtml&tool_key=EXCEL_AUTOMATION&t=${Date.now()}`);
+                const parsed = await response.json();
+                if (parsed && parsed.status === "success" && parsed.html) {
+                    const blob = new Blob([parsed.html], { type: "text/html" });
+                    const blobUrl = URL.createObjectURL(blob);
+                    window.open(blobUrl, "_blank", "noopener");
+                    return;
+                }
+            } catch (_) {}
+            const baseUrl = window.location.href.split("#")[0].split("?")[0];
+            const toolUrl = baseUrl.replace(/[^/]*$/, "") + "excel-automation.html";
+            window.open(toolUrl, "_blank", "noopener");
+        }
+
         function openCurrentRevenueBill() {
             const ivrsNo = normalizeRevenueIvrs(currentRevenueRecord?.ivrsNo || "");
             if (!ivrsNo) return showToast("IVRS No available nahi hai", false);
@@ -16010,6 +16131,8 @@
                 if (id === "vehicle-reading") headerTitle = "VEHICLE READING";
                 if (id === "stm-complaint") headerTitle = "STM COMPLAINT";
                 if (id === "vr-calculation") headerTitle = "VR CALCULATION";
+                if (id === "excel-automation") headerTitle = "EXCEL AUTOMATION";
+                if (id === "excel-tool-admin") headerTitle = "UPDATE EXCEL AUTOMATION TOOL";
                 if (id === "vr-download-log") headerTitle = "VR DOWNLOAD LOG";
                 if (id === "stock-material") headerTitle = "STOCK MATERIAL";
                 if (id === "shms-entry") headerTitle = "SHMS ENTRY";
@@ -16048,6 +16171,8 @@
                 document.querySelectorAll(".vr-header-menu-item").forEach((item) => item.style.display = vrMenuVisible ? "block" : "none");
                 const staffAdminMenuItem = document.getElementById("staff-admin-header-menu-item");
                 if (staffAdminMenuItem) staffAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
+                const excelToolAdminMenuItem = document.getElementById("excel-tool-admin-header-menu-item");
+                if (excelToolAdminMenuItem) excelToolAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 closeHeaderMenu();
                 const searchBtn = document.getElementById("search-btn");
                 if (id === "home") {

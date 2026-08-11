@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AE Office Automation Suite v2.0 - Utility Consumer Ledger Engine</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- JSZip CDN for high-speed XML extraction on 80MB+ files -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- SheetJS for Excel import/export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .golden-glow { text-shadow: 0 0 10px rgba(251, 191, 36, 0.4); }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
+
+    <!-- Header Navbar -->
+    <header class="bg-slate-950 border-b border-slate-800 sticky top-0 z-50 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+            <div class="flex items-center space-x-3">
+                <div class="bg-blue-600 p-2 rounded-lg text-white shadow-lg shadow-blue-500/30 shrink-0">
+                    <i class="fa-solid fa-bolt text-xl"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <h1 class="font-bold text-base sm:text-lg text-white leading-tight flex items-center gap-2">
+                            AE Office Automation Suite
+                            <span class="bg-blue-900/60 text-blue-400 text-xs px-2 py-0.5 rounded border border-blue-700/50">v2.0</span>
+                        </h1>
+                        <span class="text-amber-400 font-semibold text-xs bg-amber-950/70 border border-amber-500/40 px-2.5 py-0.5 rounded-full shadow-sm flex items-center gap-1.5 golden-glow">
+                            <i class="fa-solid fa-crown text-amber-400 text-[11px]"></i>
+                            Developed by Akhilesh Patidar (AE)
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-400 hidden sm:block">NGB Consumer Ledger Comparison & Multi-File Reconciliation System</p>
+                </div>
+            </div>
+
+            <div class="flex items-center space-x-2">
+                <button onclick="loadSampleData()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-vial text-amber-400"></i> <span class="hidden md:inline">Load Sample Data</span>
+                </button>
+                <button onclick="exportFinalReportOnly()" id="btn-export-main" disabled class="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-4 py-1.5 rounded-lg transition shadow-lg shadow-emerald-900/40 flex items-center gap-1.5">
+                    <i class="fa-solid fa-file-excel"></i> Export Final Output (.xlsx)
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        <!-- Workflow Step Indicator -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-blue-600/20 text-blue-400 font-bold flex items-center justify-center border border-blue-500/30">1</div>
+                <div>
+                    <div class="text-xs font-medium text-slate-300">Upload Master Data</div>
+                    <div class="text-[11px] text-slate-400">01_MASTER_DATA</div>
+                </div>
+            </div>
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-teal-600/20 text-teal-400 font-bold flex items-center justify-center border border-teal-500/30">2</div>
+                <div>
+                    <div class="text-xs font-medium text-slate-300">Upload Working Lists</div>
+                    <div class="text-[11px] text-slate-400">Multi-File Compare Input</div>
+                </div>
+            </div>
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-amber-600/20 text-amber-400 font-bold flex items-center justify-center border border-amber-500/30">3</div>
+                <div>
+                    <div class="text-xs font-medium text-slate-300">Select Fields & Filter</div>
+                    <div class="text-[11px] text-slate-400">03_REQUIRED_FIELDS</div>
+                </div>
+            </div>
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-emerald-600/20 text-emerald-400 font-bold flex items-center justify-center border border-emerald-500/30">4</div>
+                <div>
+                    <div class="text-xs font-medium text-slate-300">Export Excel & PDF</div>
+                    <div class="text-[11px] text-slate-400">Single, Multi-Tab & PDF</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 1: Upload Controls -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Master Upload -->
+            <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-database text-blue-400 text-lg"></i>
+                        <h2 class="font-semibold text-slate-100">01_MASTER_DATA Ledger</h2>
+                    </div>
+                    <span id="master-count-badge" class="text-xs bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-600">0 Records</span>
+                </div>
+                <p class="text-xs text-slate-400 mb-4">Permanent Master NGB Consumer Data Ledger (Supports 150,000+ rows / 80MB+ files).</p>
+
+                <label class="border-2 border-dashed border-slate-600 hover:border-blue-500 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition bg-slate-900/50 hover:bg-slate-900">
+                    <i class="fa-solid fa-cloud-arrow-up text-3xl text-slate-400 mb-2"></i>
+                    <span class="text-xs text-slate-300 font-medium">Click to upload Master Excel / CSV</span>
+                    <span class="text-[10px] text-slate-500 mt-1">.xlsx, .xls, .csv files</span>
+                    <input type="file" id="input-master" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleMasterUpload(event)">
+                </label>
+                <div id="master-filename" class="text-xs text-blue-400 mt-2 truncate font-mono"></div>
+                <div id="master-loading-status" class="hidden text-xs text-amber-400 font-semibold mt-1 flex items-center gap-2">
+                    <i class="fa-solid fa-spinner fa-spin"></i> <span id="master-loading-text">Reading Ledger...</span>
+                </div>
+            </div>
+
+            <!-- Compare Upload -->
+            <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center space-x-2">
+                        <i class="fa-solid fa-layer-group text-teal-400 text-lg"></i>
+                        <h2 class="font-semibold text-slate-100">02_COMPARE_INPUT Working Lists</h2>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <span id="compare-files-count" class="text-xs bg-teal-900/60 text-teal-300 px-2 py-0.5 rounded border border-teal-700/50 font-semibold">0 Files</span>
+                        <span id="compare-count-badge" class="text-xs bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-600">0 Records</span>
+                    </div>
+                </div>
+                <p class="text-xs text-slate-400 mb-3">Upload one or <strong>multiple compare files</strong>.</p>
+
+                <label class="border-2 border-dashed border-slate-600 hover:border-teal-500 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer transition bg-slate-900/50 hover:bg-slate-900 mb-3">
+                    <i class="fa-solid fa-folder-plus text-2xl text-teal-400 mb-1"></i>
+                    <span class="text-xs text-slate-200 font-medium">+ Add Compare File(s)</span>
+                    <input type="file" id="input-compare" accept=".xlsx, .xls, .csv" multiple class="hidden" onchange="handleCompareUpload(event)">
+                </label>
+
+                <div id="compare-files-list" class="space-y-1.5 max-h-24 overflow-y-auto custom-scrollbar pr-1">
+                    <div class="text-[11px] text-slate-500 italic text-center py-1">No comparison files added yet.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 2: Field Selector Matrix -->
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-3 border-b border-slate-700">
+                <div>
+                    <div class="flex items-center gap-3">
+                        <h2 class="font-semibold text-slate-100 flex items-center gap-2">
+                            <i class="fa-solid fa-sliders text-amber-400"></i>
+                            03_REQUIRED_FIELDS Control Matrix
+                        </h2>
+                        <span id="selected-fields-count" class="text-xs bg-blue-900/80 text-blue-300 font-mono px-2.5 py-0.5 rounded-full border border-blue-600/50 font-semibold">0 Fields Selected</span>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-0.5">Click column boxes in desired order. Numbers <span class="text-blue-400 font-bold">[ 1 ]</span>, <span class="text-blue-400 font-bold">[ 2 ]</span> set output column order.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <div class="relative">
+                        <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2 text-slate-500 text-xs"></i>
+                        <input type="text" id="field-search-input" oninput="filterFields(this.value)" placeholder="Search headers..." class="bg-slate-900 border border-slate-700 text-xs text-slate-200 pl-7 pr-3 py-1 rounded-lg focus:outline-none focus:border-blue-500 w-36 sm:w-44">
+                    </div>
+                    <button onclick="toggleAllFields(true)" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg transition">Select All</button>
+                    <button onclick="toggleAllFields(false)" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg transition">Deselect All</button>
+                    <button onclick="processData()" class="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg transition shadow-md flex items-center gap-1.5">
+                        <i class="fa-solid fa-gears"></i> Run Comparison Engine
+                    </button>
+                </div>
+            </div>
+
+            <div id="fields-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 max-h-56 overflow-y-auto custom-scrollbar p-1">
+                <div class="text-xs text-slate-500 col-span-full py-4 text-center">Upload Master Data above to populate available Master Ledger fields.</div>
+            </div>
+        </div>
+
+        <!-- Section 3: Output Preview -->
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl space-y-4">
+            <div class="flex items-center justify-between">
+                <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-table text-blue-400"></i> Final Output Records Preview
+                </h2>
+                <span id="filtered-rows-badge" class="text-xs text-slate-400 font-mono">Showing 0 rows</span>
+            </div>
+
+            <div class="overflow-x-auto max-h-96 custom-scrollbar border border-slate-700 rounded-xl bg-slate-900">
+                <table class="w-full text-left border-collapse text-xs">
+                    <thead id="tbl-final-head" class="bg-slate-950 text-slate-300 sticky top-0 border-b border-slate-700">
+                        <tr><th class="p-3 text-slate-500 italic">Run Comparison Engine to view data</th></tr>
+                    </thead>
+                    <tbody id="tbl-final-body" class="divide-y divide-slate-800 text-slate-300 font-mono"></tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Application JavaScript Engine -->
+    <script>
+        let state = {
+            masterHeaders: [],
+            master2DData: [], // Pure 2D Array to handle duplicate/blank header names safely
+            masterKeyMap: new Map(),
+            compareFiles: [],
+            selectedColumnIndicesSequence: [], // TRACKING BY EXACT COLUMN INDEX (0, 1, 2...) INSTEAD OF NAME!
+            fieldSearchQuery: '',
+            processedOutput: []
+        };
+
+        function normalizeConsumerNo(val) {
+            if (val === null || val === undefined) return '';
+            let str = String(val).trim().toUpperCase();
+            str = str.replace(/^(IVRS|N)[-\/]?/i, '');
+            let digitsOnly = str.replace(/\D/g, '');
+            return digitsOnly.length >= 8 ? digitsOnly : str;
+        }
+
+        function handleMasterUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            document.getElementById('master-filename').textContent = file.name;
+            const statusEl = document.getElementById('master-loading-status');
+            const statusText = document.getElementById('master-loading-text');
+
+            statusEl.classList.remove('hidden');
+            statusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Reading Master Ledger...`;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array', cellFormula: false, cellStyles: false });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+                    // Extract pure 2D Array (Header Row + Data Rows)
+                    const json2D = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+                    if (!json2D || json2D.length === 0) {
+                        statusText.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> No data rows found.`;
+                        return;
+                    }
+
+                    // Raw Headers and Data Rows
+                    state.masterHeaders = json2D[0].map((h, colIdx) => {
+                        let text = String(h || '').trim();
+                        return text !== '' ? text : `Column_${colIdx + 1}`;
+                    });
+                    state.master2DData = json2D.slice(1);
+
+                    // Index Master Data by Consumer Key Column
+                    state.masterKeyMap.clear();
+                    let keyColIdx = state.masterHeaders.findIndex(h => /consumer|ivrs|account|con_no/i.test(h));
+                    if (keyColIdx === -1) keyColIdx = 0;
+
+                    state.master2DData.forEach(row => {
+                        let rawKey = row[keyColIdx];
+                        let normKey = normalizeConsumerNo(rawKey);
+                        if (normKey) {
+                            state.masterKeyMap.set(normKey, row);
+                        }
+                    });
+
+                    document.getElementById('master-count-badge').textContent = `${state.master2DData.length.toLocaleString()} Records`;
+                    state.selectedColumnIndicesSequence = [];
+                    renderFieldToggles();
+
+                    statusEl.classList.add('hidden');
+                } catch(err) {
+                    console.error(err);
+                    statusText.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> Parsing Error: ${err.message}`;
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function handleCompareUpload(event) {
+            const files = Array.from(event.target.files);
+            if (!files || files.length === 0) return;
+
+            files.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const data = new Uint8Array(e.target.result);
+                    const wb = XLSX.read(data, { type: 'array' });
+                    const json2D = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+
+                    if (json2D.length > 0) {
+                        let headers = json2D[0].map((h, i) => String(h || '').trim() || `Col_${i+1}`);
+                        let records = json2D.slice(1);
+
+                        state.compareFiles.push({
+                            fileName: file.name,
+                            headers: headers,
+                            records: records
+                        });
+                        renderCompareFilesList();
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function renderCompareFilesList() {
+            const container = document.getElementById('compare-files-list');
+            document.getElementById('compare-files-count').textContent = `${state.compareFiles.length} Files`;
+
+            if (state.compareFiles.length === 0) {
+                container.innerHTML = `<div class="text-[11px] text-slate-500 italic text-center py-1">No comparison files added yet.</div>`;
+                return;
+            }
+
+            container.innerHTML = state.compareFiles.map(f => `
+                <div class="flex items-center justify-between bg-slate-900 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs">
+                    <span class="text-slate-200 font-medium truncate">${f.fileName} (${f.records.length.toLocaleString()} rows)</span>
+                </div>
+            `).join('');
+        }
+
+        function renderFieldToggles() {
+            const container = document.getElementById('fields-container');
+            if (state.masterHeaders.length === 0) {
+                container.innerHTML = `<div class="text-xs text-slate-500 col-span-full py-4 text-center">Upload Master Data above to populate fields.</div>`;
+                return;
+            }
+
+            const query = state.fieldSearchQuery;
+
+            container.innerHTML = state.masterHeaders.map((header, colIdx) => {
+                if (query && !header.toLowerCase().includes(query)) return '';
+
+                const seqIdx = state.selectedColumnIndicesSequence.indexOf(colIdx);
+                const isChecked = seqIdx > -1;
+                const seqBadge = isChecked ? (seqIdx + 1) : null;
+
+                return `
+                    <label class="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border ${isChecked ? 'border-blue-500 bg-blue-950/20' : 'border-slate-700/80 hover:border-blue-500/80'} cursor-pointer text-xs transition shadow-sm group">
+                        <div class="flex items-center space-x-2.5 truncate pr-1">
+                            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleField(${colIdx}, this.checked)" class="rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-0 w-4 h-4 cursor-pointer">
+                            <span class="text-slate-100 font-semibold truncate group-hover:text-blue-300" title="${header} (Col ${colIdx + 1})">${header}</span>
+                        </div>
+                        ${isChecked ? `<span class="bg-blue-600 text-white font-bold font-mono text-[10px] px-1.5 py-0.5 rounded shadow-sm shrink-0">[ ${seqBadge} ]</span>` : ''}
+                    </label>
+                `;
+            }).join('');
+
+            document.getElementById('selected-fields-count').textContent = `${state.selectedColumnIndicesSequence.length} Fields Selected`;
+        }
+
+        // TOGGLE BY EXACT COLUMN INDEX (0, 1, 2...)
+        function toggleField(colIdx, isChecked) {
+            const idx = state.selectedColumnIndicesSequence.indexOf(colIdx);
+            if (isChecked && idx === -1) {
+                state.selectedColumnIndicesSequence.push(colIdx);
+            } else if (!isChecked && idx > -1) {
+                state.selectedColumnIndicesSequence.splice(idx, 1);
+            }
+            renderFieldToggles();
+        }
+
+        function toggleAllFields(status) {
+            state.selectedColumnIndicesSequence = status ? state.masterHeaders.map((_, i) => i) : [];
+            renderFieldToggles();
+        }
+
+        function filterFields(query) {
+            state.fieldSearchQuery = query.toLowerCase().trim();
+            renderFieldToggles();
+        }
+
+        // Precise Index-Based Comparison Engine
+        function processData() {
+            if (state.master2DData.length === 0 || state.compareFiles.length === 0) {
+                alert('Please upload both Master Data and Compare File(s).');
+                return;
+            }
+
+            state.processedOutput = [];
+
+            state.compareFiles.forEach(fileObj => {
+                let cmpHeaders = fileObj.headers;
+                let keyColIdx = cmpHeaders.findIndex(h => /consumer|ivrs|account|con_no/i.test(h));
+                if (keyColIdx === -1) keyColIdx = 0;
+
+                fileObj.records.forEach(cmpRow => {
+                    let rawVal = cmpRow[keyColIdx];
+                    let normKey = normalizeConsumerNo(rawVal);
+
+                    let matchedMasterRow = state.masterKeyMap.get(normKey);
+
+                    let outRow = [
+                        rawVal,
+                        matchedMasterRow ? 'MATCHED' : 'NOT_FOUND',
+                        fileObj.fileName,
+                        ...cmpRow
+                    ];
+
+                    // Append Master Fields BY EXACT COLUMN INDEX IN USER SELECTED SEQUENCE
+                    state.selectedColumnIndicesSequence.forEach(colIdx => {
+                        let cellVal = matchedMasterRow ? (matchedMasterRow[colIdx] !== undefined ? matchedMasterRow[colIdx] : '') : 'NOT FOUND';
+                        outRow.push(cellVal);
+                    });
+
+                    state.processedOutput.push(outRow);
+                });
+            });
+
+            renderPreviewTable();
+            document.getElementById('btn-export-main').disabled = false;
+        }
+
+        function renderPreviewTable() {
+            const headEl = document.getElementById('tbl-final-head');
+            const bodyEl = document.getElementById('tbl-final-body');
+
+            if (state.processedOutput.length === 0) return;
+
+            let cmpBaseHeaders = state.compareFiles[0] ? state.compareFiles[0].headers : [];
+            let selectedMasterHeaders = state.selectedColumnIndicesSequence.map(i => state.masterHeaders[i]);
+
+            let finalHeaders = ['Consumer_No_Input', 'Match_Status', 'Source_File', ...cmpBaseHeaders, ...selectedMasterHeaders];
+
+            headEl.innerHTML = `<tr>${finalHeaders.map(h => `<th class="p-3 font-semibold text-slate-200 border-b border-slate-700 whitespace-nowrap">${h}</th>`).join('')}</tr>`;
+
+            let previewLimit = Math.min(100, state.processedOutput.length);
+            let bodyHtml = '';
+
+            for (let i = 0; i < previewLimit; i++) {
+                let row = state.processedOutput[i];
+                bodyHtml += `<tr class="hover:bg-slate-800/60 transition">
+                    ${row.map(val => {
+                        let isNF = val === 'NOT_FOUND' || val === 'NOT FOUND';
+                        return `<td class="p-2.5 border-b border-slate-800 whitespace-nowrap ${isNF ? 'text-rose-400 font-bold' : ''}">${val}</td>`;
+                    }).join('')}
+                </tr>`;
+            }
+
+            bodyEl.innerHTML = bodyHtml;
+            document.getElementById('filtered-rows-badge').textContent = `Showing ${previewLimit} of ${state.processedOutput.length.toLocaleString()} records`;
+        }
+
+        function exportFinalReportOnly() {
+            if (state.processedOutput.length === 0) return;
+
+            let cmpBaseHeaders = state.compareFiles[0] ? state.compareFiles[0].headers : [];
+            let selectedMasterHeaders = state.selectedColumnIndicesSequence.map(i => state.masterHeaders[i]);
+            let finalHeaders = ['Consumer_No_Input', 'Match_Status', 'Source_File', ...cmpBaseHeaders, ...selectedMasterHeaders];
+
+            const ws = XLSX.utils.aoa_to_sheet([finalHeaders, ...state.processedOutput]);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Reconciliation_Output");
+
+            const dateStr = new Date().toISOString().slice(0, 10);
+            XLSX.writeFile(wb, `NGB_Reconciliation_Output_${dateStr}.xlsx`);
+        }
+
+        function loadSampleData() {
+            state.masterHeaders = ['Consumer No', 'Reading Date', 'Reading Date', 'Tariff Category', 'Arrears']; // Example with duplicate 'Reading Date'
+            state.master2DData = [
+                ['1142001001', '01-08-2026', '10-08-2026', 'LV-2.1', '1450'],
+                ['1142001002', '02-08-2026', '11-08-2026', 'LV-3.1', '3200']
+            ];
+
+            state.masterKeyMap.clear();
+            state.master2DData.forEach(row => state.masterKeyMap.set(row[0], row));
+
+            document.getElementById('master-count-badge').textContent = '2 Records (Sample)';
+            state.selectedColumnIndicesSequence = [1, 2, 4]; // Selected both Reading Dates by Index!
+
+            state.compareFiles = [{
+                fileName: 'Defaulter_List_Sample.xlsx',
+                headers: ['Consumer_ID', 'Amount_Pending'],
+                records: [
+                    ['N1142001001', '1450'],
+                    ['IVRS-1142001002', '3200']
+                ]
+            }];
+
+            renderCompareFilesList();
+            renderFieldToggles();
+            processData();
+        }
+    </script>
+</body>
+</html>
