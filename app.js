@@ -164,6 +164,13 @@
         // DATE WISE/MONTH WISE toggle ya HQ/TYPE dropdown sirf local filter hain -
         // dobara sync (background wala bhi) ki koi zaroorat nahi.
         let revenueReportLoadedScopeKey = null;
+        // Daily Progress (DC) summary ke "Revenue" module me ek baar kisi DC ke
+        // liye master collection data force-fetch ho jaaye, uske baad usi DC ke
+        // liye DATE WISE/MONTH WISE toggle (setMode -> refreshSummary) dobara
+        // poori master CSV force-refresh nahi karega - sirf apna internal cache
+        // reuse karega. DC badalte hi dcKey badal jaata hai, isliye naya DC select
+        // karne par fresh force-refresh apne aap ho jaata hai.
+        let revenueSummaryMasterLoadedDcKey = null;
         let revenueLiveDownloadInProgress = false;
         let revenueReportDownloadInProgress = false;
         let revenuePaidUploadInProgress = false;
@@ -348,12 +355,28 @@
             return getAllDcConfigs().find((config) => normalizeDcName(config.name) === normalized) || null;
         }
 
+        // In-flight fetch ko dedupe karne ke liye (DC-select ke time jo background
+        // "ensureDcDataLoaded" already chal raha ho, usi ko Revenue->Update Mobile No
+        // jump jaisi jaldi wali flow me performSearch() bhi await kar le, dobara wahi
+        // poora bada CSV alag se fetch na kare - isi wajह se direct Mobile Update
+        // search fast hota tha (cache tab tak ban chuka hota tha) lekin Revenue se
+        // jump karne par turant dusra parallel fetch shuru ho jaata tha).
+        const dcDataLoadFetchPromises = {};
+
         async function ensureDcDataLoaded(dcName, forceRefresh = false) {
             const normalized = normalizeDcName(dcName);
             if (!normalized) return [];
             if (!forceRefresh && dcCacheRows[normalized]?.length) return dcCacheRows[normalized];
+            if (!forceRefresh && dcDataLoadFetchPromises[normalized]) return dcDataLoadFetchPromises[normalized];
             const config = getDcConfigByName(normalized);
             if (!config || !config.csvUrl) return [];
+            dcDataLoadFetchPromises[normalized] = ensureDcDataLoadedInner_(normalized, config, forceRefresh).finally(() => {
+                delete dcDataLoadFetchPromises[normalized];
+            });
+            return dcDataLoadFetchPromises[normalized];
+        }
+
+        async function ensureDcDataLoadedInner_(normalized, config, forceRefresh) {
             try {
                 const rawCsv = await loadRemoteText(config.csvUrl);
                 const parsedRows = isLikelyCsvPayload(rawCsv) ? parseConsumerCsv(rawCsv) : [];
@@ -437,29 +460,43 @@
         let mobileAlreadySubmittedMap = {};
         let mobileAlreadySubmittedMapLoadedAt = 0;
         const mobileAlreadySubmittedTtlMs = 60 * 1000;
+        // In-flight request ko dedupe karne ke liye - agar Revenue search ke time
+        // background prefetch abhi chal hi raha ho, aur usi 15-20 sec ke andar user
+        // "UPDATE MOBILE NO" dabaकर Mobile Update screen par pahunch jaye, to
+        // performSearch() ka call ek NAYI (duplicate) fetch shuru karne ke bajaye
+        // usi chal rahi request ko await karega - taaki jo time pehle se background
+        // me beet chuka hai wo dobara wait na karna pade.
+        let mobileAlreadySubmittedMapFetchPromise = null;
 
         async function loadMobileAlreadySubmittedMap(forceRefresh = false) {
             if (!forceRefresh && mobileAlreadySubmittedMapLoadedAt && (Date.now() - mobileAlreadySubmittedMapLoadedAt) < mobileAlreadySubmittedTtlMs) {
                 return mobileAlreadySubmittedMap;
             }
-            try {
-                const cloudData = await loadRemoteJson(`${scriptURL}?action=getSummary&t=${Date.now()}`);
-                const nextMap = {};
-                (Array.isArray(cloudData) ? cloudData : []).forEach((entry) => {
-                    const dc = normalizeLookupValue(entry.dc || "");
-                    const ivrs = normalizeLookupDigits(entry.ivrs || "");
-                    if (!dc || !ivrs) return;
-                    const key = `${dc}__${ivrs}`;
-                    const mobile = String(entry.correct_mobile || "").trim();
-                    const date = String(entry.date || entry.timestamp || "").trim();
-                    if (!nextMap[key] || date >= (nextMap[key].date || "")) {
-                        nextMap[key] = { mobile, date };
-                    }
-                });
-                mobileAlreadySubmittedMap = nextMap;
-                mobileAlreadySubmittedMapLoadedAt = Date.now();
-            } catch (_) {}
-            return mobileAlreadySubmittedMap;
+            if (!forceRefresh && mobileAlreadySubmittedMapFetchPromise) {
+                return mobileAlreadySubmittedMapFetchPromise;
+            }
+            mobileAlreadySubmittedMapFetchPromise = (async () => {
+                try {
+                    const cloudData = await loadRemoteJson(`${scriptURL}?action=getSummary&t=${Date.now()}`);
+                    const nextMap = {};
+                    (Array.isArray(cloudData) ? cloudData : []).forEach((entry) => {
+                        const dc = normalizeLookupValue(entry.dc || "");
+                        const ivrs = normalizeLookupDigits(entry.ivrs || "");
+                        if (!dc || !ivrs) return;
+                        const key = `${dc}__${ivrs}`;
+                        const mobile = String(entry.correct_mobile || "").trim();
+                        const date = String(entry.date || entry.timestamp || "").trim();
+                        if (!nextMap[key] || date >= (nextMap[key].date || "")) {
+                            nextMap[key] = { mobile, date };
+                        }
+                    });
+                    mobileAlreadySubmittedMap = nextMap;
+                    mobileAlreadySubmittedMapLoadedAt = Date.now();
+                } catch (_) {}
+                mobileAlreadySubmittedMapFetchPromise = null;
+                return mobileAlreadySubmittedMap;
+            })();
+            return mobileAlreadySubmittedMapFetchPromise;
         }
 
         function getMobileAlreadySubmittedEntry(dcName, ivrsNo) {
@@ -480,8 +517,14 @@
                     alreadyBox.innerHTML = `Is consumer ka mobile number pehle hi update ho chuka hai${mobileText}${dateText}. Dobara submit nahi ho sakta.`;
                     alreadyBox.style.display = "block";
                 }
-                if (entryBox) entryBox.style.display = "none";
-                if (submitBtn) submitBtn.style.display = "none";
+                // User ki request: ab already-submitted consumer ke liye bhi "Enter
+                // Correct Mobile" input aur Submit button hide nahi honge, sabhi
+                // consumers ke liye unhide hi rahenge. Agar phir bhi koi dobara Submit
+                // dabaye, to submitToSheet() ka pehle se maujood safety re-check
+                // (getMobileAlreadySubmittedEntry check) usi purane wale "pehle hi
+                // submit ho chuka hai" alert ke saath block kar dega - flow wahi hai.
+                if (entryBox) entryBox.style.display = "block";
+                if (submitBtn) submitBtn.style.display = "block";
             } else {
                 if (alreadyBox) alreadyBox.style.display = "none";
                 if (entryBox) entryBox.style.display = "block";
@@ -872,11 +915,25 @@
             document.getElementById("res-old").innerText = currentData.old || "N/A";
             document.getElementById("res-addr").innerText = currentData.addr;
             document.getElementById("result-box").style.display = "block";
-            // Is consumer (DC + IVRS) ka mobile number pehle hi submit ho chuka hai to
-            // dobara submit karne ka option hi na dikhe - "Enter Correct Mobile" input
-            // aur Submit button chhup jayenge, uski jagah ek clear message dikhega.
-            await loadMobileAlreadySubmittedMap();
-            applyMobileAlreadySubmittedUi(getMobileAlreadySubmittedEntry(activeDC, currentData.ivrs));
+            const entryBoxNow = document.getElementById("mobile-entry-box");
+            const submitBtnNow = document.getElementById("submit-btn");
+            const alreadyBoxNow = document.getElementById("mobile-already-submitted-box");
+            if (alreadyBoxNow) alreadyBoxNow.style.display = "none";
+            if (entryBoxNow) entryBoxNow.style.display = "block";
+            if (submitBtnNow) submitBtnNow.style.display = "block";
+            // User ki request: ab yahan already-submitted map ke fetch (~15 sec tak lag
+            // sakta tha, scriptURL?action=getSummary ka pura data) ka WAIT nahi karte -
+            // "Enter Correct Mobile" input aur Submit button turant (search khatam hote
+            // hi) dikha dete hain, taaki search fast lage. Already-submitted check background
+            // me chalta rehta hai; result aane par sirf informational banner update ho jaata
+            // hai (agar match mila to), submit button phir bhi visible hi rehta hai - agar
+            // koi already-submitted consumer ke liye dobara Submit dabaye, to submitToSheet()
+            // ka pehle se maujood safety check hi usko block karega.
+            const searchedIvrsForAsyncCheck = searchIvrs;
+            loadMobileAlreadySubmittedMap().then(() => {
+                if (!currentData || normalizeLookupDigits(currentData.ivrs) !== searchedIvrsForAsyncCheck) return;
+                applyMobileAlreadySubmittedUi(getMobileAlreadySubmittedEntry(activeDC, currentData.ivrs));
+            }).catch(() => {});
         }
 
         async function submitToSheet() {
@@ -1250,10 +1307,18 @@
         function formatProgressReportAmount(value) {
             const amount = Number(value || 0);
             // Point/paise nahi dikhane - amount Rs me poori tarah round off hoke dikhega.
-            // Extra safety: agar kabhi koi garbage/asambhav bada number (>1 crore) yahan tak
-            // pahunch jaaye to bhi 0 dikhayenge, warna JS bade number ko khud "9.88e+22"
-            // jaisi scientific notation me convert kar deta hai.
-            if (!Number.isFinite(amount) || Math.abs(amount) > 1e7) return "0";
+            // Extra safety: agar kabhi koi garbage/asambhav bada number yahan tak pahunch
+            // jaaye to bhi 0 dikhayenge, warna JS bade number ko khud "9.88e+22" jaisi
+            // scientific notation me convert kar deta hai.
+            // BUG FIX (2026-08-11): pehle yeh limit 1 crore (1e7) thi - iski wajah se
+            // Target vs Achievement jaisi reports me DIVISION/CIRCLE scope ke TOTAL/summary
+            // row (jo kai HQ/DC ke Net Bill Target ko jod kar bana hai, aasani se 1 crore se
+            // upar chala jaata hai) ghalti se "0" dikha deta tha - jabki neeche wali
+            // individual HQ/DC rows sahi dikhti thi (kyunki wo akele 1 crore se kam thi).
+            // Ab limit 1 lakh crore (1e12) kar di hai taaki genuine circle-level totals
+            // (jo kai crore tak jaa sakte hain) na katein, sirf sach me garbage/corrupt
+            // (asambhav bada) number hi 0 dikhega.
+            if (!Number.isFinite(amount) || Math.abs(amount) > 1e12) return "0";
             return String(Math.round(amount));
         }
 
@@ -2874,7 +2939,10 @@
                 try {
                     if (activeViewLevel === "DC") {
                         await ensureConsumerDataLoadedFor([activeDC]);
-                        await loadRevenueCollectionData(activeDC, true);
+                        const revenueSummaryDcKey = getRevenueCollectionDcKey(activeDC);
+                        const forceMasterRefresh = revenueSummaryMasterLoadedDcKey !== revenueSummaryDcKey;
+                        await loadRevenueCollectionData(activeDC, forceMasterRefresh);
+                        revenueSummaryMasterLoadedDcKey = revenueSummaryDcKey;
                     }
                     await Promise.all([
                         syncRevenueLiveEntriesFromSheet(),
@@ -9379,7 +9447,39 @@
             switchView("mobile-update");
             const searchInput = document.getElementById("search-ivrs");
             if (searchInput) searchInput.value = ivrsNo;
-            performSearch();
+            // User ki request (fast searching ke liye): yahan se ab sirf IVRS No
+            // Mobile Update ke search box me copy-paste ho jaata hai - details
+            // auto-open nahi hoti aur already-submitted check bhi yahan se trigger
+            // nahi hota. User khud SEARCH button dabayega, tabhi performSearch()
+            // chalega aur already-submitted/submit-button-hide wala normal flow
+            // apne aap chalega (jaisa Mobile Update screen par direct search karne
+            // par hota hai).
+        }
+
+        async function populateMobileUpdateSearchFromRevenue(record, ivrsNo) {
+            currentData = {
+                ivrs: ivrsNo,
+                name: record.consumerName || "",
+                father: record.fatherName || "",
+                old: normalizeMobileDisplayValue(record.mobileNo || ""),
+                addr: record.village || "",
+                hq: record.hqName || ""
+            };
+            const newMobileInput = document.getElementById("new-mobile");
+            if (newMobileInput) newMobileInput.value = "";
+            document.getElementById("res-ivrs").innerText = currentData.ivrs;
+            document.getElementById("res-name").innerText = currentData.name;
+            document.getElementById("res-old").innerText = currentData.old || "N/A";
+            document.getElementById("res-addr").innerText = currentData.addr;
+            document.getElementById("result-box").style.display = "block";
+            document.getElementById("submit-btn").style.display = "none";
+            const alreadyBoxReset = document.getElementById("mobile-already-submitted-box");
+            if (alreadyBoxReset) alreadyBoxReset.style.display = "none";
+            // Yeh normally ab tak Revenue search ke waqt hi background me warm ho
+            // chuka hota hai (searchRevenueIvrs() me loadMobileAlreadySubmittedMap()
+            // call), isliye yeh await 60-second cache se turant resolve ho jaata hai.
+            await loadMobileAlreadySubmittedMap();
+            applyMobileAlreadySubmittedUi(getMobileAlreadySubmittedEntry(activeDC, currentData.ivrs));
         }
 
         function copyRevenueText(value) {
@@ -10046,6 +10146,23 @@
                 currentRevenueRecord = found;
                 renderRevenueConsumer(found, ivrs);
                 syncRevenueUploadedPaidStatus(found, ivrs).catch(() => {});
+                // Revenue IVRS search ke sath hi "mobile already submitted" map bhi
+                // background me warm kar dete hain (fire-and-forget, silent fail) -
+                // taaki jab user "UPDATE MOBILE NO" button dabaye to Mobile Update
+                // screen par performSearch() ka loadMobileAlreadySubmittedMap() call
+                // is already-loaded 60-second cache se turant mil jaaye, aur submit
+                // button show/hide ka wahi purana correct logic bina kisi extra 5
+                // second wait ke turant apply ho jaaye.
+                loadMobileAlreadySubmittedMap().catch(() => {});
+                // Isi tarah Mobile Update wale consumer-master rows (ensureDcDataLoaded,
+                // jo alag cache hai revenueCollectionCsvUrls wale se) bhi yahin se
+                // background me warm karna shuru kar dete hain (fire-and-forget) -
+                // taaki jab user Mobile Update screen par paste hui IVRS ko khud
+                // Search dabaye, tab tak yeh fetch already chal/khatam ho chuka ho aur
+                // performSearch() ka apna ensureDcDataLoaded() call usi in-flight/
+                // cached promise se turant resolve ho jaaye - dobara naya fetch shuru
+                // na ho. Submitted aur non-submitted dono consumers ke liye fast rahega.
+                ensureDcDataLoaded(activeDC).catch(() => {});
                 showRevenueActionBox();
                 getRevenuePaidEntryFromSheet(found, ivrs).then((paidEntryFromSheet) => {
                     if (normalizeRevenueIvrs(currentRevenueRecord?.ivrsNo) !== normalizeRevenueIvrs(found.ivrsNo || ivrs)) return;
@@ -14994,7 +15111,11 @@
             const inlineSaveWrap = document.getElementById("vr-inline-save-wrap");
             const editBanner = document.getElementById("vr-map-edit-banner");
             const isEditingMap = !!vrEditingMapId;
-            if (inlineSaveWrap) inlineSaveWrap.style.display = (showManualFlow && nodes.length > 0 && !isEditingMap) ? "block" : "none";
+            // "Save Current as Map" sirf Existing status me hi dikhta hai - Saved
+            // Feeder Maps hamesha Existing SLD ke liye hi bante hain, New/Proposed
+            // me purana flow (three-dot menu / seedha calculate-download) use hoga.
+            const isExistingStatus = vrCalcState.lineStatus === "EXISTING";
+            if (inlineSaveWrap) inlineSaveWrap.style.display = (showManualFlow && isExistingStatus && nodes.length > 0 && !isEditingMap) ? "block" : "none";
             if (editBanner) editBanner.style.display = (showManualFlow && isEditingMap) ? "flex" : "none";
             if (!showManualFlow) {
                 vrRenderInsertProposedForm();
@@ -15400,9 +15521,28 @@
         }
 
         function vrSetLineStatus(value) {
+            const previousStatus = vrCalcState.lineStatus;
             vrCalcState.lineStatus = value;
             if (value !== "PROPOSED") {
                 vrCalcState.nodes = vrCalcState.nodes.map((n) => ({ ...n, isProposed: false }));
+            }
+            // User dropdown se Status (Existing/New/Proposed) badle to poora page
+            // reset ho jaata hai - purane status ke points naye status me carry
+            // nahi hote (Existing/New/Proposed alag-alag independent maps hote
+            // hain). Yeh sirf manual dropdown-change par lagu hota hai - Load/Edit
+            // Saved Map flow (vrLoadSavedMap/vrEditSavedMap) seedhe vrCalcState.lineStatus
+            // set karte hain (is function ko call nahi karte), isliye woh is reset
+            // se prabhavit nahi hote.
+            if (value !== previousStatus) {
+                vrCalcState.nodes = [];
+                vrCalcState.proposedInsertOnly = false;
+                vrEditingMapId = null;
+                const nameEl = document.getElementById("vr-draft-name");
+                const kvaEl = document.getElementById("vr-draft-kva");
+                const distEl = document.getElementById("vr-draft-dist");
+                if (nameEl) nameEl.value = "";
+                if (kvaEl) kvaEl.value = "";
+                if (distEl) distEl.value = "";
             }
             vrRenderNodeList();
             vrRenderCalc();
