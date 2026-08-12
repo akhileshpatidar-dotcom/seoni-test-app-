@@ -9643,7 +9643,13 @@
                 btn.innerText = originalBtnText;
             };
             try {
-                const newTab = window.open("", "_blank", "noopener");
+                // IMPORTANT: yahan "noopener" flag NAHI lagana - spec ke hisab se
+                // "noopener" ke saath window.open() hamesha NULL return karta hai (koi
+                // reference nahi milta), isliye humein baad me isi tab me content likhne
+                // ke liye reference chahiye. Isi wajah se ek blank tab + ek alag "asli"
+                // tab (2 tabs) khul rahe the - newTab hamesha null aata tha, code fallback
+                // path (naya alag tab) le leta tha.
+                const newTab = window.open("", "_blank");
                 if (newTab) {
                     try {
                         newTab.document.write("<!DOCTYPE html><html><head><title>Excel Automation - Loading...</title></head><body style=\"background:#0f172a; color:#e2e8f0; font-family:Arial,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;\"><div style=\"text-align:center;\"><div style=\"font-size:1rem; font-weight:700;\">Excel Automation Tool load ho raha hai...</div></div></body></html>");
