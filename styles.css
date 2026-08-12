@@ -203,8 +203,8 @@
         .btn-update-red { background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%) !important; }
         .btn-revenue-blue { background: linear-gradient(135deg, #38bdf8 0%, #0369a1 100%) !important; color: #ffffff !important; }
         .btn-progress-black { background: #000000 !important; padding: 12px 18px !important; font-size: 0.75rem !important; }
-        .btn-green-fix { background: linear-gradient(135deg, #22c55e 0%, #15803d 100%); }
-        .btn-excel-automation { background: linear-gradient(135deg, #14532d 0%, #052e16 100%) !important; color: #ffffff !important; }
+        .btn-green-fix { background: linear-gradient(135deg, #facc15 0%, #ca8a04 100%) !important; color: #78350f !important; }
+        .btn-excel-automation { background: linear-gradient(135deg, #f97316 0%, #c2410c 100%) !important; color: #ffffff !important; }
         .btn-court-case { background: linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%) !important; }
         .btn-stm-complaint { background: linear-gradient(135deg, #c08a57 0%, #9a6737 100%) !important; color: #ffffff !important; }
         .btn-daily-houry-peak-load { background: linear-gradient(135deg, #16a34a 0%, #15803d 100%) !important; color: #ffffff !important; }
