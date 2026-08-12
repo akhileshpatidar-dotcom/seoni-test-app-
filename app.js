@@ -16229,10 +16229,12 @@
                 const revenueMenuVisible = (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-target-achievement" || id === "revenue-top-defaulters" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload");
                 const mobileUpdateMenuVisible = (id === "mobile-update");
                 const vrMenuVisible = (id === "vr-calculation");
-                if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || mobileUpdateMenuVisible || vrMenuVisible || id === "subdn-chhapara") ? "block" : "none";
+                const dcDashboardMenuVisible = (id === "dc-dashboard");
+                if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || mobileUpdateMenuVisible || vrMenuVisible || dcDashboardMenuVisible || id === "subdn-chhapara") ? "block" : "none";
                 document.querySelectorAll(".revenue-header-menu-item").forEach((item) => item.style.display = revenueMenuVisible ? "block" : "none");
                 document.querySelectorAll(".mobile-update-header-menu-item").forEach((item) => item.style.display = mobileUpdateMenuVisible ? "block" : "none");
                 document.querySelectorAll(".vr-header-menu-item").forEach((item) => item.style.display = vrMenuVisible ? "block" : "none");
+                document.querySelectorAll(".dc-dashboard-header-menu-item").forEach((item) => item.style.display = dcDashboardMenuVisible ? "block" : "none");
                 const staffAdminMenuItem = document.getElementById("staff-admin-header-menu-item");
                 if (staffAdminMenuItem) staffAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 const excelToolAdminMenuItem = document.getElementById("excel-tool-admin-header-menu-item");
