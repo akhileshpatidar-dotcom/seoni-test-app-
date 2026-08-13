@@ -16427,9 +16427,9 @@
                 if (id === "stm-complaint") headerTitle = "STM COMPLAINT";
                 if (id === "vr-calculation") headerTitle = "VR CALCULATION";
                 if (id === "excel-automation") headerTitle = "EXCEL AUTOMATION";
-                if (id === "excel-tool-admin") headerTitle = "UPDATE EXCEL AUTOMATION TOOL";
+                if (id === "excel-tool-admin") headerTitle = "EXCEL AUTOMATION";
                 if (id === "panchnama-tool") headerTitle = "PANCHNAMA";
-                if (id === "panchnama-tool-admin") headerTitle = "UPDATE PANCHNAMA TOOL";
+                if (id === "panchnama-tool-admin") headerTitle = "PANCHNAMA TEMPLATE";
                 if (id === "vr-download-log") headerTitle = "VR DOWNLOAD LOG";
                 if (id === "stock-material") headerTitle = "STOCK MATERIAL";
                 if (id === "shms-entry") headerTitle = "SHMS ENTRY";
