@@ -102,9 +102,9 @@
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueCashReconcile()">🧾 Paid by Staff vs NGB Cash List</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueMessageCenter()">💬 Send SMS / WhatsApp</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenuePaidUpload()" style="margin-top:10px; background:#fee2e2; color:#b91c1c; border:1.5px solid #fca5a5; border-top:2px solid #f87171; padding-top:10px;">🔒 Admin Upload Cash List</button>
-                    <button id="staff-admin-header-menu-item" type="button" class="header-menu-item" onclick="openStaffAdmin()" style="display:none; background:#fff7ed; color:#c2410c; border:1.5px solid #fdba74;">🔒 STAFF ADMIN</button>
+                    <button id="staff-admin-header-menu-item" type="button" class="header-menu-item" onclick="openStaffAdmin()" style="display:none; background:#fff7ed; color:#c2410c; border:1.5px solid #fdba74;">🔒 ADMIN STAFF</button>
                     <button id="excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openExcelToolAdminUpload()" style="display:none; background:#f0fdf4; color:#14532d; border:1.5px solid #86efac;">🔒 ADMIN EXCEL AUTOMATION</button>
-                    <button id="panchnama-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openPanchnamaToolAdminUpload()" style="display:none; background:#f5f3ff; color:#4c1d95; border:1.5px solid #c4b5fd;">🔒 ADMIN PANCHNAMA TEMPLATE</button>
+                    <button id="panchnama-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openPanchnamaToolAdminUpload()" style="display:none; background:#fff7ed; color:#9a3412; border:1.5px solid #fdba74;">🔒 ADMIN PANCHNAMA TEMPLATE</button>
                     <button type="button" class="header-menu-item vr-header-menu-item" onclick="openVrSavedMapsMenu()" style="display:none;">🗺️ Saved Feeder Maps</button>
                     <button id="vr-menu-toggle-ref-btn" type="button" class="header-menu-item vr-header-menu-item" onclick="openVrReferenceInfoMenu()" style="display:none;">Show Limits &amp; CC Reference Table</button>
                 </div>
@@ -160,7 +160,7 @@
                 <div id="revenue-upload-freshness-ticker" class="ticker-wrap" style="display:none; margin-top:6px;"><span class="ticker-text" style="color:#ffffff;"></span></div>
                 <button class="dashboard-btn" style="background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%); color:#831843 !important;" onclick="switchView('bill-calculator')">Bijlee Bill Calculator</button>
           <button class="dashboard-btn btn-court-case" onclick="switchView('court-case')" style="display:none;">Lok Adalat Notice</button>
-                <button class="dashboard-btn btn-progress-black" onclick="askPassword('DC')">Daily Progress</button>
+                <button class="dashboard-btn btn-progress-black" onclick="askPassword('DC')">DC Daily Progress</button>
             </div>
         </main>
 
@@ -191,9 +191,9 @@
 
         <main id="panchnama-tool-view" class="view">
             <div class="search-panel" style="padding-top:18px;">
-                <div style="width:100%; max-width:360px; background:#f5f3ff; border:1.5px solid #c4b5fd; border-radius:18px; padding:16px; text-align:center; margin-bottom:16px;">
-                    <div style="font-size:0.85rem; font-weight:950; color:#4c1d95;">PANCHNAMA TEMPLATE</div>
-                    <div style="font-size:0.62rem; font-weight:800; color:#5b21b6; margin-top:6px; line-height:1.6;">Ready-to-copy paragraphs for irregularities found (Section 135 / 126 / 138 / Other). Opens in a separate new tab.</div>
+                <div style="width:100%; max-width:360px; background:#fff7ed; border:1.5px solid #fdba74; border-radius:18px; padding:16px; text-align:center; margin-bottom:16px;">
+                    <div style="font-size:0.85rem; font-weight:950; color:#9a3412;">PANCHNAMA TEMPLATE</div>
+                    <div style="font-size:0.62rem; font-weight:800; color:#c2410c; margin-top:6px; line-height:1.6;">Ready-to-copy paragraphs for irregularities found (Section 135 / 126 / 138 / Other). Opens in a separate new tab.</div>
                 </div>
                 <button id="panchnama-tool-open-btn" class="dashboard-btn btn-panchnama-tool" style="max-width:360px;" onclick="openPanchnamaTool()">Open Panchnama Tool</button>
             </div>
@@ -201,12 +201,12 @@
 
         <main id="panchnama-tool-admin-view" class="view">
             <div class="search-panel" style="padding-top:18px;">
-                <div style="width:100%; max-width:360px; background:#f5f3ff; border:1.5px solid #c4b5fd; border-radius:18px; padding:16px; text-align:center; margin-bottom:16px;">
-                    <div style="font-size:0.85rem; font-weight:950; color:#4c1d95;">PANCHNAMA TEMPLATE</div>
-                    <div style="font-size:0.62rem; font-weight:800; color:#5b21b6; margin-top:6px; line-height:1.6;">Uploading a new .html file here will instantly update the Panchnama Template tool on the "Open Panchnama Tool" button for all DCs - no need to re-upload to GitHub.</div>
+                <div style="width:100%; max-width:360px; background:#fff7ed; border:1.5px solid #fdba74; border-radius:18px; padding:16px; text-align:center; margin-bottom:16px;">
+                    <div style="font-size:0.85rem; font-weight:950; color:#9a3412;">PANCHNAMA TEMPLATE</div>
+                    <div style="font-size:0.62rem; font-weight:800; color:#c2410c; margin-top:6px; line-height:1.6;">Uploading a new .html file here will instantly update the Panchnama Template tool on the "Open Panchnama Tool" button for all DCs - no need to re-upload to GitHub.</div>
                 </div>
-                <label style="display:block; width:100%; max-width:360px; margin:0 auto; border:2px dashed #c4b5fd; border-radius:16px; padding:18px; text-align:center; cursor:pointer; background:#f8fafc;">
-                    <span style="font-size:0.72rem; font-weight:900; color:#4c1d95;">Click to select a new .html file</span>
+                <label style="display:block; width:100%; max-width:360px; margin:0 auto; border:2px dashed #fdba74; border-radius:16px; padding:18px; text-align:center; cursor:pointer; background:#f8fafc;">
+                    <span style="font-size:0.72rem; font-weight:900; color:#9a3412;">Click to select a new .html file</span>
                     <input type="file" id="panchnama-tool-html-input" accept=".html" style="display:none;" onchange="handlePanchnamaToolHtmlUpload(event)">
                 </label>
                 <div id="panchnama-tool-upload-filename" style="font-size:0.62rem; font-weight:800; color:#1d4ed8; text-align:center; margin-top:10px;"></div>

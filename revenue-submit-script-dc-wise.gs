@@ -1157,7 +1157,14 @@ function getUploadedPaidCategoryList_(params) {
         amount_paid: row[2],
         payment_date: formatDateValue_(row[3]),
         source_type: row[5],
-        tariff_category: first ? clean_(first.tariff_category || first.tariffCategory) : ""
+        tariff_category: first ? clean_(first.tariff_category || first.tariffCategory) : "",
+        // User request (2026-08-13): Category Wise / Target vs Achievement /
+        // HQ-Village / Non-Payee reports me ab paid-status "cash list file kis
+        // mahine upload hui" (yeh UPLOADED DATE column) ke hisaab se decide
+        // hota hai, row ki apni payment date se nahi - isliye yeh field bhi
+        // yahan bhejna zaroori hai (pehle sirf getUploadedPaidEntries_ ke
+        // mapPaidMasterRow_ me tha, is lightweight action me nahi tha).
+        uploaded_date: formatDateValue_(row[8])
       });
     });
   });
@@ -1566,16 +1573,21 @@ function saveTdPhotoIfProvided_(data) {
 // =====================================================================
 // EXTERNAL TOOL HTML (e.g. "Excel Automation - Compare Two Excel File").
 // Sub DN Chhapara ke 3-dot menu se password-protected upload karke naya
-// .html file yahan ek dedicated sheet cell me save hota hai - app ka
-// openExcelAutomationTool() (app.js) is same backend se latest content
-// fetch karta hai, isliye ek jagah upload karte hi sabhi DC me turant
-// reflect ho jaata hai, GitHub Pages par dobara upload karne ki zaroorat
-// nahi. Ek Sheet cell me max ~50,000 character store ho sakte hain -
-// isliye 45,000 se bada file reject kar dete hain (safety limit).
+// .html file backend par save hoti hai - app ka openExcelAutomationTool()
+// (app.js) is same backend se latest content fetch karta hai, isliye ek
+// jagah upload karte hi sabhi DC me turant reflect ho jaata hai, GitHub
+// Pages par dobara upload karne ki zaroorat nahi.
+// NOTE (fixed): pehle yeh ek Sheet cell me content store karta tha, lekin
+// Google Sheets ke ek cell me max 50,000 character hi aa sakte hain - ek
+// real tool file (~51,000+ character) usse bhi bada nikla, isliye yeh
+// approach hamesha ke liye fail ho jaata. Ab HTML content Google Drive
+// file me store hota hai (koi practical size limit nahi), aur is sheet
+// me sirf chhota sa metadata (tool key, file name, updated time, Drive
+// file ID) rakha jaata hai.
 // =====================================================================
 const EXTERNAL_TOOL_SHEET_NAME = "EXTERNAL TOOL HTML";
-const EXTERNAL_TOOL_HEADERS = ["TOOL KEY", "FILE NAME", "UPDATED AT", "HTML CONTENT"];
-const EXTERNAL_TOOL_MAX_CHARS = 45000;
+const EXTERNAL_TOOL_HEADERS = ["TOOL KEY", "FILE NAME", "UPDATED AT", "DRIVE FILE ID"];
+const EXTERNAL_TOOL_MAX_CHARS = 5000000; // ~5 MB sanity limit, sirf garbage upload rokne ke liye
 
 function uploadExternalToolHtml_(data) {
   const toolKey = clean_(data.tool_key) || "EXCEL_AUTOMATION";
@@ -1585,22 +1597,35 @@ function uploadExternalToolHtml_(data) {
   const htmlContent = String(data.html || "");
   if (!htmlContent.trim()) throw new Error("HTML content khali hai");
   if (htmlContent.length > EXTERNAL_TOOL_MAX_CHARS) {
-    throw new Error("File bahut badi hai (limit ~" + EXTERNAL_TOOL_MAX_CHARS + " characters), chhoti file try kijiye");
+    throw new Error("File bahut badi hai (limit ~5 MB), chhoti file try kijiye");
   }
   const ss = getSpreadsheet_();
   const sheet = getOrCreateSheet_(ss, EXTERNAL_TOOL_SHEET_NAME, EXTERNAL_TOOL_HEADERS);
   const lastRow = sheet.getLastRow();
   let targetRow = 0;
+  let oldDriveFileId = "";
   if (lastRow > 1) {
-    const keys = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues();
-    for (let i = 0; i < keys.length; i++) {
-      if (clean_(keys[i][0]) === toolKey) { targetRow = i + 2; break; }
+    const existingRows = sheet.getRange(2, 1, lastRow - 1, 4).getDisplayValues();
+    for (let i = 0; i < existingRows.length; i++) {
+      if (clean_(existingRows[i][0]) === toolKey) {
+        targetRow = i + 2;
+        oldDriveFileId = clean_(existingRows[i][3]);
+        break;
+      }
     }
   }
   if (!targetRow) targetRow = Math.max(lastRow + 1, 2);
+
+  // Naya Drive file banate hain, phir purana (agar ho) trash kar dete hain -
+  // isse beech me kabhi bhi "file missing" wala gap nahi aata.
+  const newFile = DriveApp.createFile(fileName, htmlContent, MimeType.HTML);
+  if (oldDriveFileId) {
+    try { DriveApp.getFileById(oldDriveFileId).setTrashed(true); } catch (_) {}
+  }
+
   const now = new Date();
   const updatedAt = Utilities.formatDate(now, Session.getScriptTimeZone() || "Asia/Kolkata", "dd/MM/yyyy HH:mm:ss");
-  sheet.getRange(targetRow, 1, 1, 4).setValues([[toolKey, fileName, updatedAt, htmlContent]]);
+  sheet.getRange(targetRow, 1, 1, 4).setValues([[toolKey, fileName, updatedAt, newFile.getId()]]);
   return jsonResponse_({ status: "success", message: "Tool HTML update ho gaya", updated_at: updatedAt });
 }
 
@@ -1611,10 +1636,18 @@ function getExternalToolHtml_(params) {
   if (!sheet) return jsonResponse_({ status: "error", message: "Tool abhi upload nahi hua hai" });
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return jsonResponse_({ status: "error", message: "Tool abhi upload nahi hua hai" });
-  const rows = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+  const rows = sheet.getRange(2, 1, lastRow - 1, 4).getDisplayValues();
   for (let i = 0; i < rows.length; i++) {
     if (clean_(rows[i][0]) === toolKey) {
-      return jsonResponse_({ status: "success", html: String(rows[i][3] || ""), file_name: rows[i][1], updated_at: rows[i][2] });
+      const driveFileId = clean_(rows[i][3]);
+      if (!driveFileId) return jsonResponse_({ status: "error", message: "Tool file nahi mili" });
+      try {
+        const file = DriveApp.getFileById(driveFileId);
+        const htmlContent = file.getBlob().getDataAsString("UTF-8");
+        return jsonResponse_({ status: "success", html: htmlContent, file_name: rows[i][1], updated_at: rows[i][2] });
+      } catch (error) {
+        return jsonResponse_({ status: "error", message: "Tool file read nahi ho payi: " + (error && error.message ? error.message : "") });
+      }
     }
   }
   return jsonResponse_({ status: "error", message: "Tool abhi upload nahi hua hai" });
