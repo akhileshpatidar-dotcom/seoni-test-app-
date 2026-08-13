@@ -9,202 +9,396 @@
     <!-- JSZip CDN for high-speed XML extraction on 80MB+ files -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <!-- SheetJS for Excel import/export -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- xlsx-js-style: SheetJS fork that also WRITES cell styles (fill/font/border) back to .xlsx -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; }
+        body { font-family: 'Inter', sans-serif; background-color: #0b1120; color: #94a3b8; }
+        .card-bg { background-color: #111827; border: 1px solid #1f2937; }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #111827; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #374151; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
         .golden-glow { text-shadow: 0 0 10px rgba(251, 191, 36, 0.4); }
+        @keyframes runPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6); } 50% { box-shadow: 0 0 0 10px rgba(37, 99, 235, 0); } }
+        .run-blink { animation: runPulse 1.4s ease-out infinite; }
+        @media print {
+            body * { visibility: hidden; }
+            #printable-pdf-summary, #printable-pdf-summary * { visibility: visible; }
+            #printable-pdf-summary { position: absolute; left: 0; top: 0; width: 100%; background: white !important; color: black !important; padding: 20px; }
+            .no-print { display: none !important; }
+        }
     </style>
 </head>
-<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
+<body class="p-4 md:p-6 custom-scrollbar min-h-screen flex flex-col">
 
     <!-- Header Navbar -->
-    <header class="bg-slate-950 border-b border-slate-800 sticky top-0 z-50 shadow-md">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
-            <div class="flex items-center space-x-3">
-                <div class="bg-blue-600 p-2 rounded-lg text-white shadow-lg shadow-blue-500/30 shrink-0">
-                    <i class="fa-solid fa-bolt text-xl"></i>
-                </div>
-                <div>
-                    <div class="flex items-center gap-2 flex-wrap">
-                        <h1 class="font-bold text-base sm:text-lg text-white leading-tight flex items-center gap-2">
-                            AE Office Automation Suite
-                            <span class="bg-blue-900/60 text-blue-400 text-xs px-2 py-0.5 rounded border border-blue-700/50">v2.0</span>
-                        </h1>
-                        <span class="text-amber-400 font-semibold text-xs bg-amber-950/70 border border-amber-500/40 px-2.5 py-0.5 rounded-full shadow-sm flex items-center gap-1.5 golden-glow">
-                            <i class="fa-solid fa-crown text-amber-400 text-[11px]"></i>
-                            Developed by Akhilesh Patidar (AE)
-                        </span>
-                    </div>
-                    <p class="text-xs text-slate-400 hidden sm:block">NGB Consumer Ledger Comparison & Multi-File Reconciliation System</p>
-                </div>
+    <header class="card-bg rounded-xl p-4 mb-6 shadow-2xl flex flex-wrap justify-between items-center gap-4 border-l-4 border-l-blue-500 no-print">
+        <div class="flex items-center gap-3">
+            <div class="bg-blue-600 text-white p-3 rounded-xl shadow-lg shadow-blue-500/30 shrink-0">
+                <i class="fa-solid fa-bolt text-2xl"></i>
             </div>
-
-            <div class="flex items-center space-x-2">
-                <button onclick="loadSampleData()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
-                    <i class="fa-solid fa-vial text-amber-400"></i> <span class="hidden md:inline">Load Sample Data</span>
-                </button>
-                <button onclick="exportFinalReportOnly()" id="btn-export-main" disabled class="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-4 py-1.5 rounded-lg transition shadow-lg shadow-emerald-900/40 flex items-center gap-1.5">
-                    <i class="fa-solid fa-file-excel"></i> Export Final Output (.xlsx)
-                </button>
+            <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <h1 class="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
+                        AE Office Automation Suite <span class="text-xs bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full font-mono">v2.0</span>
+                    </h1>
+                    <span class="text-amber-400 font-semibold text-xs bg-amber-950/70 border border-amber-500/40 px-2.5 py-0.5 rounded-full shadow-sm flex items-center gap-1.5 golden-glow">
+                        <i class="fa-solid fa-crown text-amber-400 text-[11px]"></i> Developed by Akhilesh Patidar (AE)
+                    </span>
+                </div>
+                <p class="text-xs text-slate-400 mt-0.5">NGB Consumer Ledger Comparison & Multi-File Reconciliation System</p>
             </div>
+        </div>
+        
+        <div class="flex items-center gap-2 flex-wrap">
+            <button onclick="toggleAudio()" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs px-3 py-2 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+                <i id="audio-icon" class="fa-solid fa-volume-high"></i> Audio Alert
+            </button>
+            <button onclick="loadSampleData()" class="bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs px-3 py-2 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-flask"></i> Load Sample Data
+            </button>
+            <button onclick="exportFinalReportOnly()" id="btn-export-main" disabled class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs px-4 py-2 rounded-lg font-bold shadow-lg shadow-emerald-600/20 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-file-excel"></i> Download Matched Report
+            </button>
+            <button onclick="exportNotFoundOnly()" id="btn-exp-notfound-top" disabled class="bg-rose-700 hover:bg-rose-600 disabled:opacity-50 text-white text-xs px-3 py-2 rounded-lg font-bold shadow transition flex items-center gap-1.5">
+                <i class="fa-solid fa-file-circle-xmark"></i> Not Found
+            </button>
+            <button onclick="exportDuplicatesOnly()" id="btn-exp-dup-top" disabled class="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs px-3 py-2 rounded-lg font-bold shadow transition flex items-center gap-1.5">
+                <i class="fa-solid fa-copy"></i> Duplicates
+            </button>
+            <button onclick="exportFullWorkbook()" id="btn-exp-full-top" disabled class="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-xs px-3 py-2 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-layer-group"></i> Full Backup
+            </button>
         </div>
     </header>
 
     <!-- Main Container -->
-    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <main class="flex-1 max-w-7xl w-full mx-auto space-y-6 no-print">
 
         <!-- Workflow Step Indicator -->
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-blue-600/20 text-blue-400 font-bold flex items-center justify-center border border-blue-500/30">1</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="card-bg p-3.5 rounded-xl flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-slate-800 text-blue-400 font-bold flex items-center justify-center border border-slate-700 font-mono text-sm">1</div>
                 <div>
-                    <div class="text-xs font-medium text-slate-300">Upload Master Data</div>
-                    <div class="text-[11px] text-slate-400">01_MASTER_DATA</div>
+                    <p class="text-xs font-bold text-slate-200">Upload Master Data</p>
+                    <p class="text-[10px] text-slate-500 font-mono">01_MASTER_DATA</p>
                 </div>
             </div>
-            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-teal-600/20 text-teal-400 font-bold flex items-center justify-center border border-teal-500/30">2</div>
+            <div class="card-bg p-3.5 rounded-xl flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-slate-800 text-teal-400 font-bold flex items-center justify-center border border-slate-700 font-mono text-sm">2</div>
                 <div>
-                    <div class="text-xs font-medium text-slate-300">Upload Working Lists</div>
-                    <div class="text-[11px] text-slate-400">Multi-File Compare Input</div>
+                    <p class="text-xs font-bold text-slate-200">Upload Working Lists</p>
+                    <p class="text-[10px] text-slate-500 font-mono">Multi-File Compare Input</p>
                 </div>
             </div>
-            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-amber-600/20 text-amber-400 font-bold flex items-center justify-center border border-amber-500/30">3</div>
+            <div class="card-bg p-3.5 rounded-xl flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-slate-800 text-amber-400 font-bold flex items-center justify-center border border-slate-700 font-mono text-sm">3</div>
                 <div>
-                    <div class="text-xs font-medium text-slate-300">Select Fields & Filter</div>
-                    <div class="text-[11px] text-slate-400">03_REQUIRED_FIELDS</div>
+                    <p class="text-xs font-bold text-slate-200">Select Fields & Filter</p>
+                    <p class="text-[10px] text-slate-500 font-mono">03_REQUIRED_FIELDS</p>
                 </div>
             </div>
-            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 flex items-center gap-3">
-                <div class="w-8 h-8 rounded-full bg-emerald-600/20 text-emerald-400 font-bold flex items-center justify-center border border-emerald-500/30">4</div>
+            <div class="card-bg p-3.5 rounded-xl flex items-center gap-3">
+                <div class="w-8 h-8 rounded-lg bg-slate-800 text-emerald-400 font-bold flex items-center justify-center border border-slate-700 font-mono text-sm">4</div>
                 <div>
-                    <div class="text-xs font-medium text-slate-300">Export Excel & PDF</div>
-                    <div class="text-[11px] text-slate-400">Single, Multi-Tab & PDF</div>
+                    <p class="text-xs font-bold text-slate-200">Export Excel & PDF</p>
+                    <p class="text-[10px] text-slate-500 font-mono">Single, Multi-Tab & PDF</p>
                 </div>
             </div>
         </div>
 
-        <!-- Section 1: Upload Controls -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- Master Upload -->
-            <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl">
-                <div class="flex items-center justify-between mb-3">
-                    <div class="flex items-center space-x-2">
-                        <i class="fa-solid fa-database text-blue-400 text-lg"></i>
-                        <h2 class="font-semibold text-slate-100">01_MASTER_DATA Ledger</h2>
+        <!-- Section 1a: Master Upload -->
+        <div class="grid grid-cols-1 gap-6">
+            <!-- Master Data Upload Box -->
+            <div class="card-bg rounded-xl p-5 shadow-lg flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-2">
+                        <h2 class="text-sm font-bold text-blue-400 flex items-center gap-2">
+                            <i class="fa-solid fa-database"></i> 01_MASTER_DATA Ledger
+                        </h2>
+                        <span id="master-count-badge" class="text-xs bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700 font-mono">0 Records</span>
                     </div>
-                    <span id="master-count-badge" class="text-xs bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-600">0 Records</span>
-                </div>
-                <p class="text-xs text-slate-400 mb-4">Permanent Master NGB Consumer Data Ledger (Supports 150,000+ rows / 80MB+ files).</p>
-
-                <label class="border-2 border-dashed border-slate-600 hover:border-blue-500 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition bg-slate-900/50 hover:bg-slate-900">
-                    <i class="fa-solid fa-cloud-arrow-up text-3xl text-slate-400 mb-2"></i>
-                    <span class="text-xs text-slate-300 font-medium">Click to upload Master Excel / CSV</span>
-                    <span class="text-[10px] text-slate-500 mt-1">.xlsx, .xls, .csv files</span>
-                    <input type="file" id="input-master" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleMasterUpload(event)">
-                </label>
-                <div id="master-filename" class="text-xs text-blue-400 mt-2 truncate font-mono"></div>
-                <div id="master-loading-status" class="hidden text-xs text-amber-400 font-semibold mt-1 flex items-center gap-2">
-                    <i class="fa-solid fa-spinner fa-spin"></i> <span id="master-loading-text">Reading Ledger...</span>
+                    <p class="text-[11px] text-slate-400 mb-4">Permanent Master NGB Consumer Data Ledger (Supports 150,000+ rows / 80MB+ files). Key: <code>Consumer No</code>.</p>
+                    
+                    <label class="border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-900/50 hover:bg-slate-900 rounded-xl p-6 text-center cursor-pointer transition flex flex-col items-center justify-center min-h-[120px]">
+                        <i class="fa-solid fa-cloud-arrow-up text-2xl text-blue-400 mb-2"></i>
+                        <span class="text-xs font-medium text-slate-300">Click to upload Master Excel / CSV</span>
+                        <span class="text-[10px] text-slate-500 mt-1">.xlsx, .xls, .csv files</span>
+                        <input type="file" id="input-master" accept=".xlsx, .xls, .csv" class="hidden" onchange="handleMasterUpload(event)">
+                    </label>
+                    <div id="master-filename" class="text-xs text-blue-400 mt-2 truncate font-mono"></div>
+                    <div id="master-loading-status" class="hidden text-xs text-amber-400 font-semibold mt-1 flex items-center gap-2">
+                        <i class="fa-solid fa-spinner fa-spin"></i> <span id="master-loading-text">Reading Ledger...</span>
+                    </div>
                 </div>
             </div>
 
-            <!-- Compare Upload -->
-            <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl">
-                <div class="flex items-center justify-between mb-3">
-                    <div class="flex items-center space-x-2">
-                        <i class="fa-solid fa-layer-group text-teal-400 text-lg"></i>
-                        <h2 class="font-semibold text-slate-100">02_COMPARE_INPUT Working Lists</h2>
-                    </div>
-                    <div class="flex items-center gap-1.5">
-                        <span id="compare-files-count" class="text-xs bg-teal-900/60 text-teal-300 px-2 py-0.5 rounded border border-teal-700/50 font-semibold">0 Files</span>
-                        <span id="compare-count-badge" class="text-xs bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-600">0 Records</span>
-                    </div>
-                </div>
-                <p class="text-xs text-slate-400 mb-3">Upload one or <strong>multiple compare files</strong>.</p>
-
-                <label class="border-2 border-dashed border-slate-600 hover:border-teal-500 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer transition bg-slate-900/50 hover:bg-slate-900 mb-3">
-                    <i class="fa-solid fa-folder-plus text-2xl text-teal-400 mb-1"></i>
-                    <span class="text-xs text-slate-200 font-medium">+ Add Compare File(s)</span>
-                    <input type="file" id="input-compare" accept=".xlsx, .xls, .csv" multiple class="hidden" onchange="handleCompareUpload(event)">
-                </label>
-
-                <div id="compare-files-list" class="space-y-1.5 max-h-24 overflow-y-auto custom-scrollbar pr-1">
-                    <div class="text-[11px] text-slate-500 italic text-center py-1">No comparison files added yet.</div>
-                </div>
-            </div>
         </div>
 
-        <!-- Section 2: Field Selector Matrix -->
-        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 pb-3 border-b border-slate-700">
+        <!-- Section 2: Controls & Field Selector -->
+        <div class="card-bg rounded-xl p-5 shadow-lg">
+            <div class="flex flex-wrap justify-between items-center gap-4 mb-4 pb-3 border-b border-slate-800">
                 <div>
                     <div class="flex items-center gap-3">
-                        <h2 class="font-semibold text-slate-100 flex items-center gap-2">
-                            <i class="fa-solid fa-sliders text-amber-400"></i>
-                            03_REQUIRED_FIELDS Control Matrix
+                        <h2 class="text-sm font-bold text-amber-400 flex items-center gap-2">
+                            <i class="fa-solid fa-sliders"></i> 03_REQUIRED_FIELDS Control Matrix
                         </h2>
-                        <span id="selected-fields-count" class="text-xs bg-blue-900/80 text-blue-300 font-mono px-2.5 py-0.5 rounded-full border border-blue-600/50 font-semibold">0 Fields Selected</span>
+                        <span id="selected-fields-count" class="text-xs bg-blue-600/20 text-blue-400 border border-blue-500/30 px-3 py-0.5 rounded-full font-mono">0 Fields Selected</span>
                     </div>
-                    <p class="text-xs text-slate-400 mt-0.5">Click column boxes in desired order. Numbers <span class="text-blue-400 font-bold">[ 1 ]</span>, <span class="text-blue-400 font-bold">[ 2 ]</span> set output column order.</p>
+                    <p class="text-[11px] text-slate-400 mt-1">Check boxes to append specific Master Ledger columns. Selection sequence <span class="text-blue-400 font-bold">[ 1 ]</span>, <span class="text-blue-400 font-bold">[ 2 ]</span> defines output column order.</p>
                 </div>
-                <div class="flex flex-wrap items-center gap-2">
+
+                <div class="flex items-center gap-2 flex-wrap">
+                    <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-700 px-2 py-1 rounded-lg text-xs">
+                        <span class="text-slate-400">Header Row:</span>
+                        <select id="select-master-header-row" onchange="changeHeaderRow(this.value)" class="bg-transparent text-amber-300 font-medium focus:outline-none cursor-pointer">
+                            <option value="auto">Auto Detect</option>
+                            <option value="0">Row 1</option>
+                            <option value="1">Row 2</option>
+                            <option value="2">Row 3</option>
+                        </select>
+                    </div>
+
                     <div class="relative">
                         <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2 text-slate-500 text-xs"></i>
-                        <input type="text" id="field-search-input" oninput="filterFields(this.value)" placeholder="Search headers..." class="bg-slate-900 border border-slate-700 text-xs text-slate-200 pl-7 pr-3 py-1 rounded-lg focus:outline-none focus:border-blue-500 w-36 sm:w-44">
+                        <input type="text" id="field-search-input" oninput="filterFields(this.value)" placeholder="Search headers..." class="bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-3 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 w-36 md:w-48">
                     </div>
-                    <button onclick="toggleAllFields(true)" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg transition">Select All</button>
-                    <button onclick="toggleAllFields(false)" class="text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-1.5 rounded-lg transition">Deselect All</button>
-                    <button onclick="processData()" class="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg transition shadow-md flex items-center gap-1.5">
-                        <i class="fa-solid fa-gears"></i> Run Comparison Engine
+
+                    <button onclick="toggleAllFields(true)" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1 rounded-lg border border-slate-700 transition">Select All</button>
+                    <button onclick="toggleAllFields(false)" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-3 py-1 rounded-lg border border-slate-700 transition">Deselect All</button>
+                </div>
+            </div>
+
+            <div id="fields-container" class="min-h-[100px] max-h-[220px] overflow-y-auto custom-scrollbar p-2">
+                <div class="text-center py-8 text-slate-500 text-xs italic">Upload Master Data above to populate available Master Ledger fields.</div>
+            </div>
+        </div>
+
+        <!-- Section 1b: Compare Upload -->
+        <div class="grid grid-cols-1 gap-6">
+            <div class="card-bg rounded-xl p-5 shadow-lg flex flex-col justify-between">
+                <div>
+                    <div class="flex justify-between items-center mb-2">
+                        <h2 class="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                            <i class="fa-solid fa-layer-group"></i> 02_COMPARE_INPUT Working Lists
+                        </h2>
+                        <div class="flex gap-2 font-mono">
+                            <span id="compare-files-count" class="text-xs bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700">0 Files</span>
+                            <span id="compare-count-badge" class="text-xs bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700">0 Records</span>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-400 mb-4">Upload one or multiple compare files (Complaints, Defaulters, Meter Lists).</p>
+
+                    <label class="border-2 border-dashed border-slate-700 hover:border-emerald-500 bg-slate-900/50 hover:bg-slate-900 rounded-xl p-6 text-center cursor-pointer transition flex flex-col items-center justify-center min-h-[120px]">
+                        <i class="fa-solid fa-square-plus text-2xl text-emerald-400 mb-2"></i>
+                        <span class="text-xs font-medium text-slate-300">+ Add Compare File(s) (Multiple allowed)</span>
+                        <span class="text-[10px] text-slate-500 mt-1">Select one or multiple Excel files at once</span>
+                        <input type="file" id="input-compare" accept=".xlsx, .xls, .csv" multiple class="hidden" onchange="handleCompareUpload(event)">
+                    </label>
+
+                    <div id="compare-files-list" class="mt-3 text-xs text-slate-400 max-h-[80px] overflow-y-auto custom-scrollbar space-y-1">
+                        <div class="text-[11px] text-slate-500 italic text-center py-1">No comparison files added yet.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Run Comparison Engine CTA -->
+        <div class="flex justify-center">
+            <button onclick="processData(true)" id="btn-run-engine" disabled class="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-base px-8 py-3.5 rounded-xl font-bold shadow-lg shadow-blue-600/30 transition flex items-center gap-2">
+                <i class="fa-solid fa-gears"></i> Run Comparison Engine
+            </button>
+        </div>
+
+        <!-- Section 3: Executive Operational KPIs Dashboard -->
+        <div class="card-bg rounded-xl p-5 shadow-lg space-y-6">
+            <div>
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                        <i class="fa-solid fa-chart-line text-blue-400"></i> EXECUTIVE OPERATIONAL KPIS (07_DASHBOARD)
+                    </h2>
+                    <button onclick="generatePDFReport()" id="btn-pdf-report" disabled class="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-slate-900 text-xs px-3 py-1.5 rounded-lg font-bold shadow transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-pdf"></i> 1-Click PDF Executive Report
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 font-mono">
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <p class="text-[10px] text-slate-500 uppercase">MASTER LEDGER</p>
+                        <p id="kpi-master" class="text-lg font-bold text-blue-400 mt-0.5">0</p>
+                    </div>
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <p class="text-[10px] text-slate-500 uppercase">COMPARE RECORDS</p>
+                        <p id="kpi-compare" class="text-lg font-bold text-slate-200 mt-0.5">0</p>
+                    </div>
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <p class="text-[10px] text-slate-500 uppercase">MATCHED</p>
+                        <p id="kpi-matched" class="text-lg font-bold text-emerald-400 mt-0.5">0</p>
+                    </div>
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <p class="text-[10px] text-slate-500 uppercase">NOT FOUND</p>
+                        <p id="kpi-notfound" class="text-lg font-bold text-rose-400 mt-0.5">0</p>
+                    </div>
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <p class="text-[10px] text-slate-500 uppercase">DUP COMPARE</p>
+                        <p id="kpi-dup-cmp" class="text-lg font-bold text-amber-400 mt-0.5">0</p>
+                    </div>
+                    <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <p class="text-[10px] text-slate-500 uppercase">MATCH ACCURACY</p>
+                        <p id="kpi-accuracy" class="text-lg font-bold text-emerald-400 mt-0.5">0.00%</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Export Hub Bar -->
+            <div class="bg-slate-900/90 border border-slate-800 p-3.5 rounded-xl flex flex-col md:flex-row items-center justify-between gap-3">
+                <div class="flex items-center gap-2 text-xs text-slate-300">
+                    <i class="fa-solid fa-download text-emerald-400 text-sm"></i>
+                    <span class="font-semibold text-slate-200">Export Center:</span>
+                    <span class="text-slate-400">Download lightweight outputs or multi-tab workbooks</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="exportFinalReportOnly()" id="btn-exp-final" disabled class="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg font-bold shadow transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-excel"></i> Download Matched Report
+                    </button>
+                    <button onclick="exportNotFoundOnly()" id="btn-exp-notfound" disabled class="bg-rose-700 hover:bg-rose-600 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg font-bold shadow transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-circle-xmark"></i> Download Not Found List
+                    </button>
+                    <button onclick="exportDuplicatesOnly()" id="btn-exp-dup" disabled class="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg font-bold shadow transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-copy"></i> Download Duplicate List
+                    </button>
+                    <button onclick="exportFullWorkbook()" id="btn-exp-full" disabled class="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-xs px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-layer-group"></i> Full Backup
                     </button>
                 </div>
             </div>
 
-            <div id="fields-container" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 max-h-56 overflow-y-auto custom-scrollbar p-1">
-                <div class="text-xs text-slate-500 col-span-full py-4 text-center">Upload Master Data above to populate available Master Ledger fields.</div>
+            <!-- Tab Navigation -->
+            <div class="border-b border-slate-800 flex space-x-2">
+                <button onclick="switchTab('final')" id="tab-btn-final" class="py-2 px-4 text-xs font-semibold border-b-2 border-blue-500 text-blue-400 transition flex items-center gap-2">
+                    <i class="fa-solid fa-table"></i> 04_FINAL_REPORT
+                </button>
+                <button onclick="switchTab('notfound')" id="tab-btn-notfound" class="py-2 px-4 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition flex items-center gap-2">
+                    <i class="fa-solid fa-triangle-exclamation text-rose-400"></i> 05_NOT_FOUND
+                </button>
+                <button onclick="switchTab('duplicates')" id="tab-btn-duplicates" class="py-2 px-4 text-xs font-semibold border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition flex items-center gap-2">
+                    <i class="fa-solid fa-copy text-amber-400"></i> 06_DUPLICATES
+                </button>
             </div>
-        </div>
 
-        <!-- Section 3: Output Preview -->
-        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-5 shadow-xl space-y-4">
-            <div class="flex items-center justify-between">
-                <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                    <i class="fa-solid fa-table text-blue-400"></i> Final Output Records Preview
-                </h2>
-                <span id="filtered-rows-badge" class="text-xs text-slate-400 font-mono">Showing 0 rows</span>
-            </div>
+            <!-- Tab Contents -->
+            <div>
+                <div id="tab-content-final" class="space-y-3">
+                    <div class="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                        <div class="flex items-center gap-2 w-full sm:w-auto">
+                            <span class="text-xs text-slate-400 font-medium whitespace-nowrap"><i class="fa-solid fa-filter text-blue-400"></i> Quick Filter:</span>
+                            <select id="filter-feeder-select" onchange="applyTableFilter()" class="bg-slate-800 text-amber-300 font-semibold text-xs border border-slate-700 rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500 max-w-xs">
+                                <option value="ALL">All Feeders / Categories</option>
+                            </select>
+                        </div>
 
-            <div class="overflow-x-auto max-h-96 custom-scrollbar border border-slate-700 rounded-xl bg-slate-900">
-                <table class="w-full text-left border-collapse text-xs">
-                    <thead id="tbl-final-head" class="bg-slate-950 text-slate-300 sticky top-0 border-b border-slate-700">
-                        <tr><th class="p-3 text-slate-500 italic">Run Comparison Engine to view data</th></tr>
-                    </thead>
-                    <tbody id="tbl-final-body" class="divide-y divide-slate-800 text-slate-300 font-mono"></tbody>
-                </table>
+                        <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
+                            <div class="relative w-full sm:w-64">
+                                <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2 text-slate-500 text-xs"></i>
+                                <input type="text" id="table-search-input" oninput="applyTableFilter()" placeholder="Search in table (Name, Consumer No)..." class="bg-slate-800 border border-slate-700 text-xs text-slate-200 pl-8 pr-3 py-1 rounded-lg focus:outline-none focus:border-blue-500 w-full">
+                            </div>
+                            <span id="filtered-rows-badge" class="text-[11px] text-slate-400 font-mono whitespace-nowrap">Showing 0 rows</span>
+                        </div>
+                    </div>
+
+                    <div class="overflow-x-auto max-h-96 custom-scrollbar border border-slate-800 rounded-xl bg-slate-900">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead id="tbl-final-head" class="bg-slate-950 text-slate-400 sticky top-0 border-b border-slate-800 uppercase text-[10px]">
+                                <tr><th class="p-3 text-slate-500 italic">Run Comparison Engine to view data</th></tr>
+                            </thead>
+                            <tbody id="tbl-final-body" class="divide-y divide-slate-800/80 text-slate-300 font-mono"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="tab-content-notfound" class="hidden space-y-3">
+                    <div class="overflow-x-auto max-h-96 custom-scrollbar border border-slate-800 rounded-xl bg-slate-900">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead id="tbl-notfound-head" class="bg-slate-950 text-rose-300 sticky top-0 border-b border-slate-800 uppercase text-[10px]">
+                                <tr><th class="p-3 text-slate-500 italic">No exceptions loaded</th></tr>
+                            </thead>
+                            <tbody id="tbl-notfound-body" class="divide-y divide-slate-800/80 text-slate-300 font-mono"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="tab-content-duplicates" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="border border-slate-800 rounded-xl bg-slate-900 p-3">
+                        <h3 class="text-xs font-bold text-amber-400 mb-2"><i class="fa-solid fa-copy"></i> Duplicate Consumer Nos in Comparison Lists</h3>
+                        <div class="overflow-x-auto max-h-80 custom-scrollbar">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead id="tbl-dup-cmp-head" class="bg-slate-950 text-slate-400 border-b border-slate-800 sticky top-0"></thead>
+                                <tbody id="tbl-dup-cmp-body" class="divide-y divide-slate-800 text-slate-300 font-mono"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="border border-slate-800 rounded-xl bg-slate-900 p-3">
+                        <h3 class="text-xs font-bold text-orange-400 mb-2"><i class="fa-solid fa-copy"></i> Duplicate Consumer Nos in Master Data</h3>
+                        <div class="overflow-x-auto max-h-80 custom-scrollbar">
+                            <table class="w-full text-left border-collapse text-xs">
+                                <thead id="tbl-dup-mst-head" class="bg-slate-950 text-slate-400 border-b border-slate-800 sticky top-0"></thead>
+                                <tbody id="tbl-dup-mst-body" class="divide-y divide-slate-800 text-slate-300 font-mono"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
     </main>
 
+    <!-- Printable PDF Executive Summary -->
+    <div id="printable-pdf-summary" class="hidden">
+        <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px;">
+            <div style="border-bottom: 3px solid #1e40af; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1 style="font-size: 22px; color: #1e3a8a; margin: 0;">AE OFFICE AUTOMATION SUITE v2.0</h1>
+                    <p style="font-size: 13px; color: #475569; margin: 4px 0 0 0;">Executive Utility Consumer Ledger Reconciliation Report</p>
+                </div>
+                <div style="text-align: right;">
+                    <span style="font-size: 11px; font-weight: bold; background: #fef3c7; color: #92400e; padding: 4px 8px; border-radius: 4px; border: 1px solid #f59e0b;">Developed by Akhilesh Patidar (AE)</span>
+                    <div id="pdf-report-date" style="font-size: 11px; color: #64748b; margin-top: 6px;"></div>
+                </div>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+                <tr style="background: #f8fafc;"><td style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold;">Total Master Ledger Records</td><td id="pdf-val-master" style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #1d4ed8; text-align: right;">0</td></tr>
+                <tr><td style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold;">Total Compare Records</td><td id="pdf-val-compare" style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #0f766e; text-align: right;">0</td></tr>
+                <tr style="background: #f8fafc;"><td style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold;">Successfully Matched Consumers</td><td id="pdf-val-matched" style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #15803d; text-align: right;">0</td></tr>
+                <tr><td style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold;">Not Found Consumers</td><td id="pdf-val-notfound" style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #b91c1c; text-align: right;">0</td></tr>
+                <tr style="background: #f8fafc;"><td style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold;">Match Accuracy Rate</td><td id="pdf-val-accuracy" style="padding: 10px; border: 1px solid #cbd5e1; font-weight: bold; color: #15803d; text-align: right;">0.00%</td></tr>
+            </table>
+        </div>
+    </div>
+
     <!-- Application JavaScript Engine -->
     <script>
         let state = {
+            audioEnabled: true,
             masterHeaders: [],
-            master2DData: [], // Pure 2D Array to handle duplicate/blank header names safely
+            master2DData: [],
             masterKeyMap: new Map(),
             compareFiles: [],
-            selectedColumnIndicesSequence: [], // TRACKING BY EXACT COLUMN INDEX (0, 1, 2...) INSTEAD OF NAME!
+            selectedColumnIndicesSequence: [], // Exact Column Index Tracker
             fieldSearchQuery: '',
-            processedOutput: []
+            processed: {
+                totalCompareRows: 0,
+                finalHeaders: [],
+                finalRows: [],
+                notFoundRows: [],
+                dupCompareRows: [],
+                dupMasterRows: [],
+                matchedCount: 0,
+                notFoundCount: 0,
+                accuracy: 0
+            }
         };
 
         function normalizeConsumerNo(val) {
@@ -213,6 +407,163 @@
             str = str.replace(/^(IVRS|N)[-\/]?/i, '');
             let digitsOnly = str.replace(/\D/g, '');
             return digitsOnly.length >= 8 ? digitsOnly : str;
+        }
+
+        // Plain-text CSV parser (handles quoted fields, escaped quotes, CRLF/LF) —
+        // CSV must never go through the JSZip/XLSX binary Excel parsers below
+        function parseCSVText(text) {
+            const rows = [];
+            let row = [], field = '', inQuotes = false;
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (inQuotes) {
+                    if (ch === '"') {
+                        if (text[i + 1] === '"') { field += '"'; i++; }
+                        else inQuotes = false;
+                    } else field += ch;
+                } else if (ch === '"') {
+                    inQuotes = true;
+                } else if (ch === ',') {
+                    row.push(field); field = '';
+                } else if (ch === '\r') {
+                    // skip, \n handles the line break
+                } else if (ch === '\n') {
+                    row.push(field); field = '';
+                    if (row.length > 1 || row[0] !== '') rows.push(row);
+                    row = [];
+                } else {
+                    field += ch;
+                }
+            }
+            if (field !== '' || row.length > 0) { row.push(field); rows.push(row); }
+            return rows;
+        }
+
+        // JSZip Fast XML Parser Engine with Strict Excel Column Limit Protection
+        async function parseLargeXlsxWithJSZip(arrayBuffer) {
+            if (typeof JSZip === 'undefined') return null;
+            try {
+                const zip = await JSZip.loadAsync(arrayBuffer);
+                let sharedStrings = [];
+                const sstKey = Object.keys(zip.files).find(k => k.toLowerCase().includes('sharedstrings.xml'));
+                if (sstKey) {
+                    const sstXml = await zip.file(sstKey).async("text");
+                    const siBlocks = sstXml.split(/<si\b/i);
+                    for (let i = 1; i < siBlocks.length; i++) {
+                        const block = siBlocks[i];
+                        let strVal = "";
+                        let pos = 0;
+                        while (true) {
+                            let tStart = block.indexOf('<t', pos);
+                            if (tStart === -1) break;
+                            let valStart = block.indexOf('>', tStart) + 1;
+                            let tEnd = block.indexOf('</t>', valStart);
+                            if (tEnd === -1) break;
+                            strVal += block.substring(valStart, tEnd);
+                            pos = tEnd + 4;
+                        }
+                        sharedStrings.push(strVal.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+                    }
+                }
+
+                const sheetKeys = Object.keys(zip.files).filter(f => f.toLowerCase().includes('sheet') && f.toLowerCase().endsWith('.xml'));
+                if (sheetKeys.length === 0) return null;
+
+                let targetSheetXml = "";
+                let maxLen = 0;
+                for (let sf of sheetKeys) {
+                    const xml = await zip.file(sf).async("text");
+                    if (xml.length > maxLen) { maxLen = xml.length; targetSheetXml = xml; }
+                }
+
+                const result2D = [];
+                const rowBlocks = targetSheetXml.split(/<row\b/i);
+
+                for (let i = 1; i < rowBlocks.length; i++) {
+                    const rowStr = rowBlocks[i];
+                    const cellBlocks = rowStr.split(/<c\b/i);
+                    const rowData = [];
+                    let lastColIdx = -1;
+
+                    for (let j = 1; j < cellBlocks.length; j++) {
+                        const cellStr = cellBlocks[j];
+                        let colIdx = lastColIdx + 1;
+
+                        // STRICT REGEX: 1 to 3 letters only (A-XFD) to prevent extraneous attribute matches
+                        const rMatch = cellStr.match(/\br="([A-Za-z]{1,3})\d+"/);
+                        if (rMatch && rMatch[1]) {
+                            let col = 0;
+                            let colStr = rMatch[1].toUpperCase();
+                            for (let c = 0; c < colStr.length; c++) {
+                                col = col * 26 + (colStr.charCodeAt(c) - 64);
+                            }
+                            // Excel Column Maximum Limit Guard (16384 columns)
+                            if (col > 0 && col <= 16384) {
+                                colIdx = col - 1;
+                            }
+                        }
+
+                        let cellVal = "";
+                        if (cellStr.includes('t="s"')) {
+                            const vMatch = cellStr.match(/<v>(\d+)<\/v>/);
+                            if (vMatch && sharedStrings[parseInt(vMatch[1])]) cellVal = sharedStrings[parseInt(vMatch[1])];
+                        } else {
+                            const vMatch = cellStr.match(/<v>(.*?)<\/v>/);
+                            if (vMatch) cellVal = vMatch[1];
+                        }
+
+                        // Safeguard padding to prevent array enumeration overflow
+                        if (colIdx >= 0 && colIdx < 16384) {
+                            while (rowData.length < colIdx) rowData.push("");
+                            rowData[colIdx] = cellVal;
+                            lastColIdx = colIdx;
+                        }
+                    }
+                    if (rowData.length > 0) result2D.push(rowData);
+                }
+                return result2D.length > 0 ? result2D : null;
+            } catch(e) {
+                return null;
+            }
+        }
+
+        // Auto-detects the real header row: exported ledgers often carry a title/company-name
+        // row above the actual headers, which has just one non-empty cell — skip those.
+        function detectHeaderRowIndex(json2D) {
+            let bestIdx = 0, bestCount = -1;
+            for (let i = 0; i < Math.min(10, json2D.length); i++) {
+                const nonEmpty = json2D[i].filter(c => String(c || '').trim() !== '').length;
+                if (nonEmpty > bestCount) { bestCount = nonEmpty; bestIdx = i; }
+            }
+            return bestIdx;
+        }
+
+        function applyMasterHeaderRow(rowSelection) {
+            const json2D = state.masterRawJson2D;
+            if (!json2D || json2D.length === 0) return;
+            const headerIdx = rowSelection === 'auto' ? detectHeaderRowIndex(json2D) : parseInt(rowSelection, 10);
+
+            state.masterHeaders = json2D[headerIdx].map((h, i) => String(h || '').trim() || `Column_${i+1}`);
+            state.master2DData = json2D.slice(headerIdx + 1);
+
+            state.masterKeyMap.clear();
+            let keyIdx = state.masterHeaders.findIndex(h => /consumer|ivrs|account|con_no/i.test(h));
+            if (keyIdx === -1) keyIdx = 0;
+
+            state.master2DData.forEach(row => {
+                let norm = normalizeConsumerNo(row[keyIdx]);
+                if (norm) state.masterKeyMap.set(norm, row);
+            });
+
+            document.getElementById('master-count-badge').textContent = `${state.master2DData.length.toLocaleString()} Records`;
+            document.getElementById('kpi-master').textContent = state.master2DData.length.toLocaleString();
+
+            state.selectedColumnIndicesSequence = [];
+            renderFieldToggles();
+        }
+
+        function changeHeaderRow(value) {
+            applyMasterHeaderRow(value);
         }
 
         function handleMasterUpload(event) {
@@ -226,135 +577,150 @@
             statusEl.classList.remove('hidden');
             statusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Reading Master Ledger...`;
 
+            const isCSV = /\.csv$/i.test(file.name);
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = async function(e) {
                 try {
-                    const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array', cellFormula: false, cellStyles: false });
-                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-
-                    // Extract pure 2D Array (Header Row + Data Rows)
-                    const json2D = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+                    let json2D;
+                    if (isCSV) {
+                        json2D = parseCSVText(e.target.result);
+                    } else {
+                        const buffer = e.target.result;
+                        json2D = await parseLargeXlsxWithJSZip(buffer);
+                        if (!json2D || json2D.length === 0) {
+                            const data = new Uint8Array(buffer);
+                            const wb = XLSX.read(data, { type: 'array', cellFormula: false, cellStyles: false });
+                            json2D = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+                        }
+                    }
 
                     if (!json2D || json2D.length === 0) {
                         statusText.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> No data rows found.`;
                         return;
                     }
 
-                    // Raw Headers and Data Rows
-                    state.masterHeaders = json2D[0].map((h, colIdx) => {
-                        let text = String(h || '').trim();
-                        return text !== '' ? text : `Column_${colIdx + 1}`;
-                    });
-                    state.master2DData = json2D.slice(1);
-
-                    // Index Master Data by Consumer Key Column
-                    state.masterKeyMap.clear();
-                    let keyColIdx = state.masterHeaders.findIndex(h => /consumer|ivrs|account|con_no/i.test(h));
-                    if (keyColIdx === -1) keyColIdx = 0;
-
-                    state.master2DData.forEach(row => {
-                        let rawKey = row[keyColIdx];
-                        let normKey = normalizeConsumerNo(rawKey);
-                        if (normKey) {
-                            state.masterKeyMap.set(normKey, row);
-                        }
-                    });
-
-                    document.getElementById('master-count-badge').textContent = `${state.master2DData.length.toLocaleString()} Records`;
-                    state.selectedColumnIndicesSequence = [];
-                    renderFieldToggles();
-
+                    state.masterRawJson2D = json2D;
+                    document.getElementById('select-master-header-row').value = 'auto';
+                    applyMasterHeaderRow('auto');
                     statusEl.classList.add('hidden');
                 } catch(err) {
-                    console.error(err);
                     statusText.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> Parsing Error: ${err.message}`;
                 }
             };
-            reader.readAsArrayBuffer(file);
+            if (isCSV) reader.readAsText(file); else reader.readAsArrayBuffer(file);
         }
 
         function handleCompareUpload(event) {
             const files = Array.from(event.target.files);
             if (!files || files.length === 0) return;
 
+            let totalRows = 0;
             files.forEach(file => {
+                const isCSV = /\.csv$/i.test(file.name);
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    const data = new Uint8Array(e.target.result);
-                    const wb = XLSX.read(data, { type: 'array' });
-                    const json2D = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+                    let json2D;
+                    let rawWorksheet = null;
+                    let rawBuffer = null;
+                    if (isCSV) {
+                        json2D = parseCSVText(e.target.result);
+                    } else {
+                        rawBuffer = e.target.result;
+                        const data = new Uint8Array(rawBuffer);
+                        // cellStyles:true keeps each cell's original fill/font as an object on the cell
+                        // itself, so the compare file's own formatting can be re-used untouched on export
+                        const wb = XLSX.read(data, { type: 'array', cellStyles: true });
+                        rawWorksheet = wb.Sheets[wb.SheetNames[0]];
+                        json2D = XLSX.utils.sheet_to_json(rawWorksheet, { header: 1, defval: '' });
+                    }
 
                     if (json2D.length > 0) {
                         let headers = json2D[0].map((h, i) => String(h || '').trim() || `Col_${i+1}`);
                         let records = json2D.slice(1);
+                        // Re-uploading a file with the same name replaces the old entry instead of
+                        // stacking a duplicate copy (was doubling Not Found / Duplicate counts)
+                        const existingIdx = state.compareFiles.findIndex(f => f.fileName === file.name);
+                        if (existingIdx > -1) state.compareFiles.splice(existingIdx, 1, { fileName: file.name, headers, records, rawWorksheet, rawBuffer });
+                        else state.compareFiles.push({ fileName: file.name, headers, records, rawWorksheet, rawBuffer });
+                        totalRows += records.length;
 
-                        state.compareFiles.push({
-                            fileName: file.name,
-                            headers: headers,
-                            records: records
-                        });
+                        const grandTotal = state.compareFiles.reduce((sum, f) => sum + f.records.length, 0);
+                        document.getElementById('compare-files-count').textContent = `${state.compareFiles.length} Files`;
+                        document.getElementById('compare-count-badge').textContent = `${grandTotal.toLocaleString()} Records`;
+                        document.getElementById('kpi-compare').textContent = grandTotal.toLocaleString();
+
                         renderCompareFilesList();
                     }
                 };
-                reader.readAsArrayBuffer(file);
+                if (isCSV) reader.readAsText(file); else reader.readAsArrayBuffer(file);
             });
         }
 
         function renderCompareFilesList() {
             const container = document.getElementById('compare-files-list');
-            document.getElementById('compare-files-count').textContent = `${state.compareFiles.length} Files`;
-
             if (state.compareFiles.length === 0) {
-                container.innerHTML = `<div class="text-[11px] text-slate-500 italic text-center py-1">No comparison files added yet.</div>`;
+                container.innerHTML = '<div class="text-[11px] text-slate-500 italic text-center py-1">No comparison files added yet.</div>';
                 return;
             }
-
-            container.innerHTML = state.compareFiles.map(f => `
-                <div class="flex items-center justify-between bg-slate-900 border border-slate-700 px-2.5 py-1.5 rounded-lg text-xs">
-                    <span class="text-slate-200 font-medium truncate">${f.fileName} (${f.records.length.toLocaleString()} rows)</span>
+            container.innerHTML = state.compareFiles.map((f, idx) => `
+                <div class="flex items-center justify-between bg-slate-900 border border-slate-800 px-2 py-1 rounded text-xs">
+                    <span class="text-emerald-400 font-mono"><i class="fa-solid fa-file-excel"></i> ${f.fileName} (${f.records.length.toLocaleString()} rows)</span>
+                    <button onclick="removeCompareFile(${idx})" class="text-rose-400 hover:text-rose-300 px-1" title="Remove"><i class="fa-solid fa-circle-xmark"></i></button>
                 </div>
             `).join('');
         }
 
+        function removeCompareFile(idx) {
+            state.compareFiles.splice(idx, 1);
+            const totalRows = state.compareFiles.reduce((sum, f) => sum + f.records.length, 0);
+            document.getElementById('compare-files-count').textContent = `${state.compareFiles.length} Files`;
+            document.getElementById('compare-count-badge').textContent = `${totalRows.toLocaleString()} Records`;
+            document.getElementById('kpi-compare').textContent = totalRows.toLocaleString();
+            renderCompareFilesList();
+        }
+
         function renderFieldToggles() {
             const container = document.getElementById('fields-container');
-            if (state.masterHeaders.length === 0) {
-                container.innerHTML = `<div class="text-xs text-slate-500 col-span-full py-4 text-center">Upload Master Data above to populate fields.</div>`;
-                return;
-            }
+            if (state.masterHeaders.length === 0) return;
 
-            const query = state.fieldSearchQuery;
+            let query = state.fieldSearchQuery;
+            let html = '<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-2.5">';
 
-            container.innerHTML = state.masterHeaders.map((header, colIdx) => {
-                if (query && !header.toLowerCase().includes(query)) return '';
-
+            state.masterHeaders.forEach((header, colIdx) => {
+                if (query && !header.toLowerCase().includes(query)) return;
                 const seqIdx = state.selectedColumnIndicesSequence.indexOf(colIdx);
                 const isChecked = seqIdx > -1;
                 const seqBadge = isChecked ? (seqIdx + 1) : null;
 
-                return `
-                    <label class="flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border ${isChecked ? 'border-blue-500 bg-blue-950/20' : 'border-slate-700/80 hover:border-blue-500/80'} cursor-pointer text-xs transition shadow-sm group">
-                        <div class="flex items-center space-x-2.5 truncate pr-1">
-                            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleField(${colIdx}, this.checked)" class="rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-0 w-4 h-4 cursor-pointer">
-                            <span class="text-slate-100 font-semibold truncate group-hover:text-blue-300" title="${header} (Col ${colIdx + 1})">${header}</span>
+                html += `
+                    <div onclick="toggleField(${colIdx})" 
+                         class="cursor-pointer p-2.5 rounded-lg border text-xs flex items-center justify-between gap-2 select-none transition ${isChecked ? 'bg-blue-900/40 border-blue-500 text-blue-200 font-medium' : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-600'}">
+                        <div class="flex items-center gap-2 overflow-hidden">
+                            <input type="checkbox" ${isChecked ? 'checked' : ''} class="rounded bg-slate-800 border-slate-700 text-blue-600 pointer-events-none">
+                            <span class="truncate font-semibold uppercase text-[11px]" title="${header}">${header}</span>
                         </div>
-                        ${isChecked ? `<span class="bg-blue-600 text-white font-bold font-mono text-[10px] px-1.5 py-0.5 rounded shadow-sm shrink-0">[ ${seqBadge} ]</span>` : ''}
-                    </label>
+                        ${isChecked ? `<span class="bg-blue-600 text-white font-bold text-[10px] px-1.5 py-0.5 rounded shrink-0 font-mono">[ ${seqBadge} ]</span>` : ''}
+                    </div>
                 `;
-            }).join('');
+            });
+            html += '</div>';
 
+            container.innerHTML = html;
             document.getElementById('selected-fields-count').textContent = `${state.selectedColumnIndicesSequence.length} Fields Selected`;
+            updateRunButtonState();
         }
 
-        // TOGGLE BY EXACT COLUMN INDEX (0, 1, 2...)
-        function toggleField(colIdx, isChecked) {
+        function updateRunButtonState() {
+            const btn = document.getElementById('btn-run-engine');
+            const ready = state.selectedColumnIndicesSequence.length > 0;
+            btn.disabled = !ready;
+            btn.classList.toggle('run-blink', ready);
+        }
+
+        function toggleField(colIdx) {
             const idx = state.selectedColumnIndicesSequence.indexOf(colIdx);
-            if (isChecked && idx === -1) {
-                state.selectedColumnIndicesSequence.push(colIdx);
-            } else if (!isChecked && idx > -1) {
-                state.selectedColumnIndicesSequence.splice(idx, 1);
-            }
+            if (idx > -1) state.selectedColumnIndicesSequence.splice(idx, 1);
+            else state.selectedColumnIndicesSequence.push(colIdx);
             renderFieldToggles();
         }
 
@@ -368,117 +734,384 @@
             renderFieldToggles();
         }
 
-        // Precise Index-Based Comparison Engine
-        function processData() {
+        function processData(playChime = false) {
             if (state.master2DData.length === 0 || state.compareFiles.length === 0) {
                 alert('Please upload both Master Data and Compare File(s).');
                 return;
             }
 
-            state.processedOutput = [];
+            state.processed.finalRows = [];
+            state.processed.notFoundRows = [];
+            let matchedCount = 0;
+            let totalCompareRows = 0;
+
+            let baseCmpHeaders = state.compareFiles[0] ? state.compareFiles[0].headers : [];
+            let selectedMasterNames = state.selectedColumnIndicesSequence.map(i => state.masterHeaders[i]);
+            state.processed.finalHeaders = ['Consumer_No_Input', 'Match_Status', 'Source_File', ...baseCmpHeaders, ...selectedMasterNames];
+            state.processed.notFoundHeaders = ['Consumer_No_Input', 'Match_Status', 'Source_File', ...baseCmpHeaders];
+
+            // Duplicate detection: any consumer no. appearing more than once across all
+            // comparison files, and any appearing more than once in the master ledger
+            const cmpSeenAt = new Map();
+            state.compareFiles.forEach(fileObj => {
+                let keyIdx = fileObj.headers.findIndex(h => /consumer|ivrs|account|con_no/i.test(h));
+                if (keyIdx === -1) keyIdx = 0;
+                fileObj.records.forEach(cmpRow => {
+                    let normKey = normalizeConsumerNo(cmpRow[keyIdx]);
+                    if (!normKey) return;
+                    if (!cmpSeenAt.has(normKey)) cmpSeenAt.set(normKey, []);
+                    cmpSeenAt.get(normKey).push([cmpRow[keyIdx], fileObj.fileName, ...cmpRow]);
+                });
+            });
+            // One row per duplicated consumer no. (not one per occurrence) — the list itself proves
+            // the duplication; an Occurrence_Count column says how many times it repeats.
+            state.processed.dupCompareRows = [];
+            state.processed.dupCompareKeyCount = 0;
+            cmpSeenAt.forEach((occurrences) => {
+                if (occurrences.length > 1) {
+                    const sources = [...new Set(occurrences.map(o => o[1]))].join(', ');
+                    // occurrences[0] = [rawVal, fileName, ...fullCmpRow] — keep the full comparison
+                    // row's columns too so this list can be cross-checked against the source file
+                    state.processed.dupCompareRows.push([occurrences[0][0], occurrences.length, sources, ...occurrences[0].slice(2)]);
+                    state.processed.dupCompareKeyCount++;
+                }
+            });
+
+            let masterKeyIdx = state.masterHeaders.findIndex(h => /consumer|ivrs|account|con_no/i.test(h));
+            if (masterKeyIdx === -1) masterKeyIdx = 0;
+            const mstSeenAt = new Map();
+            state.master2DData.forEach(mRow => {
+                let normKey = normalizeConsumerNo(mRow[masterKeyIdx]);
+                if (!normKey) return;
+                if (!mstSeenAt.has(normKey)) mstSeenAt.set(normKey, []);
+                mstSeenAt.get(normKey).push([mRow[masterKeyIdx], ...mRow]);
+            });
+            state.processed.dupMasterRows = [];
+            mstSeenAt.forEach((occurrences) => {
+                if (occurrences.length > 1) {
+                    state.processed.dupMasterRows.push([occurrences[0][0], occurrences.length, ...occurrences[0].slice(1)]);
+                }
+            });
 
             state.compareFiles.forEach(fileObj => {
-                let cmpHeaders = fileObj.headers;
-                let keyColIdx = cmpHeaders.findIndex(h => /consumer|ivrs|account|con_no/i.test(h));
-                if (keyColIdx === -1) keyColIdx = 0;
+                let keyIdx = fileObj.headers.findIndex(h => /consumer|ivrs|account|con_no/i.test(h));
+                if (keyIdx === -1) keyIdx = 0;
 
                 fileObj.records.forEach(cmpRow => {
-                    let rawVal = cmpRow[keyColIdx];
+                    totalCompareRows++;
+                    let rawVal = cmpRow[keyIdx];
                     let normKey = normalizeConsumerNo(rawVal);
+                    let masterMatchRow = state.masterKeyMap.get(normKey);
 
-                    let matchedMasterRow = state.masterKeyMap.get(normKey);
+                    let outRow = [rawVal, masterMatchRow ? 'MATCHED' : 'NOT_FOUND', fileObj.fileName, ...cmpRow];
 
-                    let outRow = [
-                        rawVal,
-                        matchedMasterRow ? 'MATCHED' : 'NOT_FOUND',
-                        fileObj.fileName,
-                        ...cmpRow
-                    ];
-
-                    // Append Master Fields BY EXACT COLUMN INDEX IN USER SELECTED SEQUENCE
-                    state.selectedColumnIndicesSequence.forEach(colIdx => {
-                        let cellVal = matchedMasterRow ? (matchedMasterRow[colIdx] !== undefined ? matchedMasterRow[colIdx] : '') : 'NOT FOUND';
-                        outRow.push(cellVal);
-                    });
-
-                    state.processedOutput.push(outRow);
+                    if (masterMatchRow) {
+                        matchedCount++;
+                        state.selectedColumnIndicesSequence.forEach(colIdx => {
+                            outRow.push(masterMatchRow[colIdx] !== undefined ? masterMatchRow[colIdx] : '');
+                        });
+                        state.processed.finalRows.push(outRow);
+                    } else {
+                        state.selectedColumnIndicesSequence.forEach(() => outRow.push('NOT FOUND'));
+                        state.processed.finalRows.push(outRow);
+                        state.processed.notFoundRows.push([rawVal, 'NOT_FOUND', fileObj.fileName, ...cmpRow]);
+                    }
                 });
             });
 
-            renderPreviewTable();
+            state.processed.totalCompareRows = totalCompareRows;
+            state.processed.matchedCount = matchedCount;
+            state.processed.notFoundCount = state.processed.notFoundRows.length;
+            state.processed.accuracy = totalCompareRows > 0 ? ((matchedCount / totalCompareRows) * 100).toFixed(2) : '0.00';
+
+            updateDashboard();
+            applyTableFilter();
+
             document.getElementById('btn-export-main').disabled = false;
+            document.getElementById('btn-exp-final').disabled = false;
+            document.getElementById('btn-exp-full').disabled = false;
+            document.getElementById('btn-pdf-report').disabled = false;
+            document.getElementById('btn-exp-notfound').disabled = state.processed.notFoundRows.length === 0;
+            document.getElementById('btn-exp-dup').disabled = (state.processed.dupCompareRows.length === 0 && state.processed.dupMasterRows.length === 0);
+            document.getElementById('btn-exp-notfound-top').disabled = state.processed.notFoundRows.length === 0;
+            document.getElementById('btn-exp-dup-top').disabled = (state.processed.dupCompareRows.length === 0 && state.processed.dupMasterRows.length === 0);
+            document.getElementById('btn-exp-full-top').disabled = false;
+            document.getElementById('btn-run-engine').classList.remove('run-blink');
+
+            if (playChime) playSuccessChime();
         }
 
-        function renderPreviewTable() {
-            const headEl = document.getElementById('tbl-final-head');
-            const bodyEl = document.getElementById('tbl-final-body');
+        function updateDashboard() {
+            document.getElementById('kpi-master').textContent = state.master2DData.length.toLocaleString();
+            document.getElementById('kpi-compare').textContent = state.processed.totalCompareRows.toLocaleString();
+            document.getElementById('kpi-matched').textContent = state.processed.matchedCount.toLocaleString();
+            document.getElementById('kpi-notfound').textContent = state.processed.notFoundCount.toLocaleString();
+            document.getElementById('kpi-accuracy').textContent = `${state.processed.accuracy}%`;
+            document.getElementById('kpi-dup-cmp').textContent = state.processed.dupCompareKeyCount.toLocaleString();
 
-            if (state.processedOutput.length === 0) return;
+            renderTable('tbl-notfound-head', 'tbl-notfound-body', state.processed.notFoundHeaders, state.processed.notFoundRows);
+            renderTable('tbl-dup-cmp-head', 'tbl-dup-cmp-body', ['Consumer_No', 'Occurrence_Count', 'Source_Files', ...(state.compareFiles[0] ? state.compareFiles[0].headers : [])], state.processed.dupCompareRows);
+            renderTable('tbl-dup-mst-head', 'tbl-dup-mst-body', ['Consumer_No', 'Occurrence_Count', ...state.masterHeaders], state.processed.dupMasterRows);
+        }
 
-            let cmpBaseHeaders = state.compareFiles[0] ? state.compareFiles[0].headers : [];
-            let selectedMasterHeaders = state.selectedColumnIndicesSequence.map(i => state.masterHeaders[i]);
+        function applyTableFilter() {
+            renderTable('tbl-final-head', 'tbl-final-body', state.processed.finalHeaders, state.processed.finalRows);
+        }
 
-            let finalHeaders = ['Consumer_No_Input', 'Match_Status', 'Source_File', ...cmpBaseHeaders, ...selectedMasterHeaders];
+        function renderTable(headId, bodyId, headers, rows) {
+            const headEl = document.getElementById(headId);
+            const bodyEl = document.getElementById(bodyId);
 
-            headEl.innerHTML = `<tr>${finalHeaders.map(h => `<th class="p-3 font-semibold text-slate-200 border-b border-slate-700 whitespace-nowrap">${h}</th>`).join('')}</tr>`;
+            headEl.innerHTML = `<tr>${headers.map(h => `<th class="p-3">${h}</th>`).join('')}</tr>`;
 
-            let previewLimit = Math.min(100, state.processedOutput.length);
+            let limit = Math.min(100, rows.length);
             let bodyHtml = '';
-
-            for (let i = 0; i < previewLimit; i++) {
-                let row = state.processedOutput[i];
-                bodyHtml += `<tr class="hover:bg-slate-800/60 transition">
-                    ${row.map(val => {
-                        let isNF = val === 'NOT_FOUND' || val === 'NOT FOUND';
-                        return `<td class="p-2.5 border-b border-slate-800 whitespace-nowrap ${isNF ? 'text-rose-400 font-bold' : ''}">${val}</td>`;
-                    }).join('')}
+            for (let i = 0; i < limit; i++) {
+                let row = rows[i];
+                bodyHtml += `<tr class="hover:bg-slate-800/40">
+                    ${row.map(val => `<td class="p-2.5 border-b border-slate-800/60 ${val === 'NOT_FOUND' || val === 'NOT FOUND' ? 'text-rose-400 font-bold' : ''}">${val}</td>`).join('')}
                 </tr>`;
             }
-
             bodyEl.innerHTML = bodyHtml;
-            document.getElementById('filtered-rows-badge').textContent = `Showing ${previewLimit} of ${state.processedOutput.length.toLocaleString()} records`;
+            document.getElementById('filtered-rows-badge').textContent = `Showing ${limit} of ${rows.length.toLocaleString()} rows`;
+        }
+
+        function switchTab(tabName) {
+            ['final', 'notfound', 'duplicates'].forEach(t => {
+                document.getElementById(`tab-content-${t}`).classList.toggle('hidden', t !== tabName);
+            });
+        }
+
+        function sanitizeSheetName(name) {
+            let clean = String(name).replace(/\.(xlsx|xls|csv)$/i, '').replace(/[\\/*?:\[\]]/g, '_');
+            return clean.substring(0, 31) || 'Sheet';
+        }
+
+        function colLetter(n) {
+            n++; let s = '';
+            while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+            return s;
+        }
+
+        function stripNS(xmlFragment) {
+            // serializeToString on a node plucked from its own document re-declares the default
+            // xmlns on every fragment; repeating it on each <si>/<font>/etc inside the merged parent
+            // (which already declares it) breaks strict XML consumers — strip the redundant copies.
+            return xmlFragment.replace(/ xmlns="http:\/\/schemas\.openxmlformats\.org\/spreadsheetml\/2006\/main"/g, '');
+        }
+
+        // Raw-XML level merge: opens each compare file's ORIGINAL .xlsx package with JSZip, copies its
+        // sheet/styles/sharedStrings XML byte-for-byte (so fonts, fills AND borders survive exactly as
+        // uploaded), remaps style/string indices to sit alongside other files' tables, appends the new
+        // Match_Status + master columns as plain inline-string cells, and repackages one output workbook.
+        async function exportStyledMultiSheetWorkbook(uniqueFiles) {
+            const parser = new DOMParser();
+            const serializer = new XMLSerializer();
+            let combinedFonts = [], combinedFills = [], combinedBorders = [], combinedCellXfs = [], combinedSS = [];
+            const sheetsOut = [];
+
+            for (const fname of uniqueFiles) {
+                const fileObj = state.compareFiles.find(f => f.fileName === fname);
+                const zip = await JSZip.loadAsync(fileObj.rawBuffer);
+                const wbDoc = parser.parseFromString(await zip.file('xl/workbook.xml').async('text'), 'text/xml');
+                const rId = wbDoc.getElementsByTagName('sheet')[0].getAttribute('r:id');
+                const relsDoc = parser.parseFromString(await zip.file('xl/_rels/workbook.xml.rels').async('text'), 'text/xml');
+                let target = '';
+                Array.from(relsDoc.getElementsByTagName('Relationship')).forEach(r => { if (r.getAttribute('Id') === rId) target = r.getAttribute('Target'); });
+                const sheetPath = 'xl/' + target.replace(/^\.?\/?/, '');
+                const sheetDoc = parser.parseFromString(await zip.file(sheetPath).async('text'), 'text/xml');
+
+                const fontsOffset = combinedFonts.length, fillsOffset = combinedFills.length, bordersOffset = combinedBorders.length, cellXfsOffset = combinedCellXfs.length;
+                const stylesFile = zip.file('xl/styles.xml');
+                if (stylesFile) {
+                    const stylesDoc = parser.parseFromString(await stylesFile.async('text'), 'text/xml');
+                    const fontsEl = stylesDoc.getElementsByTagName('fonts')[0];
+                    const fillsEl = stylesDoc.getElementsByTagName('fills')[0];
+                    const bordersEl = stylesDoc.getElementsByTagName('borders')[0];
+                    const cellXfsEl = stylesDoc.getElementsByTagName('cellXfs')[0];
+                    if (fontsEl) Array.from(fontsEl.children).forEach(el => combinedFonts.push(stripNS(serializer.serializeToString(el))));
+                    if (fillsEl) Array.from(fillsEl.children).forEach(el => combinedFills.push(stripNS(serializer.serializeToString(el))));
+                    if (bordersEl) Array.from(bordersEl.children).forEach(el => combinedBorders.push(stripNS(serializer.serializeToString(el))));
+                    if (cellXfsEl) Array.from(cellXfsEl.children).forEach(el => {
+                        const xf = el.cloneNode(true);
+                        if (xf.hasAttribute('fontId')) xf.setAttribute('fontId', String((parseInt(xf.getAttribute('fontId')) || 0) + fontsOffset));
+                        if (xf.hasAttribute('fillId')) xf.setAttribute('fillId', String((parseInt(xf.getAttribute('fillId')) || 0) + fillsOffset));
+                        if (xf.hasAttribute('borderId')) xf.setAttribute('borderId', String((parseInt(xf.getAttribute('borderId')) || 0) + bordersOffset));
+                        combinedCellXfs.push(stripNS(serializer.serializeToString(xf)));
+                    });
+                }
+
+                const ssOffset = combinedSS.length;
+                const ssFile = zip.file('xl/sharedStrings.xml');
+                if (ssFile) {
+                    const ssDoc = parser.parseFromString(await ssFile.async('text'), 'text/xml');
+                    Array.from(ssDoc.getElementsByTagName('si')).forEach(si => combinedSS.push(stripNS(serializer.serializeToString(si))));
+                }
+
+                Array.from(sheetDoc.getElementsByTagName('c')).forEach(c => {
+                    if (c.hasAttribute('s')) c.setAttribute('s', String((parseInt(c.getAttribute('s')) || 0) + cellXfsOffset));
+                    if (c.getAttribute('t') === 's') {
+                        const vEl = c.getElementsByTagName('v')[0];
+                        if (vEl) vEl.textContent = String((parseInt(vEl.textContent) || 0) + ssOffset);
+                    }
+                });
+
+                const rowsMap = {};
+                Array.from(sheetDoc.getElementsByTagName('row')).forEach(r => rowsMap[r.getAttribute('r')] = r);
+                const sheetDataEl = sheetDoc.getElementsByTagName('sheetData')[0];
+                const rowsForFile = state.processed.finalRows.filter(r => r[2] === fname);
+                const extraHeaders = ['Match_Status', ...state.selectedColumnIndicesSequence.map(i => state.masterHeaders[i])];
+                const startColIdx = fileObj.headers.length;
+
+                function setCellInline(rowEl, colIdx, rowNum, text, styleIdx) {
+                    const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+                    // createElement() (no namespace) makes the serializer stamp xmlns="" on these new
+                    // cells, which knocks them OUT of the spreadsheet namespace — Excel then silently
+                    // ignores them (XML is valid, cells just never render). Must use createElementNS.
+                    const cEl = sheetDoc.createElementNS(NS, 'c');
+                    cEl.setAttribute('r', colLetter(colIdx) + rowNum);
+                    if (styleIdx !== undefined && styleIdx !== null) cEl.setAttribute('s', String(styleIdx));
+                    cEl.setAttribute('t', 'inlineStr');
+                    const isEl = sheetDoc.createElementNS(NS, 'is');
+                    const tEl = sheetDoc.createElementNS(NS, 't');
+                    tEl.textContent = (text === undefined || text === null) ? '' : String(text);
+                    isEl.appendChild(tEl);
+                    cEl.appendChild(isEl);
+                    rowEl.appendChild(cEl);
+                }
+
+                let headerRow = rowsMap['1'];
+                if (!headerRow) { headerRow = sheetDoc.createElementNS('http://schemas.openxmlformats.org/spreadsheetml/2006/main', 'row'); headerRow.setAttribute('r', '1'); sheetDataEl.appendChild(headerRow); rowsMap['1'] = headerRow; }
+                // Match the neighboring original cell's style so the new columns carry the same
+                // font/size as the rest of the sheet (borders/fill are skipped per the ask).
+                const headerLastC = headerRow.lastElementChild;
+                const headerStyleIdx = headerLastC && headerLastC.hasAttribute('s') ? headerLastC.getAttribute('s') : null;
+                extraHeaders.forEach((h, idx) => setCellInline(headerRow, startColIdx + idx, 1, h, headerStyleIdx));
+
+                rowsForFile.forEach((r, i) => {
+                    const rowNum = i + 2;
+                    let rowEl = rowsMap[String(rowNum)];
+                    if (!rowEl) { rowEl = sheetDoc.createElementNS('http://schemas.openxmlformats.org/spreadsheetml/2006/main', 'row'); rowEl.setAttribute('r', String(rowNum)); sheetDataEl.appendChild(rowEl); rowsMap[String(rowNum)] = rowEl; }
+                    const lastC = rowEl.lastElementChild;
+                    const rowStyleIdx = lastC && lastC.hasAttribute('s') ? lastC.getAttribute('s') : null;
+                    const status = r[1];
+                    const masterVals = r.slice(3 + fileObj.headers.length);
+                    setCellInline(rowEl, startColIdx, rowNum, status, rowStyleIdx);
+                    masterVals.forEach((v, j) => setCellInline(rowEl, startColIdx + 1 + j, rowNum, v, rowStyleIdx));
+                });
+
+                const dimEl = sheetDoc.getElementsByTagName('dimension')[0];
+                if (dimEl) {
+                    const startLetter = (dimEl.getAttribute('ref').match(/^[A-Z]+/) || ['A'])[0];
+                    const newEndCol = colLetter(startColIdx + extraHeaders.length - 1);
+                    const newEndRow = Math.max(1, rowsForFile.length + 1);
+                    dimEl.setAttribute('ref', `${startLetter}1:${newEndCol}${newEndRow}`);
+                }
+
+                sheetsOut.push({ name: sanitizeSheetName(fname), xml: serializer.serializeToString(sheetDoc) });
+            }
+
+            const outZip = new JSZip();
+            outZip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheetsOut.map((s, i) => `<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>`);
+            outZip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`);
+            outZip.file('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheetsOut.map((s, i) => `<sheet name="${s.name}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets></workbook>`);
+            const stylesRid = sheetsOut.length + 1, ssRid = sheetsOut.length + 2;
+            outZip.file('xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheetsOut.map((s, i) => `<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')}<Relationship Id="rId${stylesRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId${ssRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>`);
+            outZip.file('xl/styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="${combinedFonts.length}">${combinedFonts.join('')}</fonts><fills count="${combinedFills.length}">${combinedFills.join('')}</fills><borders count="${combinedBorders.length}">${combinedBorders.join('')}</borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${combinedCellXfs.length}">${combinedCellXfs.join('')}</cellXfs></styleSheet>`);
+            outZip.file('xl/sharedStrings.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${combinedSS.length}" uniqueCount="${combinedSS.length}">${combinedSS.join('')}</sst>`);
+            sheetsOut.forEach((s, i) => outZip.file(`xl/worksheets/sheet${i+1}.xml`, s.xml));
+
+            const blob = await outZip.generateAsync({ type: 'blob' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'NGB_Reconciliation_Output.xlsx';
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
         }
 
         function exportFinalReportOnly() {
-            if (state.processedOutput.length === 0) return;
+            const uniqueFiles = [...new Set(state.processed.finalRows.map(r => r[2]))];
+            const allHaveRawBuffer = uniqueFiles.every(fname => {
+                const f = state.compareFiles.find(x => x.fileName === fname);
+                return f && f.rawBuffer;
+            });
 
-            let cmpBaseHeaders = state.compareFiles[0] ? state.compareFiles[0].headers : [];
-            let selectedMasterHeaders = state.selectedColumnIndicesSequence.map(i => state.masterHeaders[i]);
-            let finalHeaders = ['Consumer_No_Input', 'Match_Status', 'Source_File', ...cmpBaseHeaders, ...selectedMasterHeaders];
+            if (allHaveRawBuffer) {
+                exportStyledMultiSheetWorkbook(uniqueFiles);
+                return;
+            }
 
-            const ws = XLSX.utils.aoa_to_sheet([finalHeaders, ...state.processedOutput]);
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Reconciliation_Output");
+            const extraHeaders = ['Match_Status', ...state.selectedColumnIndicesSequence.map(i => state.masterHeaders[i])];
 
-            const dateStr = new Date().toISOString().slice(0, 10);
-            XLSX.writeFile(wb, `NGB_Reconciliation_Output_${dateStr}.xlsx`);
+            uniqueFiles.forEach(fname => {
+                const rows = state.processed.finalRows.filter(r => r[2] === fname);
+                const ws = XLSX.utils.aoa_to_sheet([state.processed.finalHeaders, ...rows]);
+                XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(fname));
+            });
+            XLSX.writeFile(wb, "NGB_Reconciliation_Output.xlsx");
         }
 
+        function exportNotFoundOnly() {
+            const ws = XLSX.utils.aoa_to_sheet([state.processed.notFoundHeaders, ...state.processed.notFoundRows]);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "NOT_FOUND");
+            XLSX.writeFile(wb, "NOT_FOUND_Consumers.xlsx");
+        }
+
+        function exportDuplicatesOnly() {
+            const wb = XLSX.utils.book_new();
+            const wsCmp = XLSX.utils.aoa_to_sheet([['Consumer_No', 'Occurrence_Count', 'Source_Files', ...(state.compareFiles[0] ? state.compareFiles[0].headers : [])], ...state.processed.dupCompareRows]);
+            XLSX.utils.book_append_sheet(wb, wsCmp, "DUP_IN_COMPARE");
+            const wsMst = XLSX.utils.aoa_to_sheet([['Consumer_No', 'Occurrence_Count', ...state.masterHeaders], ...state.processed.dupMasterRows]);
+            XLSX.utils.book_append_sheet(wb, wsMst, "DUP_IN_MASTER");
+            XLSX.writeFile(wb, "Duplicate_Consumers.xlsx");
+        }
+
+        function exportFullWorkbook() {
+            exportFinalReportOnly();
+        }
+
+        function playSuccessChime() {
+            if (!state.audioEnabled) return;
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine'; osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+                gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.start(); osc.stop(ctx.currentTime + 0.3);
+            } catch(e) {}
+        }
+
+        function toggleAudio() {
+            state.audioEnabled = !state.audioEnabled;
+        }
+
+        function generatePDFReport() { window.print(); }
+
         function loadSampleData() {
-            state.masterHeaders = ['Consumer No', 'Reading Date', 'Reading Date', 'Tariff Category', 'Arrears']; // Example with duplicate 'Reading Date'
+            state.masterHeaders = ['Consumer No', 'Reading Date', 'Reading Date', 'Tariff Category', 'Arrears'];
             state.master2DData = [
                 ['1142001001', '01-08-2026', '10-08-2026', 'LV-2.1', '1450'],
                 ['1142001002', '02-08-2026', '11-08-2026', 'LV-3.1', '3200']
             ];
-
             state.masterKeyMap.clear();
-            state.master2DData.forEach(row => state.masterKeyMap.set(row[0], row));
+            state.master2DData.forEach(r => state.masterKeyMap.set(r[0], r));
 
             document.getElementById('master-count-badge').textContent = '2 Records (Sample)';
-            state.selectedColumnIndicesSequence = [1, 2, 4]; // Selected both Reading Dates by Index!
+            state.selectedColumnIndicesSequence = [1, 2, 4];
 
             state.compareFiles = [{
-                fileName: 'Defaulter_List_Sample.xlsx',
+                fileName: 'Defaulter_List.xlsx',
                 headers: ['Consumer_ID', 'Amount_Pending'],
-                records: [
-                    ['N1142001001', '1450'],
-                    ['IVRS-1142001002', '3200']
-                ]
+                records: [['N1142001001', '1450'], ['IVRS-1142001002', '3200']]
             }];
 
             renderCompareFilesList();
             renderFieldToggles();
-            processData();
+            processData(true);
         }
     </script>
 </body>

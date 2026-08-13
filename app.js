@@ -863,7 +863,7 @@
         }
 
         function verifyPassword() {
-            const pws = { STOCK: "AE123", EXCEL_TOOL_ADMIN: "AE123" };
+            const pws = { STOCK: "AE123", EXCEL_TOOL_ADMIN: "AE123", PANCHNAMA_TOOL_ADMIN: "AE123" };
             if (document.getElementById("pwd-input").value === pws[pendingLevel]) {
                 activeViewLevel = pendingLevel;
                 closePwdModal();
@@ -874,6 +874,11 @@
                 if (pendingLevel === "EXCEL_TOOL_ADMIN") {
                     initExcelToolAdminUpload();
                     switchView("excel-tool-admin");
+                    return;
+                }
+                if (pendingLevel === "PANCHNAMA_TOOL_ADMIN") {
+                    initPanchnamaToolAdminUpload();
+                    switchView("panchnama-tool-admin");
                     return;
                 }
                 switchView("summary");
@@ -938,19 +943,38 @@
                     statusBox.innerText = "Upload ho raha hai...";
                 }
                 try {
-                    const p = new URLSearchParams();
-                    p.append("action", "uploadExternalToolHtml");
-                    p.append("tool_key", "EXCEL_AUTOMATION");
-                    p.append("html", htmlContent);
-                    p.append("file_name", file.name);
-                    const response = await fetch(revenueCollectionSubmitScriptUrl, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-                        body: p.toString()
+                    // BUG FIX: pehle yahan URLSearchParams (application/x-www-form-urlencoded)
+                    // use hota tha - HTML content me bahut saare space/</>/"quote/newline
+                    // hote hain, jo percent-encoding me har character ko "%XX" (3 character)
+                    // bana deta hai - isse ek 72KB ki file ka POST body 150-200KB+ tak phool
+                    // jaata tha, jisse Google ka front-end request ko hi reject kar deta tha
+                    // (HTTP 404 + ek generic Google error HTML page, JSON ki jagah).
+                    // Fix: ab JSON.stringify() se body banate hain (bahut kam overhead,
+                    // sirf quotes/backslash/newline escape hote hain) - lekin Content-Type
+                    // "application/json" nahi rakha, kyonki wo CORS "preflight" (OPTIONS
+                    // request) trigger karta hai jise Apps Script web app handle nahi karta.
+                    // Isliye Content-Type "text/plain" (CORS-safe, "simple request", koi
+                    // preflight nahi) rakha hai - backend ka getRequestData_() body ke
+                    // shuru me "{" dekhkar khud hi ise JSON samajh kar parse kar leta hai
+                    // (Content-Type header par depend nahi karta), toh yeh already-existing
+                    // logic ke saath bhi compatible hai.
+                    const payload = JSON.stringify({
+                        action: "uploadExternalToolHtml",
+                        tool_key: "EXCEL_AUTOMATION",
+                        html: htmlContent,
+                        file_name: file.name
                     });
+                    console.log("EXCEL TOOL UPLOAD: starting, html length =", htmlContent.length, "payload length =", payload.length, "file =", file.name);
+                    const response = await fetchWithTimeout(revenueCollectionSubmitScriptUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+                        body: payload
+                    }, 40000);
                     const responseText = await response.text();
+                    console.log("EXCEL TOOL UPLOAD: http status =", response.status, "body (first 300 chars) =", responseText.slice(0, 300));
                     let parsed = {};
-                    try { parsed = JSON.parse(responseText || "{}"); } catch (_) {}
+                    let parseFailed = false;
+                    try { parsed = JSON.parse(responseText || "{}"); } catch (_) { parseFailed = true; }
                     if (response.ok && parsed.status !== "error") {
                         if (statusBox) {
                             statusBox.style.background = "#ecfdf5";
@@ -959,13 +983,116 @@
                         }
                         showToast("Tool update ho gaya", true);
                     } else {
-                        throw new Error(parsed.message || "Upload nahi ho paya");
+                        // Jitna detail mil sake utna dikhate hain (HTTP status + backend
+                        // ka message, ya agar JSON hi nahi mila to raw response ka
+                        // shuruaati hissa) - taaki screenshot se hi asli wajah pata chal
+                        // jaaye, DevTools kholne ki zaroorat na pade.
+                        const detail = parsed.message
+                            ? parsed.message
+                            : (parseFailed ? `Server se JSON nahi mila (HTTP ${response.status}): ${responseText.slice(0, 150)}` : `HTTP ${response.status}`);
+                        throw new Error(detail);
                     }
                 } catch (error) {
+                    console.log("EXCEL TOOL UPLOAD: failed -", error);
                     if (statusBox) {
                         statusBox.style.background = "#fff1f2";
                         statusBox.style.color = "#991b1b";
-                        statusBox.innerText = error?.message || "Upload nahi ho paya, network check kijiye";
+                        statusBox.innerText = "Upload nahi ho paya: " + (error?.message || "network/unknown error");
+                    }
+                    showToast("Upload nahi ho paya", false);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // Panchnama tool - Excel Automation jaisa hi same flow (password-protected
+        // admin upload, generic backend action=uploadExternalToolHtml/getExternalToolHtml
+        // ko sirf tool_key="PANCHNAMA" se reuse kiya hai - koi naya .gs backend change
+        // nahi chahiye).
+        function openPanchnamaToolAdminUpload() {
+            closeHeaderMenu();
+            askPassword("PANCHNAMA_TOOL_ADMIN");
+        }
+
+        function initPanchnamaToolAdminUpload() {
+            const fileInput = document.getElementById("panchnama-tool-html-input");
+            const filenameBox = document.getElementById("panchnama-tool-upload-filename");
+            const statusBox = document.getElementById("panchnama-tool-upload-status");
+            if (fileInput) fileInput.value = "";
+            if (filenameBox) filenameBox.innerText = "";
+            if (statusBox) statusBox.style.display = "none";
+        }
+
+        function handlePanchnamaToolHtmlUpload(event) {
+            const file = event?.target?.files?.[0];
+            if (!file) return;
+            const filenameBox = document.getElementById("panchnama-tool-upload-filename");
+            const statusBox = document.getElementById("panchnama-tool-upload-status");
+            if (filenameBox) filenameBox.innerText = file.name;
+            if (!file.name.toLowerCase().endsWith(".html")) {
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#fff1f2";
+                    statusBox.style.color = "#991b1b";
+                    statusBox.innerText = "Sirf .html file hi upload kijiye";
+                }
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const htmlContent = String(e.target?.result || "");
+                if (!htmlContent.trim()) {
+                    if (statusBox) {
+                        statusBox.style.display = "block";
+                        statusBox.style.background = "#fff1f2";
+                        statusBox.style.color = "#991b1b";
+                        statusBox.innerText = "File khali hai ya padhi nahi ja saki";
+                    }
+                    return;
+                }
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#eff6ff";
+                    statusBox.style.color = "#1d4ed8";
+                    statusBox.innerText = "Upload ho raha hai...";
+                }
+                try {
+                    const payload = JSON.stringify({
+                        action: "uploadExternalToolHtml",
+                        tool_key: "PANCHNAMA",
+                        html: htmlContent,
+                        file_name: file.name
+                    });
+                    console.log("PANCHNAMA TOOL UPLOAD: starting, html length =", htmlContent.length, "payload length =", payload.length, "file =", file.name);
+                    const response = await fetchWithTimeout(revenueCollectionSubmitScriptUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+                        body: payload
+                    }, 40000);
+                    const responseText = await response.text();
+                    console.log("PANCHNAMA TOOL UPLOAD: http status =", response.status, "body (first 300 chars) =", responseText.slice(0, 300));
+                    let parsed = {};
+                    let parseFailed = false;
+                    try { parsed = JSON.parse(responseText || "{}"); } catch (_) { parseFailed = true; }
+                    if (response.ok && parsed.status !== "error") {
+                        if (statusBox) {
+                            statusBox.style.background = "#ecfdf5";
+                            statusBox.style.color = "#047857";
+                            statusBox.innerText = "Panchnama tool update ho gaya - sabhi DC me turant reflect hoga";
+                        }
+                        showToast("Tool update ho gaya", true);
+                    } else {
+                        const detail = parsed.message
+                            ? parsed.message
+                            : (parseFailed ? `Server se JSON nahi mila (HTTP ${response.status}): ${responseText.slice(0, 150)}` : `HTTP ${response.status}`);
+                        throw new Error(detail);
+                    }
+                } catch (error) {
+                    console.log("PANCHNAMA TOOL UPLOAD: failed -", error);
+                    if (statusBox) {
+                        statusBox.style.background = "#fff1f2";
+                        statusBox.style.color = "#991b1b";
+                        statusBox.innerText = "Upload nahi ho paya: " + (error?.message || "network/unknown error");
                     }
                     showToast("Upload nahi ho paya", false);
                 }
@@ -1572,20 +1699,44 @@
             return getRevenueMonthKey(raw);
         }
 
+        // NOTE (user request): pehle yahan sirf EXACT month/date match hota tha
+        // (paid date ka month === selected month, ya paid date === selected date) -
+        // isse ek hi cash list upload me agar kuch consumer ka real payment date
+        // pichhle month ka ho (real NGB exports me aksar mix milta hai), to wo
+        // consumer paid hote hue bhi us report me "pending/unpaid" dikhta tha.
+        // User ne explicitly bola ki Category Wise / Target vs Achievement /
+        // HQ-Village / Non-Payee jaisi reports me current + pichhle sabhi
+        // mahino ka paid data bhi count ho (cumulative "as of selected period") -
+        // sirf future (aage ke) month/date ka data ab bhi exclude rahega. Yeh
+        // sirf paid-status MATCHING ko relax karta hai; NORMAL file abhi bhi
+        // sirf LV1-LV4 aur AG file abhi bhi sirf LV5 count karti hai (wo alag
+        // getRevenueUploadedPaidRowCategory() me handle hota hai, yahan nahi
+        // chheda). Pending DO List apni alag paidSet logic use karta hai (date
+        // se bilkul independent, wahan pehle se hi koi restriction nahi thi) -
+        // isliye is change se wahan koi asar nahi padta.
         function isRevenueUploadedPaidInCategoryPeriod(row, mode, filterValue) {
             if (mode === "MONTHLY") {
                 const targetMonthKey = normalizeRevenueMonthFilterKey(filterValue);
                 if (!targetMonthKey) return false;
                 const paidDate = normalizeRevenuePaidDate(getRevenueUploadedPaidRowDate(row), targetMonthKey);
                 if (!paidDate) return false;
-                return getRevenueMonthKey(paidDate) === targetMonthKey;
+                return getRevenueMonthKey(paidDate) <= targetMonthKey;
             }
             const targetDate = normalizeRevenueReportDate(filterValue || getCurrentDateDDMMYYYY());
             if (!targetDate) return false;
             const targetMonthKey = getRevenueMonthKey(targetDate);
             const paidDate = normalizeRevenuePaidDate(getRevenueUploadedPaidRowDate(row), targetMonthKey);
             if (!paidDate) return false;
-            return normalizeRevenueReportDate(paidDate) === targetDate;
+            return revenueDateSortKey_(normalizeRevenueReportDate(paidDate)) <= revenueDateSortKey_(targetDate);
+        }
+
+        // DD-MM-YYYY ko YYYY-MM-DD me convert karta hai taaki string "<=" se
+        // chronological (calendar-wise) comparison sahi ho - DD-MM-YYYY ko
+        // seedhe compare karne se date order galat aata hai.
+        function revenueDateSortKey_(ddmmyyyy) {
+            const m = String(ddmmyyyy || "").match(/^(\d{2})-(\d{2})-(\d{4})$/);
+            if (!m) return "";
+            return `${m[3]}-${m[2]}-${m[1]}`;
         }
 
         function getRevenueUploadedPaidRowDcName(row, fallbackDc = "") {
@@ -9661,8 +9812,17 @@
                 const baseUrl = window.location.href.split("#")[0].split("?")[0];
                 const toolUrl = baseUrl.replace(/[^/]*$/, "") + "excel-automation.html";
                 try {
+                    // NOTE (fixed): pehle yahan sirf 8 second ka timeout tha - is backend
+                    // (Google Apps Script) ka response kabhi-kabhi 15-20+ second bhi le
+                    // leta hai (jaisa doosri Revenue reports me bhi pehle dekha gaya hai),
+                    // isliye 8 second me hi silently purani static GitHub file par
+                    // fallback ho jaata tha - koi error bhi nahi dikhta tha, isliye naya
+                    // upload kiya hua tool kabhi khulta hi nahi tha, hamesha purana hi
+                    // dikhta rehta tha. Ab 40 second diya hai (poori DC-agnostic report
+                    // fetches jaisa hi generous), aur agar phir bhi fallback ho to user ko
+                    // saaf toast bhi dikhega ki "latest fetch nahi ho paya".
                     const fetchUrl = `${revenueCollectionSubmitScriptUrl}?action=getExternalToolHtml&tool_key=EXCEL_AUTOMATION&t=${Date.now()}`;
-                    const response = await fetchWithTimeout(fetchUrl, {}, 8000);
+                    const response = await fetchWithTimeout(fetchUrl, {}, 40000);
                     const parsed = await response.json();
                     if (parsed && parsed.status === "success" && parsed.html) {
                         if (newTab && !newTab.closed) {
@@ -9675,7 +9835,78 @@
                         }
                         return;
                     }
-                } catch (_) {}
+                    showToast("Latest tool fetch nahi ho paya, purani file khul rahi hai", false);
+                } catch (_) {
+                    showToast("Latest tool fetch nahi ho paya, purani file khul rahi hai", false);
+                }
+                if (newTab && !newTab.closed) {
+                    newTab.location.href = toolUrl;
+                } else {
+                    window.open(toolUrl, "_blank", "noopener");
+                }
+            } finally {
+                restoreBtn();
+            }
+        }
+
+        // Panchnama tool ka "open new tab" flow bilkul Excel Automation jaisa hi hai
+        // (isi wajah se yahan bhi same synchronous-tab-open + reentrancy-guard +
+        // 40-second backend-fetch-with-static-fallback pattern use kiya hai). Static
+        // fallback file panchnama/index.html me hai (isi ke saath panchnama/manifest.json
+        // aur panchnama/sw.js bhi hain jo tool ki apni PWA installability ke liye hain -
+        // fallback tab me likhte waqt yeh dono files chalte na bhi ho, tool ka paragraph-
+        // copy wala main kaam bilkul theek chalega).
+        let panchnamaToolOpening = false;
+        async function openPanchnamaTool() {
+            if (panchnamaToolOpening) return;
+            panchnamaToolOpening = true;
+            const btn = document.getElementById("panchnama-tool-open-btn");
+            const originalBtnText = btn ? btn.innerText : "Open Panchnama Tool";
+            if (btn) {
+                btn.disabled = true;
+                btn.style.opacity = "0.65";
+                btn.style.pointerEvents = "none";
+                btn.innerText = "Opening...";
+            }
+            const restoreBtn = () => {
+                panchnamaToolOpening = false;
+                if (!btn) return;
+                btn.disabled = false;
+                btn.style.opacity = "1";
+                btn.style.pointerEvents = "auto";
+                btn.innerText = originalBtnText;
+            };
+            try {
+                const newTab = window.open("", "_blank");
+                if (newTab) {
+                    try {
+                        newTab.document.write("<!DOCTYPE html><html><head><title>Panchnama - Loading...</title></head><body style=\"background:#0f172a; color:#e2e8f0; font-family:Arial,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;\"><div style=\"text-align:center;\"><div style=\"font-size:1rem; font-weight:700;\">Panchnama Tool load ho raha hai...</div></div></body></html>");
+                        newTab.document.close();
+                    } catch (_) {}
+                } else {
+                    showToast("Naya tab nahi khul paya - browser me popup allow kijiye", false);
+                }
+                const baseUrl = window.location.href.split("#")[0].split("?")[0];
+                const toolUrl = baseUrl.replace(/[^/]*$/, "") + "panchnama/index.html";
+                try {
+                    const fetchUrl = `${revenueCollectionSubmitScriptUrl}?action=getExternalToolHtml&tool_key=PANCHNAMA&t=${Date.now()}`;
+                    const response = await fetchWithTimeout(fetchUrl, {}, 40000);
+                    const parsed = await response.json();
+                    if (parsed && parsed.status === "success" && parsed.html) {
+                        if (newTab && !newTab.closed) {
+                            newTab.document.open();
+                            newTab.document.write(parsed.html);
+                            newTab.document.close();
+                        } else {
+                            const blob = new Blob([parsed.html], { type: "text/html" });
+                            window.open(URL.createObjectURL(blob), "_blank", "noopener");
+                        }
+                        return;
+                    }
+                    showToast("Latest tool fetch nahi ho paya, purani file khul rahi hai", false);
+                } catch (_) {
+                    showToast("Latest tool fetch nahi ho paya, purani file khul rahi hai", false);
+                }
                 if (newTab && !newTab.closed) {
                     newTab.location.href = toolUrl;
                 } else {
@@ -16197,6 +16428,8 @@
                 if (id === "vr-calculation") headerTitle = "VR CALCULATION";
                 if (id === "excel-automation") headerTitle = "EXCEL AUTOMATION";
                 if (id === "excel-tool-admin") headerTitle = "UPDATE EXCEL AUTOMATION TOOL";
+                if (id === "panchnama-tool") headerTitle = "PANCHNAMA";
+                if (id === "panchnama-tool-admin") headerTitle = "UPDATE PANCHNAMA TOOL";
                 if (id === "vr-download-log") headerTitle = "VR DOWNLOAD LOG";
                 if (id === "stock-material") headerTitle = "STOCK MATERIAL";
                 if (id === "shms-entry") headerTitle = "SHMS ENTRY";
@@ -16239,6 +16472,8 @@
                 if (staffAdminMenuItem) staffAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 const excelToolAdminMenuItem = document.getElementById("excel-tool-admin-header-menu-item");
                 if (excelToolAdminMenuItem) excelToolAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
+                const panchnamaToolAdminMenuItem = document.getElementById("panchnama-tool-admin-header-menu-item");
+                if (panchnamaToolAdminMenuItem) panchnamaToolAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 closeHeaderMenu();
                 const searchBtn = document.getElementById("search-btn");
                 if (id === "home") {
