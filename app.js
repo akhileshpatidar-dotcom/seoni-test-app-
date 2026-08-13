@@ -12412,6 +12412,17 @@
                     amountPaid: getRevenueUploadedPaidRowAmount(entry),
                     paymentDate: getRevenueUploadedPaidRowDate(entry),
                     paymentDateRaw: entry.paymentDateRaw || entry.payment_date_raw || getRevenueUploadedPaidRowDate(entry),
+                    // BUG FIX (2026-08-13): yeh function backend se aaya hua entry
+                    // dobara ek "saaf" object banakar cache me save karta hai - pehle
+                    // isme "uploaded_date" field include hi nahi thi, isliye backend se
+                    // sahi uploaded_date aane ke bawajood yahan cache me save karte
+                    // waqt woh gir (drop ho) jaati thi. Isi wajah se upload ke turant
+                    // baad (jab local raw IndexedDB cache use hoti thi) sahi dikhta
+                    // tha, lekin thodi der baad jab yeh cache dobara backend se sync
+                    // hoti thi to Achieved hamesha 0 aane lagta tha - ab yahan bhi
+                    // uploaded_date save karte hain taaki isRevenueUploadedPaidIn-
+                    // CategoryPeriod() ko yeh hamesha sahi mile.
+                    uploadedDate: getRevenueUploadedPaidRowUploadedDate(entry),
                     paymentCount: entry.payment_count || entry.paymentCount || entry.count || "",
                     sourceType: entry.source_type || entry.sourceType || entry.type || "",
                     tariffCategory: entry.tariffCategory || entry.tariff_category || getRevenueUploadedPaidRowCategory(entry, entry.source_type || entry.sourceType || ""),
