@@ -561,7 +561,6 @@
         // Date/Month/All Time wise poori CONSUMER-WISE LIST (IVRS, Naam, Mobile,
         // Status) taaki DC wala apni poori list PDF/Excel me nikal sake.
         let mobileUpdateListMode = "ALL";
-        let mobileUpdateListStatusFilter = "ALL";
         let mobileUpdateListRows = null;
         let mobileUpdateListRenderToken = 0;
 
@@ -813,9 +812,7 @@
             if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
             if (monthInput && !monthInput.value) monthInput.value = getTodayIsoDate().slice(0, 7);
             const scopeLabel = document.getElementById("mobile-update-list-scope-label");
-            if (scopeLabel) scopeLabel.innerText = activeDC ? `DC: ${activeDC} - Consumer-wise List` : "Consumer-wise List";
-            const statusSelect = document.getElementById("mobile-update-list-status");
-            if (statusSelect) statusSelect.value = mobileUpdateListStatusFilter;
+            if (scopeLabel) scopeLabel.innerText = activeDC ? `DC: ${activeDC} - Sirf UPDATED Consumers (Correct Mobile No)` : "Sirf UPDATED Consumers (Correct Mobile No)";
             setMobileUpdateListMode(mobileUpdateListMode || "ALL");
         }
 
@@ -832,12 +829,6 @@
             if (dateBtn) { dateBtn.style.background = mobileUpdateListMode === "DAILY" ? "#991b1b" : "#ffe4e6"; dateBtn.style.color = mobileUpdateListMode === "DAILY" ? "#ffffff" : "#991b1b"; }
             if (monthBtn) { monthBtn.style.background = mobileUpdateListMode === "MONTHLY" ? "#991b1b" : "#ffe4e6"; monthBtn.style.color = mobileUpdateListMode === "MONTHLY" ? "#ffffff" : "#991b1b"; }
             renderMobileUpdateList();
-        }
-
-        function setMobileUpdateListStatusFilter(value) {
-            mobileUpdateListStatusFilter = ["UPDATED", "PENDING"].includes(value) ? value : "ALL";
-            const tableBox = document.getElementById("mobile-update-list-table");
-            if (tableBox) tableBox.innerHTML = renderMobileUpdateListTableHtml();
         }
 
         function getMobileUpdateListPeriod() {
@@ -857,7 +848,10 @@
         // buildMobileUpdateReportData() (upar) sirf HQ/Village LEVEL AGGREGATE counts
         // banata hai. Yahan wahi matching logic (matchesProgressDate se date/month
         // filter) reuse karte hain lekin per-consumer detail (mobile no + updated
-        // date) bhi sath rakhte hain, taaki poori list row-by-row dikh/download ho sake.
+        // date) bhi sath rakhte hain. USER REQUEST (2026-08-14): is list me sirf
+        // wahi consumer aane chahiye jinka mobile no APP SE ACTUALLY UPDATE hua ho
+        // (correct_mobile wali entry mili ho) - total/pending consumer is list me
+        // bilkul nahi aane chahiye, isliye yahin filter kar dete hain.
         function buildMobileUpdateListRows(rows, dcName, cloudData, period) {
             const normDc = normalizeDcName(dcName);
             const updatedInfoByIvrs = {};
@@ -879,70 +873,52 @@
                 }
             });
 
-            return rows.map((row) => {
-                const ivrs = normalizeLookupDigits(row.ivrsNo);
-                const info = ivrs ? updatedInfoByIvrs[ivrs] : null;
-                return {
-                    ivrsNo: row.ivrsNo || "",
-                    consumerName: row.consumerName || "",
-                    hqName: String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL",
-                    village: String(row.village || "UNKNOWN").trim().toUpperCase() || "UNKNOWN",
-                    oldMobile: row.mobileNo || "",
-                    updatedMobile: info ? info.mobile : "",
-                    updatedDate: info ? info.date : "",
-                    status: info ? "UPDATED" : "PENDING"
-                };
-            }).filter((row) => row.ivrsNo);
+            return rows
+                .map((row) => {
+                    const ivrs = normalizeLookupDigits(row.ivrsNo);
+                    const info = ivrs ? updatedInfoByIvrs[ivrs] : null;
+                    if (!info) return null;
+                    return {
+                        ivrsNo: row.ivrsNo || "",
+                        consumerName: row.consumerName || "",
+                        hqName: String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL",
+                        village: String(row.village || "UNKNOWN").trim().toUpperCase() || "UNKNOWN",
+                        oldMobile: row.mobileNo || "",
+                        updatedMobile: info.mobile,
+                        updatedDate: info.date,
+                        status: "UPDATED"
+                    };
+                })
+                .filter((row) => row && row.ivrsNo);
         }
 
-        function getMobileUpdateListFilteredRows() {
-            const all = mobileUpdateListRows || [];
-            if (mobileUpdateListStatusFilter === "UPDATED") return all.filter((row) => row.status === "UPDATED");
-            if (mobileUpdateListStatusFilter === "PENDING") return all.filter((row) => row.status === "PENDING");
-            return all;
-        }
-
-        function renderMobileUpdateListSummaryHtml(all) {
-            const total = all.length;
-            const updated = all.filter((row) => row.status === "UPDATED").length;
-            const pct = total ? Math.round((updated / total) * 1000) / 10 : 0;
+        // USER REQUEST (2026-08-14): Screen par ab sirf SUMMARY (kitne consumer ka
+        // mobile no update hua) dikhta hai, poori row-by-row list nahi - poori list
+        // sirf PDF/Excel download me milegi.
+        function renderMobileUpdateListSummaryHtml(updatedRows) {
+            const updated = (updatedRows || []).length;
             return `
-                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; margin:0 auto;">
-                    <div style="background:#f1f5f9; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#64748b; text-transform:uppercase;">Total</div><div style="font-size:1.05rem; font-weight:950; color:#0f172a; margin-top:3px;">${total}</div></div>
-                    <div style="background:#ecfdf5; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#166534; text-transform:uppercase;">Updated</div><div style="font-size:1.05rem; font-weight:950; color:#166534; margin-top:3px;">${updated}</div></div>
-                    <div style="background:#fff1f2; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Pending</div><div style="font-size:1.05rem; font-weight:950; color:#9f1239; margin-top:3px;">${total - updated}</div></div>
+                <div style="width:100%; max-width:360px; margin:0 auto; background:#ecfdf5; border:1.5px solid #86efac; border-radius:16px; padding:16px 10px; text-align:center;">
+                    <div style="font-size:0.6rem; font-weight:850; color:#166534; text-transform:uppercase;">Total Mobile No Updated (App Se)</div>
+                    <div style="font-size:1.7rem; font-weight:950; color:#166534; margin-top:4px;">${updated}</div>
                 </div>
-                <div style="text-align:center; margin-top:8px; font-size:0.7rem; font-weight:950; color:#991b1b;">${pct}% Updated</div>
+                <div style="text-align:center; margin-top:10px; font-size:0.66rem; font-weight:850; color:#64748b;">Poori list (IVRS/Naam/Mobile/Date sahit) niche PDF ya EXCEL button se download kijiye</div>
             `;
-        }
-
-        function renderMobileUpdateListTableHtml() {
-            const rows = getMobileUpdateListFilteredRows();
-            let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 0.75fr 1.3fr 0.85fr 0.85fr;"><div>IVRS NO</div><div>NAME</div><div>MOBILE</div><div>STATUS</div></div>`;
-            if (!rows.length) {
-                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is filter me consumer nahi mila.</div></div>`;
-            } else {
-                rows.forEach((row) => {
-                    const statusColor = row.status === "UPDATED" ? "#166534" : "#9f1239";
-                    html += `<div class="summary-table-row" style="grid-template-columns: 0.75fr 1.3fr 0.85fr 0.85fr;"><div>${escapeHtml(row.ivrsNo)}</div><div>${escapeHtml(row.consumerName)}</div><div>${escapeHtml(row.updatedMobile || row.oldMobile || "-")}</div><div style="color:${statusColor}; font-weight:950;">${row.status}</div></div>`;
-                });
-            }
-            html += `</div>`;
-            return html;
         }
 
         async function renderMobileUpdateList() {
             const summaryBox = document.getElementById("mobile-update-list-summary");
             const tableBox = document.getElementById("mobile-update-list-table");
             const statusBox = document.getElementById("mobile-update-list-download-status");
-            if (!tableBox) return;
+            if (!summaryBox) return;
             const renderToken = ++mobileUpdateListRenderToken;
             if (statusBox) statusBox.style.display = "none";
             if (summaryBox) summaryBox.innerHTML = "";
+            if (tableBox) tableBox.innerHTML = "";
             mobileUpdateListRows = null;
             const dcName = activeDC;
             const isRenderValid = () => renderToken === mobileUpdateListRenderToken && document.getElementById("mobile-update-list-view")?.classList.contains("active");
-            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST DATA...");
+            const progress = renderSyncingProgress(summaryBox, isRenderValid, "SYNCING LATEST DATA...");
             try {
                 if (!dcName) throw new Error("DC select nahi hai");
                 await ensureConsumerDataLoadedFor([dcName]);
@@ -953,8 +929,7 @@
                 mobileUpdateListRows = buildMobileUpdateListRows(rows, dcName, cloudData, period);
                 await progress.finish();
                 if (!isRenderValid()) return;
-                if (summaryBox) summaryBox.innerHTML = renderMobileUpdateListSummaryHtml(mobileUpdateListRows);
-                tableBox.innerHTML = renderMobileUpdateListTableHtml();
+                summaryBox.innerHTML = renderMobileUpdateListSummaryHtml(mobileUpdateListRows);
             } catch (error) {
                 progress.stop();
                 if (statusBox) {
@@ -987,19 +962,18 @@
         }
 
         function downloadMobileUpdateList(type) {
-            const rows = getMobileUpdateListFilteredRows();
-            if (!rows.length) return showToast("List ke liye data nahi hai", false);
+            const rows = mobileUpdateListRows || [];
+            if (!rows.length) return showToast("Is period me kisi bhi consumer ka mobile no update nahi hua", false);
             setMobileUpdateListDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
             try {
                 const headers = ["STATUS", "IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "OLD MOBILE NO", "UPDATED MOBILE NO", "UPDATED DATE"];
                 const bodyRows = rows.map((row) => [row.status, row.ivrsNo, row.consumerName, row.hqName, row.village, row.oldMobile, row.updatedMobile, row.updatedDate]);
                 const period = getMobileUpdateListPeriod();
                 const periodLabel = period.mode === "ALL" ? "All Time" : (period.label || period.dStr || period.mStr || "All Time");
-                const statusLabel = mobileUpdateListStatusFilter === "UPDATED" ? "Updated Only" : (mobileUpdateListStatusFilter === "PENDING" ? "Pending Only" : "All (Updated + Pending)");
                 const reportTitle = `Mobile No Update List - DC ${activeDC}`;
-                const scopeLine = `Scope: DC - ${activeDC}  |  Status: ${statusLabel}`;
+                const scopeLine = `Scope: DC - ${activeDC}  |  Status: Updated Only (Correct Mobile No)`;
                 const periodLine = `Period: ${periodLabel}`;
-                const fileName = `Mobile-No-Update-List-${activeDC}-${mobileUpdateListStatusFilter}-${periodLabel}`.replace(/[\\/:*?"<>|]+/g, "_");
+                const fileName = `Mobile-No-Update-List-${activeDC}-UPDATED-${periodLabel}`.replace(/[\\/:*?"<>|]+/g, "_");
                 if (type === "PDF") {
                     if (!window.jspdf?.jsPDF) { setMobileUpdateListDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;

@@ -92,7 +92,7 @@
                     <button type="button" class="header-menu-item dc-dashboard-header-menu-item" onclick="switchView('vr-calculation')" style="display:none; background:#1e3a8a; color:#ffffff;">📐 VR Calculation</button>
                     <button type="button" class="header-menu-item dc-dashboard-header-menu-item" onclick="switchView('excel-automation')" style="display:none; background:#16a34a; color:#ffffff;">📊 Excel Automation</button>
                     <button type="button" class="header-menu-item dc-dashboard-header-menu-item" onclick="switchView('panchnama-tool')" style="display:none; background:#ea580c; color:#ffffff;">📝 Panchnama Template</button>
-                    <button type="button" class="header-menu-item mobile-update-header-menu-item" onclick="openMobileUpdateReport()" style="display:none;">📄 Download Report</button>
+                    <button type="button" class="header-menu-item mobile-update-header-menu-item" onclick="openMobileUpdateReport()" style="display:none;">📄 Download Summary Report</button>
                     <button type="button" class="header-menu-item mobile-update-header-menu-item" onclick="openMobileUpdateList()" style="display:none;">📋 Date/Month Wise List Download</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item live-progress-menu-item" onclick="openRevenueLiveProgress()">⏱️ Live Progress</button>
                     <button type="button" class="header-menu-item revenue-header-menu-item" onclick="openRevenueReportDownload()">📄 Paid by Staff Date/Month</button>
@@ -1083,7 +1083,7 @@
             <div class="search-panel" style="padding-top:10px;">
                 <div style="width:100%; max-width:360px; background:#fff1f2; border:1.2px solid #fca5a5; border-radius:14px; padding:9px 12px; text-align:center;">
                     <div style="font-size:0.78rem; font-weight:950; color:#991b1b; text-transform:uppercase;">Mobile No Update - Consumer List</div>
-                    <div id="mobile-update-list-scope-label" style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">Consumer-wise List</div>
+                    <div id="mobile-update-list-scope-label" style="font-size:0.58rem; font-weight:850; color:#475569; margin-top:2px;">Sirf UPDATED Consumers (Correct Mobile No)</div>
                 </div>
                 <div style="display:flex; gap:8px; width:100%; max-width:360px; margin:9px auto 0;">
                     <button id="mobile-update-list-all-mode-btn" onclick="setMobileUpdateListMode('ALL')" style="flex:1; height:32px; border:none; border-radius:999px; background:#991b1b; color:#ffffff; font-size:0.6rem; font-weight:950;">ALL TIME</button>
@@ -1094,13 +1094,8 @@
                     <input id="mobile-update-list-date" type="date" onchange="renderMobileUpdateList()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:none; border:1.2px solid #fca5a5; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
                     <input id="mobile-update-list-month" type="month" onchange="renderMobileUpdateList()" style="width:100%; max-width:100%; min-width:0; box-sizing:border-box; height:38px; line-height:38px; display:none; border:1.2px solid #fca5a5; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
                 </div>
-                <select id="mobile-update-list-status" onchange="setMobileUpdateListStatusFilter(this.value)" style="width:100%; max-width:360px; height:42px; margin:8px auto 0; display:block; border:1.5px solid #fca5a5; border-radius:12px; padding:0 12px; font-size:0.76rem; font-weight:950; color:#991b1b; background:#fff7f7;">
-                    <option value="ALL">ALL (UPDATED + PENDING)</option>
-                    <option value="UPDATED">UPDATED ONLY</option>
-                    <option value="PENDING">PENDING ONLY</option>
-                </select>
-                <div id="mobile-update-list-summary" style="width:100%; max-width:360px; margin:0 auto;"></div>
-                <div id="mobile-update-list-table" style="width:100%; max-width:360px; max-height:340px; overflow-y:auto; margin:10px auto 0;"></div>
+                <div id="mobile-update-list-summary" style="width:100%; max-width:360px; margin:8px auto 0;"></div>
+                <div id="mobile-update-list-table" style="width:100%; max-width:360px; margin:0 auto;"></div>
                 <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
                     <button id="mobile-update-list-pdf-btn" onclick="downloadMobileUpdateList('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF</button>
                     <button id="mobile-update-list-excel-btn" onclick="downloadMobileUpdateList('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL</button>
