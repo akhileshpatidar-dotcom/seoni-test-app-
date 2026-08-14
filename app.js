@@ -129,9 +129,17 @@
         let progressRevenueReportType = "STAFF";
         let progressRevenueDefaultersLimit = 20;
         let progressDefaultersGovtFilter = "";
+        // USER REQUEST (2026-08-13): Daily Progress -> Revenue -> "Target vs
+        // Achievement" dropdown me bhi Govt/Non-Govt filter chahiye (jaisa Top
+        // Defaulters me pehle se hai).
+        let progressTargetGovtFilter = "";
         let progressStaffTypeFilter = "";
         let lastRevenueProgressBoxData = null;
         let lastRevenueProgressStaffData = null;
+        // Target vs Achievement ke liye - jab Govt/Non-Govt filter select ho, tab
+        // us filter ke saath banaya hua tree yahan rakhte hain, taaki download
+        // (Excel/PDF) bhi screen par jo dikh raha hai wahi (filtered) data use kare.
+        let lastRevenueProgressTargetSummaryData = null;
         let suppressHistoryPush = false;
         let progressSummaryDownloadInProgress = false;
         let selectedStockReceiveItem = null, selectedStockIssueItem = null, pendingReceiveItems = [], pendingIssueItems = [];
@@ -547,6 +555,16 @@
         let mobileUpdateReportTree = null;
         let mobileUpdateReportRenderToken = 0;
 
+        // USER REQUEST (2026-08-14): "Update Mobile No" (daily) screen ke 3-dot
+        // menu me ab ek "List Download" option bhi hai - upar wale "Download
+        // Report" jaisa sirf HQ/Village LEVEL SUMMARY (counts) nahi, balki
+        // Date/Month/All Time wise poori CONSUMER-WISE LIST (IVRS, Naam, Mobile,
+        // Status) taaki DC wala apni poori list PDF/Excel me nikal sake.
+        let mobileUpdateListMode = "ALL";
+        let mobileUpdateListStatusFilter = "ALL";
+        let mobileUpdateListRows = null;
+        let mobileUpdateListRenderToken = 0;
+
         function openMobileUpdateReport() {
             closeHeaderMenu();
             switchView("mobile-update-report");
@@ -762,7 +780,8 @@
                     if (!window.jspdf?.jsPDF) { setMobileUpdateReportDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
                     doc.text(periodLine, 148, 25, { align: "center" });
                     doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
@@ -780,6 +799,230 @@
             } catch (error) {
                 setMobileUpdateReportDownloadState(false, "Download nahi ho paya", false);
                 showToast(error?.message || "Report download nahi ho payi", false);
+            }
+        }
+
+        function openMobileUpdateList() {
+            closeHeaderMenu();
+            switchView("mobile-update-list");
+        }
+
+        function initMobileUpdateList() {
+            const dateInput = document.getElementById("mobile-update-list-date");
+            const monthInput = document.getElementById("mobile-update-list-month");
+            if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
+            if (monthInput && !monthInput.value) monthInput.value = getTodayIsoDate().slice(0, 7);
+            const scopeLabel = document.getElementById("mobile-update-list-scope-label");
+            if (scopeLabel) scopeLabel.innerText = activeDC ? `DC: ${activeDC} - Consumer-wise List` : "Consumer-wise List";
+            const statusSelect = document.getElementById("mobile-update-list-status");
+            if (statusSelect) statusSelect.value = mobileUpdateListStatusFilter;
+            setMobileUpdateListMode(mobileUpdateListMode || "ALL");
+        }
+
+        function setMobileUpdateListMode(mode) {
+            mobileUpdateListMode = ["DAILY", "MONTHLY"].includes(mode) ? mode : "ALL";
+            const dateInput = document.getElementById("mobile-update-list-date");
+            const monthInput = document.getElementById("mobile-update-list-month");
+            const allBtn = document.getElementById("mobile-update-list-all-mode-btn");
+            const dateBtn = document.getElementById("mobile-update-list-date-mode-btn");
+            const monthBtn = document.getElementById("mobile-update-list-month-mode-btn");
+            if (dateInput) dateInput.style.display = mobileUpdateListMode === "DAILY" ? "block" : "none";
+            if (monthInput) monthInput.style.display = mobileUpdateListMode === "MONTHLY" ? "block" : "none";
+            if (allBtn) { allBtn.style.background = mobileUpdateListMode === "ALL" ? "#991b1b" : "#ffe4e6"; allBtn.style.color = mobileUpdateListMode === "ALL" ? "#ffffff" : "#991b1b"; }
+            if (dateBtn) { dateBtn.style.background = mobileUpdateListMode === "DAILY" ? "#991b1b" : "#ffe4e6"; dateBtn.style.color = mobileUpdateListMode === "DAILY" ? "#ffffff" : "#991b1b"; }
+            if (monthBtn) { monthBtn.style.background = mobileUpdateListMode === "MONTHLY" ? "#991b1b" : "#ffe4e6"; monthBtn.style.color = mobileUpdateListMode === "MONTHLY" ? "#ffffff" : "#991b1b"; }
+            renderMobileUpdateList();
+        }
+
+        function setMobileUpdateListStatusFilter(value) {
+            mobileUpdateListStatusFilter = ["UPDATED", "PENDING"].includes(value) ? value : "ALL";
+            const tableBox = document.getElementById("mobile-update-list-table");
+            if (tableBox) tableBox.innerHTML = renderMobileUpdateListTableHtml();
+        }
+
+        function getMobileUpdateListPeriod() {
+            if (mobileUpdateListMode === "DAILY") {
+                const raw = document.getElementById("mobile-update-list-date")?.value || getTodayIsoDate();
+                const parsed = parseSummarySelection(raw, "DAILY");
+                return { mode: "DAILY", dStr: parsed.daily, mStr: parsed.monthly, label: parsed.label };
+            }
+            if (mobileUpdateListMode === "MONTHLY") {
+                const raw = document.getElementById("mobile-update-list-month")?.value || getTodayIsoDate().slice(0, 7);
+                const parsed = parseSummarySelection(raw, "MONTHLY");
+                return { mode: "MONTHLY", dStr: parsed.daily, mStr: parsed.monthly, label: parsed.label };
+            }
+            return { mode: "ALL" };
+        }
+
+        // buildMobileUpdateReportData() (upar) sirf HQ/Village LEVEL AGGREGATE counts
+        // banata hai. Yahan wahi matching logic (matchesProgressDate se date/month
+        // filter) reuse karte hain lekin per-consumer detail (mobile no + updated
+        // date) bhi sath rakhte hain, taaki poori list row-by-row dikh/download ho sake.
+        function buildMobileUpdateListRows(rows, dcName, cloudData, period) {
+            const normDc = normalizeDcName(dcName);
+            const updatedInfoByIvrs = {};
+            (cloudData || []).forEach((u) => {
+                const uDc = (u.dc || "").trim().toUpperCase();
+                if (uDc !== normDc) return;
+                const mobileVal = u.correct_mobile || "";
+                const hasMobile = mobileVal.toString().trim().length === 10;
+                if (!hasMobile) return;
+                if (period.mode !== "ALL") {
+                    const ts = (u.date || "").trim();
+                    if (!matchesProgressDate(ts, period.mode, period.dStr, period.mStr)) return;
+                }
+                const ivrs = normalizeLookupDigits(u.ivrs || "");
+                if (!ivrs) return;
+                const existing = updatedInfoByIvrs[ivrs];
+                if (!existing || String(u.date || "") > String(existing.date || "")) {
+                    updatedInfoByIvrs[ivrs] = { mobile: mobileVal.toString().trim(), date: (u.date || "").trim() };
+                }
+            });
+
+            return rows.map((row) => {
+                const ivrs = normalizeLookupDigits(row.ivrsNo);
+                const info = ivrs ? updatedInfoByIvrs[ivrs] : null;
+                return {
+                    ivrsNo: row.ivrsNo || "",
+                    consumerName: row.consumerName || "",
+                    hqName: String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL",
+                    village: String(row.village || "UNKNOWN").trim().toUpperCase() || "UNKNOWN",
+                    oldMobile: row.mobileNo || "",
+                    updatedMobile: info ? info.mobile : "",
+                    updatedDate: info ? info.date : "",
+                    status: info ? "UPDATED" : "PENDING"
+                };
+            }).filter((row) => row.ivrsNo);
+        }
+
+        function getMobileUpdateListFilteredRows() {
+            const all = mobileUpdateListRows || [];
+            if (mobileUpdateListStatusFilter === "UPDATED") return all.filter((row) => row.status === "UPDATED");
+            if (mobileUpdateListStatusFilter === "PENDING") return all.filter((row) => row.status === "PENDING");
+            return all;
+        }
+
+        function renderMobileUpdateListSummaryHtml(all) {
+            const total = all.length;
+            const updated = all.filter((row) => row.status === "UPDATED").length;
+            const pct = total ? Math.round((updated / total) * 1000) / 10 : 0;
+            return `
+                <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; margin:0 auto;">
+                    <div style="background:#f1f5f9; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#64748b; text-transform:uppercase;">Total</div><div style="font-size:1.05rem; font-weight:950; color:#0f172a; margin-top:3px;">${total}</div></div>
+                    <div style="background:#ecfdf5; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#166534; text-transform:uppercase;">Updated</div><div style="font-size:1.05rem; font-weight:950; color:#166534; margin-top:3px;">${updated}</div></div>
+                    <div style="background:#fff1f2; border-radius:14px; padding:10px 6px; text-align:center;"><div style="font-size:0.56rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Pending</div><div style="font-size:1.05rem; font-weight:950; color:#9f1239; margin-top:3px;">${total - updated}</div></div>
+                </div>
+                <div style="text-align:center; margin-top:8px; font-size:0.7rem; font-weight:950; color:#991b1b;">${pct}% Updated</div>
+            `;
+        }
+
+        function renderMobileUpdateListTableHtml() {
+            const rows = getMobileUpdateListFilteredRows();
+            let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 0.75fr 1.3fr 0.85fr 0.85fr;"><div>IVRS NO</div><div>NAME</div><div>MOBILE</div><div>STATUS</div></div>`;
+            if (!rows.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is filter me consumer nahi mila.</div></div>`;
+            } else {
+                rows.forEach((row) => {
+                    const statusColor = row.status === "UPDATED" ? "#166534" : "#9f1239";
+                    html += `<div class="summary-table-row" style="grid-template-columns: 0.75fr 1.3fr 0.85fr 0.85fr;"><div>${escapeHtml(row.ivrsNo)}</div><div>${escapeHtml(row.consumerName)}</div><div>${escapeHtml(row.updatedMobile || row.oldMobile || "-")}</div><div style="color:${statusColor}; font-weight:950;">${row.status}</div></div>`;
+                });
+            }
+            html += `</div>`;
+            return html;
+        }
+
+        async function renderMobileUpdateList() {
+            const summaryBox = document.getElementById("mobile-update-list-summary");
+            const tableBox = document.getElementById("mobile-update-list-table");
+            const statusBox = document.getElementById("mobile-update-list-download-status");
+            if (!tableBox) return;
+            const renderToken = ++mobileUpdateListRenderToken;
+            if (statusBox) statusBox.style.display = "none";
+            if (summaryBox) summaryBox.innerHTML = "";
+            mobileUpdateListRows = null;
+            const dcName = activeDC;
+            const isRenderValid = () => renderToken === mobileUpdateListRenderToken && document.getElementById("mobile-update-list-view")?.classList.contains("active");
+            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST DATA...");
+            try {
+                if (!dcName) throw new Error("DC select nahi hai");
+                await ensureConsumerDataLoadedFor([dcName]);
+                const cloudData = await loadRemoteJson(`${scriptURL}?action=getSummary`);
+                if (!isRenderValid()) { progress.stop(); return; }
+                const rows = getConsumerRows(dcName).map(mapRevenueConsumerRow).filter((row) => normalizeLookupDigits(row.ivrsNo));
+                const period = getMobileUpdateListPeriod();
+                mobileUpdateListRows = buildMobileUpdateListRows(rows, dcName, cloudData, period);
+                await progress.finish();
+                if (!isRenderValid()) return;
+                if (summaryBox) summaryBox.innerHTML = renderMobileUpdateListSummaryHtml(mobileUpdateListRows);
+                tableBox.innerHTML = renderMobileUpdateListTableHtml();
+            } catch (error) {
+                progress.stop();
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#fff1f2";
+                    statusBox.style.borderColor = "#fca5a5";
+                    statusBox.style.color = "#991b1b";
+                    statusBox.innerText = "List load nahi ho payi";
+                }
+            }
+        }
+
+        function setMobileUpdateListDownloadState(isLoading, message = "", ok = true) {
+            const pdfBtn = document.getElementById("mobile-update-list-pdf-btn");
+            const excelBtn = document.getElementById("mobile-update-list-excel-btn");
+            const statusBox = document.getElementById("mobile-update-list-download-status");
+            const statusMessage = normalizeActionStatusMessage(message, isLoading, ok);
+            [pdfBtn, excelBtn].forEach((btn) => {
+                if (!btn) return;
+                btn.disabled = isLoading;
+                btn.style.opacity = isLoading ? "0.65" : "1";
+                btn.style.pointerEvents = isLoading ? "none" : "auto";
+            });
+            if (!statusBox) return;
+            statusBox.style.display = statusMessage ? "block" : "none";
+            statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
+            statusBox.style.borderColor = ok ? "#86efac" : "#fca5a5";
+            statusBox.style.color = ok ? "#166534" : "#991b1b";
+            statusBox.innerHTML = escapeHtml(statusMessage);
+        }
+
+        function downloadMobileUpdateList(type) {
+            const rows = getMobileUpdateListFilteredRows();
+            if (!rows.length) return showToast("List ke liye data nahi hai", false);
+            setMobileUpdateListDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
+            try {
+                const headers = ["STATUS", "IVRS NO", "CONSUMER NAME", "HQ NAME", "VILLAGE", "OLD MOBILE NO", "UPDATED MOBILE NO", "UPDATED DATE"];
+                const bodyRows = rows.map((row) => [row.status, row.ivrsNo, row.consumerName, row.hqName, row.village, row.oldMobile, row.updatedMobile, row.updatedDate]);
+                const period = getMobileUpdateListPeriod();
+                const periodLabel = period.mode === "ALL" ? "All Time" : (period.label || period.dStr || period.mStr || "All Time");
+                const statusLabel = mobileUpdateListStatusFilter === "UPDATED" ? "Updated Only" : (mobileUpdateListStatusFilter === "PENDING" ? "Pending Only" : "All (Updated + Pending)");
+                const reportTitle = `Mobile No Update List - DC ${activeDC}`;
+                const scopeLine = `Scope: DC - ${activeDC}  |  Status: ${statusLabel}`;
+                const periodLine = `Period: ${periodLabel}`;
+                const fileName = `Mobile-No-Update-List-${activeDC}-${mobileUpdateListStatusFilter}-${periodLabel}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (type === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setMobileUpdateListDownloadState(false, "PDF library load nahi hui", false); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
+                    doc.text(periodLine, 148, 25, { align: "center" });
+                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6.5, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                    setMobileUpdateListDownloadState(false, "PDF download ho chuki hai", true);
+                    return;
+                }
+                const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                const csv = [[reportTitle], [scopeLine], [periodLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = `${fileName}.csv`;
+                link.click();
+                setMobileUpdateListDownloadState(false, "Excel download ho chuki hai", true);
+            } catch (error) {
+                setMobileUpdateListDownloadState(false, "Download nahi ho paya", false);
+                showToast(error?.message || "List download nahi ho payi", false);
             }
         }
 
@@ -2450,11 +2693,12 @@
         }
 
         function downloadProgressRevenueTargetSummary(fmt) {
-            if (!lastRevenueProgressBoxData?.hqVillageSummaryData) return showToast("Report ke liye data nahi hai", false);
+            const summaryData = lastRevenueProgressTargetSummaryData || lastRevenueProgressBoxData?.hqVillageSummaryData;
+            if (!summaryData) return showToast("Report ke liye data nahi hai", false);
             const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
             setProgressCategoryDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
             try {
-                const tree = lastRevenueProgressBoxData.hqVillageSummaryData.tree || [];
+                const tree = summaryData.tree || [];
                 const colLabel = activeViewLevel === "DC" ? revenueHqLabelUpper() : "DC NAME";
                 const headers = [colLabel, "TARGET", "ACHIEVED", "%"];
                 const rows = tree.map((row) => {
@@ -2465,13 +2709,15 @@
                 const reportTitle = `Target vs Achievement Summary - ${scope}`;
                 const rawVal = document.getElementById("report-date")?.value || "";
                 const parsed = parseSummarySelection(rawVal, summaryMode);
-                const periodLine = `Period: ${parsed.label || getTodayIsoDate()}`;
+                const govtLabel = progressTargetGovtFilter === "GOVT" ? "Govt" : (progressTargetGovtFilter === "NONGOVT" ? "Non Govt" : "All");
+                const periodLine = `Period: ${parsed.label || getTodayIsoDate()}  |  Type: ${govtLabel}`;
                 const fileName = `${reportTitle}-${parsed.label || getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
                 if (fmt === "PDF") {
                     if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
                     doc.text(periodLine, 148, 25, { align: "center" });
                     doc.autoTable({ startY: 31, head: [headers], body: rows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
@@ -2515,6 +2761,12 @@
             if (body) body.innerHTML = renderProgressRevenueBodyInner();
         }
 
+        function setProgressTargetGovtFilter(value) {
+            progressTargetGovtFilter = value || "";
+            const body = document.getElementById("progress-revenue-body");
+            if (body) body.innerHTML = renderProgressRevenueBodyInner();
+        }
+
         function downloadProgressRevenueDefaultersSummary(fmt) {
             if (!lastRevenueProgressBoxData) return showToast("Report ke liye data nahi hai", false);
             const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
@@ -2536,7 +2788,8 @@
                     if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
                     doc.text(periodLine, 148, 25, { align: "center" });
                     doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
@@ -2630,6 +2883,11 @@
             const colLabel = activeViewLevel === "DC" ? revenueHqLabelUpper() : "DC NAME";
             return `
                 <div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Target vs Achievement (Net Bill vs Paid)</div>
+                <select onchange="setProgressTargetGovtFilter(this.value)" style="width:100%; height:44px; margin:9px auto 0; display:block; border:1.5px solid #93c5fd; border-radius:12px; padding:0 12px; font-size:0.76rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                    <option value="">All (Govt + Non Govt)</option>
+                    <option value="GOVT" ${progressTargetGovtFilter === "GOVT" ? "selected" : ""}>Govt</option>
+                    <option value="NONGOVT" ${progressTargetGovtFilter === "NONGOVT" ? "selected" : ""}>Non Govt</option>
+                </select>
                 <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; width:100%; margin:10px auto 0;">
                     <div style="background:#f1f5f9; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#64748b; text-transform:uppercase;">Target</div><div style="font-size:0.82rem; font-weight:950; color:#0f172a; margin-top:2px;">${formatProgressReportAmount(target)}</div></div>
                     <div style="background:#ecfdf5; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#166534; text-transform:uppercase;">Achieved</div><div style="font-size:0.82rem; font-weight:950; color:#166534; margin-top:2px;">${formatProgressReportAmount(data.totals.paidAmountTotal)}</div></div>
@@ -2821,7 +3079,8 @@
                     if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
                     doc.text(filterLine, 148, 25, { align: "center" });
                     doc.text(asOfLine, 148, 30, { align: "center" });
@@ -2847,6 +3106,7 @@
             progressRevenueReportType = validValues.includes(value) ? value : "STAFF";
             resetProgressNonPayeeFilterState();
             progressDefaultersGovtFilter = "";
+            progressTargetGovtFilter = "";
             progressStaffTypeFilter = "";
             const body = document.getElementById("progress-revenue-body");
             if (body) body.innerHTML = renderProgressRevenueBodyInner();
@@ -2975,7 +3235,15 @@
             // pehle jaisे hi (bodyHtml ke NEECHE) buttons rakhte hain - wahan list chhoti hoti hai.
             const isNonPayeeType = ["NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION"].includes(progressRevenueReportType);
             if (progressRevenueReportType === "TARGET") {
-                bodyHtml = data.hqVillageSummaryData ? renderRevenueProgressTargetSummaryHtml(data.hqVillageSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Data nahi mila.</div>`;
+                // USER REQUEST (2026-08-13): Govt/Non-Govt filter - jab select ho, tab
+                // hi tree ko us filter ke saath dobara (local, bina naye fetch ke)
+                // banate hain, taaki Category Wise wali shared hqVillageSummaryData
+                // (jo saath me isi box me use hoti hai) chhedni na pade.
+                const targetSummaryData = progressTargetGovtFilter
+                    ? buildRevenueHqVillageSummaryData(data.mode || "DAILY", data.filterValue || "", progressTargetGovtFilter)
+                    : data.hqVillageSummaryData;
+                lastRevenueProgressTargetSummaryData = targetSummaryData;
+                bodyHtml = targetSummaryData ? renderRevenueProgressTargetSummaryHtml(targetSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Data nahi mila.</div>`;
             } else if (progressRevenueReportType === "DEFAULTERS") {
                 bodyHtml = renderRevenueProgressDefaultersSummaryHtml(data.mode || "DAILY", data.filterValue || "");
             } else if (progressRevenueReportType === "NONPAYEE_3M") {
@@ -10410,11 +10678,24 @@
         // RESTORED (user confirmed root cause was NGB Cash List upload replacing
         // old data, not this caching) - shared 60-second TTL cache wapas ON hai.
         const REVENUE_TD_ENTRIES_SYNC_TTL_MS = 60000;
+        // In-flight fetch dedupe - same reason as revenueLiveEntriesSyncFetchPromise
+        // upar: background warming aur user ka apna report-open ek hi request share
+        // karein, taaki koi extra competing parallel fetch na chale.
+        let revenueTdEntriesSyncFetchPromise = null;
+
         async function syncRevenueTdEntriesFromSheet(attempts = 3, forceRefresh = false) {
             if (!forceRefresh && revenueTdEntriesSyncedAt && Date.now() - revenueTdEntriesSyncedAt < REVENUE_TD_ENTRIES_SYNC_TTL_MS) {
                 return getRevenueTdEntriesLocal();
             }
             if (!revenueCollectionSubmitScriptUrl) return getRevenueTdEntriesLocal();
+            if (!forceRefresh && revenueTdEntriesSyncFetchPromise) return revenueTdEntriesSyncFetchPromise;
+            revenueTdEntriesSyncFetchPromise = syncRevenueTdEntriesFromSheetInner_(attempts).finally(() => {
+                revenueTdEntriesSyncFetchPromise = null;
+            });
+            return revenueTdEntriesSyncFetchPromise;
+        }
+
+        async function syncRevenueTdEntriesFromSheetInner_(attempts) {
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 try {
                     const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getTDEntries&t=${Date.now()}`);
@@ -10452,7 +10733,10 @@
                 mobileNo: currentRevenueRecord.mobileNo || "",
                 arrears: currentRevenueRecord.arrears || "",
                 netBill: currentRevenueRecord.netBill || "",
-                tdDate: getCurrentDateDDMMYYYY(),
+                // Same dash->slash fix as Paid Amount submit (upar) - Line TD ki
+                // date bhi turant-submit hone ke baad screen par slash-format
+                // (DD/MM/YYYY) me dikhni chahiye, backend sync se pehle bhi.
+                tdDate: getCurrentDateDDMMYYYY().replace(/-/g, "/"),
                 tdTime: getCurrentTimeHHMM(),
                 photoName: revenueTdPhotoName || "td-photo.jpg",
                 photoCaptured: true,
@@ -10529,7 +10813,14 @@
                 ...currentRevenueRecord,
                 dcName: activeDC || "",
                 paidAmount: amount,
-                paidDate: getCurrentDateDDMMYYYY(),
+                // BUG FIX: getCurrentDateDDMMYYYY() "DD-MM-YYYY" (dash) return
+                // karta hai - jab tak backend se sync hokar asli "Paid By Staff"
+                // date (slash format, DD/MM/YYYY) wapas nahi aati, tab tak IVRS
+                // search screen par abhi-abhi submit kiya hua payment dash-format
+                // me dikhta tha, jo baaki poore app/NGB Cashlist ke slash-format
+                // se alag/inconsistent tha. .replace() se yahan bhi slash format
+                // consistent kar diya.
+                paidDate: getCurrentDateDDMMYYYY().replace(/-/g, "/"),
                 paidTime: getCurrentTimeHHMM(),
                 paidAt: new Date().toISOString(),
                 paymentId: `revenue-${Date.now()}`
@@ -11886,8 +12177,30 @@
         // replace kar deta tha, is caching me koi dikkat nahi thi) - DC-scoped
         // shared 60-second TTL cache wapas ON hai.
         const REVENUE_UPLOADED_PAID_MASTER_SYNC_TTL_MS = 60000;
+        // In-flight fetch dedupe (per-DC) - same reason as revenueLiveEntriesSyncFetchPromise
+        // upar: DC-select ke background warming aur user ka khud kisi report par
+        // jaana (jo yahi function call karta hai) dono ek hi chal rahi backend
+        // request share karein, dobara alag fetch shuru na ho.
+        const revenueUploadedPaidMasterFetchPromises = {};
+
         async function getRevenueUploadedPaidMasterRows(forceRefresh = false) {
             const dcKey = normalizeLookupValue(activeDC || "");
+            if (!forceRefresh && revenueUploadedPaidMasterFetchPromises[dcKey]) {
+                return revenueUploadedPaidMasterFetchPromises[dcKey];
+            }
+            if (!forceRefresh && revenueUploadedPaidMasterRowsCache
+                && revenueUploadedPaidMasterRowsCache.dcKey === dcKey
+                && revenueUploadedPaidMasterRowsCache.backendSynced
+                && Date.now() - revenueUploadedPaidMasterRowsCache.syncedAt < REVENUE_UPLOADED_PAID_MASTER_SYNC_TTL_MS) {
+                return revenueUploadedPaidMasterRowsCache.rows;
+            }
+            revenueUploadedPaidMasterFetchPromises[dcKey] = getRevenueUploadedPaidMasterRowsInner_(dcKey, forceRefresh).finally(() => {
+                delete revenueUploadedPaidMasterFetchPromises[dcKey];
+            });
+            return revenueUploadedPaidMasterFetchPromises[dcKey];
+        }
+
+        async function getRevenueUploadedPaidMasterRowsInner_(dcKey, forceRefresh) {
             // NOTE (bug fix): pehle yahan har outcome - chahe backend se poora sync
             // safal hua ho ya (bade DC jaise SEONI (T) me) fetch fail/timeout hoke
             // sirf adhura local fallback mila ho - dono ko ek jaisa 60-second "fresh"
@@ -11899,12 +12212,8 @@
             // maante hain; adhura/fallback result cache to hota hai (turant dikhane
             // ke liye) lekin usko fresh nahi maana jaata, isliye agla call turant
             // dobara backend se poora sahi data laane ki koshish karega.
-            if (!forceRefresh && revenueUploadedPaidMasterRowsCache
-                && revenueUploadedPaidMasterRowsCache.dcKey === dcKey
-                && revenueUploadedPaidMasterRowsCache.backendSynced
-                && Date.now() - revenueUploadedPaidMasterRowsCache.syncedAt < REVENUE_UPLOADED_PAID_MASTER_SYNC_TTL_MS) {
-                return revenueUploadedPaidMasterRowsCache.rows;
-            }
+            // (Freshness check outer getRevenueUploadedPaidMasterRows() me already
+            // ho chuki hai, yahan dobara nahi karte.)
             // Upload ke turant baad local cache me entries turant save ho jaati hain
             // (saveRevenueUploadedPaidEntriesLocalBulk), backend fetch se pehle hi -
             // isliye yahan backend call se pehle current local rows capture kar lete
@@ -12982,11 +13291,27 @@
         // replace kar deta tha, is caching me koi dikkat nahi thi) - shared
         // 60-second TTL cache wapas ON hai.
         const REVENUE_LIVE_ENTRIES_SYNC_TTL_MS = 60000;
+        // In-flight fetch dedupe (ensureDcDataLoaded jaisa pattern): agar DC-select
+        // ke turant baad background prefetchRevenueBackgroundDataForDc() ne is sync
+        // ko already shuru kar diya ho, aur usi beech user khud koi report khol de
+        // jo yahi function call kare, to naya alag parallel fetch shuru NAHI hota -
+        // dono ek hi chal rahi request ka result share karte hain. Isse background
+        // warming ki wajah se pehla report kabhi slow nahi hota, sirf fast/same hota hai.
+        let revenueLiveEntriesSyncFetchPromise = null;
+
         async function syncRevenueLiveEntriesFromSheet(attempts = 3, forceRefresh = false) {
             if (!forceRefresh && revenueLiveEntriesSyncedAt && Date.now() - revenueLiveEntriesSyncedAt < REVENUE_LIVE_ENTRIES_SYNC_TTL_MS) {
                 return getRevenueLiveEntries();
             }
             if (!revenueCollectionSubmitScriptUrl) return getRevenueLiveEntries();
+            if (!forceRefresh && revenueLiveEntriesSyncFetchPromise) return revenueLiveEntriesSyncFetchPromise;
+            revenueLiveEntriesSyncFetchPromise = syncRevenueLiveEntriesFromSheetInner_(attempts).finally(() => {
+                revenueLiveEntriesSyncFetchPromise = null;
+            });
+            return revenueLiveEntriesSyncFetchPromise;
+        }
+
+        async function syncRevenueLiveEntriesFromSheetInner_(attempts) {
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 try {
                     const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getEntries&t=${Date.now()}`);
@@ -13983,7 +14308,8 @@
                     if (!window.jspdf?.jsPDF) { setRevenueCashDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(13); doc.text(reportTitle, 148, 14, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 14, { align: "center" });
                     doc.setFontSize(8); doc.text(`Matching: IVRS only | ${periodDisplay}`, 148, 20, { align: "center" });
                     doc.autoTable({ startY: 26, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [194, 65, 12] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
@@ -14016,8 +14342,17 @@
         let revenueHqVillageRenderToken = 0;
         let revenueHqVillageTree = [];
         let revenueHqVillageDrillPath = [];
+        // BUG FIX (user report): pehle DATE WISE/MONTH WISE toggle badalte hi
+        // (setRevenueHqVillageMode -> renderRevenueHqVillageReport) har baar
+        // "SYNCING LATEST REPORT..." dobara chal jaata tha, chahe usi view-visit
+        // me thodi der pehle hi is scope (DC/Division/Circle) ka data poora sync
+        // ho chuka ho. Cash Reconcile/Report Download jaisa hi simple "is scope
+        // ke liye is visit me ek baar load ho chuka" flag - jab tak view se bahar
+        // jaakar dobara na aayein, DATE/MONTH toggle sirf local recompute karega.
+        let revenueHqVillageLoadedScopeKey = null;
 
         function initRevenueHqVillageReport() {
+            revenueHqVillageLoadedScopeKey = null;
             const dateInput = document.getElementById("revenue-hq-village-date");
             const monthInput = document.getElementById("revenue-hq-village-month");
             if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
@@ -14202,8 +14537,12 @@
             return html;
         }
 
-        function buildRevenueHqVillageSummaryData(mode, filterValue) {
-            const tree = buildRevenueHqVillagePaidUnpaidTree(mode, filterValue);
+        // govtFilter optional param (2026-08-13 addition) - defaults to "" (no
+        // filter, old behaviour unchanged for existing callers like Category Wise
+        // / HQ-Village Report). Progress Report's "Target vs Achievement" dropdown
+        // passes this through when its own Govt/Non-Govt filter is set.
+        function buildRevenueHqVillageSummaryData(mode, filterValue, govtFilter = "") {
+            const tree = buildRevenueHqVillagePaidUnpaidTree(mode, filterValue, govtFilter);
             const totals = (tree || []).filter((row) => row.type !== "SUB_TOTAL" && row.type !== "SUBDN_TOTAL").reduce((acc, row) => {
                 acc.paidTotal += Number(row.paidTotal || 0);
                 acc.unpaidTotal += Number(row.unpaidTotal || 0);
@@ -14268,15 +14607,20 @@
             else if (activeDiv) activeViewLevel = "DIVISION";
             else activeViewLevel = "CIRCLE";
             const isRenderValid = () => renderToken === revenueHqVillageRenderToken && document.getElementById("revenue-hq-village-view")?.classList.contains("active");
-            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
+            const scopeKey = activeDC || activeDiv || "CIRCLE";
+            const alreadyLoaded = revenueHqVillageLoadedScopeKey === scopeKey;
+            const progress = alreadyLoaded ? null : renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
             try {
-                const targetDcs = getRevenueCategoryTargetDcs();
-                await Promise.all([
-                    ensureRevenueCategoryMasterDataLoaded(targetDcs),
-                    ensureRevenueCategoryRawPaymentRowsLoaded(),
-                    warmRevenueCategoryUploadedPaidCache()
-                ]);
-                if (!isRenderValid()) { progress.stop(); return; }
+                if (!alreadyLoaded) {
+                    const targetDcs = getRevenueCategoryTargetDcs();
+                    await Promise.all([
+                        ensureRevenueCategoryMasterDataLoaded(targetDcs),
+                        ensureRevenueCategoryRawPaymentRowsLoaded(),
+                        warmRevenueCategoryUploadedPaidCache()
+                    ]);
+                    if (!isRenderValid()) { progress.stop(); return; }
+                    revenueHqVillageLoadedScopeKey = scopeKey;
+                }
                 const mode = revenueHqVillageMode === "MONTHLY" ? "MONTHLY" : "DAILY";
                 const filterValue = mode === "MONTHLY"
                     ? (document.getElementById("revenue-hq-village-month")?.value || getTodayIsoDate().slice(0, 7))
@@ -14285,14 +14629,14 @@
                 revenueHqVillageTree = summaryData.tree;
                 revenueHqVillageDrillPath = [];
                 revenueHqVillageConsumerRows = buildRevenueHqVillageConsumerRows(mode, filterValue);
-                await progress.finish();
+                if (progress) await progress.finish();
                 if (!isRenderValid()) return;
                 if (summaryBox) summaryBox.innerHTML = renderRevenueHqVillageSummaryCardsHtml(summaryData);
                 tableBox.innerHTML = renderRevenueHqVillageTable();
                 initRevenueHqVillageListDropdowns();
                 if (listSection) listSection.style.display = "block";
             } catch (error) {
-                progress.stop();
+                if (progress) progress.stop();
                 if (statusBox) {
                     statusBox.style.display = "block";
                     statusBox.style.background = "#fff1f2";
@@ -14380,7 +14724,8 @@
                     if (!window.jspdf?.jsPDF) { setRevenueHqVillageDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
                     doc.text(periodLine, 148, 25, { align: "center" });
                     doc.autoTable({ startY: 31, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [21, 128, 61] } });
@@ -14440,7 +14785,14 @@
             if (tableBox) tableBox.innerHTML = renderRevenueTargetTable();
         }
 
+        // Same "ek baar is scope ke liye is visit me load ho jaaye to DATE/MONTH
+        // toggle sirf local recompute kare" fix jo HQ Village report me kiya -
+        // Target Achievement bhi wahi ensureRevenueCategoryMasterDataLoaded/
+        // warmRevenueCategoryUploadedPaidCache use karta hai, isliye same pattern.
+        let revenueTargetLoadedScopeKey = null;
+
         function initRevenueTargetAchievement() {
+            revenueTargetLoadedScopeKey = null;
             const dateInput = document.getElementById("revenue-target-date");
             const monthInput = document.getElementById("revenue-target-month");
             if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
@@ -14649,15 +15001,20 @@
             else if (activeDiv) activeViewLevel = "DIVISION";
             else activeViewLevel = "CIRCLE";
             const isRenderValid = () => renderToken === revenueTargetRenderToken && document.getElementById("revenue-target-achievement-view")?.classList.contains("active");
-            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
+            const scopeKey = activeDC || activeDiv || "CIRCLE";
+            const alreadyLoaded = revenueTargetLoadedScopeKey === scopeKey;
+            const progress = alreadyLoaded ? null : renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
             try {
-                const targetDcs = getRevenueCategoryTargetDcs();
-                await Promise.all([
-                    ensureRevenueCategoryMasterDataLoaded(targetDcs),
-                    ensureRevenueCategoryRawPaymentRowsLoaded(),
-                    warmRevenueCategoryUploadedPaidCache()
-                ]);
-                if (!isRenderValid()) { progress.stop(); return; }
+                if (!alreadyLoaded) {
+                    const targetDcs = getRevenueCategoryTargetDcs();
+                    await Promise.all([
+                        ensureRevenueCategoryMasterDataLoaded(targetDcs),
+                        ensureRevenueCategoryRawPaymentRowsLoaded(),
+                        warmRevenueCategoryUploadedPaidCache()
+                    ]);
+                    if (!isRenderValid()) { progress.stop(); return; }
+                    revenueTargetLoadedScopeKey = scopeKey;
+                }
                 const mode = revenueTargetMode === "MONTHLY" ? "MONTHLY" : "DAILY";
                 const filterValue = mode === "MONTHLY"
                     ? (document.getElementById("revenue-target-month")?.value || getTodayIsoDate().slice(0, 7))
@@ -14671,13 +15028,13 @@
                     acc.unpaidAmountTotal += Number(row.unpaidAmountTotal || 0);
                     return acc;
                 }, { paidAmountTotal: 0, unpaidAmountTotal: 0 });
-                await progress.finish();
+                if (progress) await progress.finish();
                 if (!isRenderValid()) return;
                 refreshRevenueTargetViewByOptions();
                 if (summaryBox) summaryBox.innerHTML = renderRevenueTargetSummaryCardsHtml(totals);
                 tableBox.innerHTML = renderRevenueTargetTable();
             } catch (error) {
-                progress.stop();
+                if (progress) progress.stop();
                 if (statusBox) {
                     statusBox.style.display = "block";
                     statusBox.style.background = "#fff1f2";
@@ -14748,7 +15105,8 @@
                     if (!window.jspdf?.jsPDF) { setRevenueTargetDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
                     doc.text(periodLine, 148, 25, { align: "center" });
                     doc.autoTable({ startY: 31, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
@@ -14778,8 +15136,13 @@
         let revenueDefaultersLimit = 20;
         let revenueDefaultersRows = [];
         let revenueDefaultersRenderToken = 0;
+        // Same fix as HQ Village/Target Achievement - Top20/Top50 toggle aur date
+        // change bhi pehle har baar poora "SYNCING..." resync kar dete the, chahe
+        // is scope ka category data isi visit me pehle hi load ho chuka ho.
+        let revenueDefaultersLoadedScopeKey = null;
 
         function initRevenueTopDefaulters() {
+            revenueDefaultersLoadedScopeKey = null;
             const dateInput = document.getElementById("revenue-defaulters-date");
             if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
             setRevenueDefaultersButtonState();
@@ -14861,15 +15224,20 @@
             else if (activeDiv) activeViewLevel = "DIVISION";
             else activeViewLevel = "CIRCLE";
             const isRenderValid = () => renderToken === revenueDefaultersRenderToken && document.getElementById("revenue-top-defaulters-view")?.classList.contains("active");
-            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
+            const scopeKey = activeDC || activeDiv || "CIRCLE";
+            const alreadyLoaded = revenueDefaultersLoadedScopeKey === scopeKey;
+            const progress = alreadyLoaded ? null : renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST REPORT...");
             try {
-                const targetDcs = getRevenueCategoryTargetDcs();
-                await Promise.all([
-                    ensureRevenueCategoryMasterDataLoaded(targetDcs),
-                    ensureRevenueCategoryRawPaymentRowsLoaded(),
-                    warmRevenueCategoryUploadedPaidCache()
-                ]);
-                if (!isRenderValid()) { progress.stop(); return; }
+                if (!alreadyLoaded) {
+                    const targetDcs = getRevenueCategoryTargetDcs();
+                    await Promise.all([
+                        ensureRevenueCategoryMasterDataLoaded(targetDcs),
+                        ensureRevenueCategoryRawPaymentRowsLoaded(),
+                        warmRevenueCategoryUploadedPaidCache()
+                    ]);
+                    if (!isRenderValid()) { progress.stop(); return; }
+                    revenueDefaultersLoadedScopeKey = scopeKey;
+                }
                 const dateValue = document.getElementById("revenue-defaulters-date")?.value || getTodayIsoDate();
                 // USER REQUEST (2026-08-13): row.pendingAmount (buildRevenueHqVillage-
                 // ConsumerRows me pehle se Net Bill - Paid, sirf positive) use karte
@@ -14878,7 +15246,7 @@
                 // me sahi se dikhein (pehle wo poori tarah list se bahar ho jaate the).
                 const consumerRows = buildRevenueHqVillageConsumerRows("DAILY", dateValue);
                 revenueDefaultersRows = consumerRows.filter((row) => row.pendingAmount > 0);
-                await progress.finish();
+                if (progress) await progress.finish();
                 if (!isRenderValid()) return;
                 const hqSelect = document.getElementById("revenue-defaulters-hq");
                 const villageSelect = document.getElementById("revenue-defaulters-village");
@@ -14890,7 +15258,7 @@
                 if (govtSelect) govtSelect.value = "";
                 renderRevenueDefaultersTable();
             } catch (error) {
-                progress.stop();
+                if (progress) progress.stop();
                 if (statusBox) statusBox.innerText = "Report load nahi ho payi";
             }
         }
@@ -14935,7 +15303,8 @@
                     if (!window.jspdf?.jsPDF) { setRevenueDefaultersDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
                     doc.text(periodLine, 148, 25, { align: "center" });
                     doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
@@ -15208,7 +15577,8 @@
                     if (!window.jspdf?.jsPDF) { setRevenueHqVillageListDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(12); doc.text(reportTitle, 148, 11, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 7);
+                    doc.setFontSize(12); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9);
                     doc.text(filterLine1, 148, 17, { align: "center" });
                     doc.text(filterLine2, 148, 22, { align: "center" });
@@ -16245,6 +16615,11 @@
         let vrDownloadLogMode = "ALL";
         let vrDownloadLogRawRows = [];
         let vrDownloadLogRenderToken = 0;
+        // Same "ek baar is visit me load ho jaaye to ALL/DATE toggle sirf local
+        // recompute kare" fix jo Revenue reports me kiya - yahan poora data hamesha
+        // ek hi getSummary call se aata hai (division/date sirf local filter hain),
+        // isliye is baar ye sirf ek boolean flag hai.
+        let vrDownloadLogLoaded = false;
 
         function openVrDownloadLog() {
             const dd = document.getElementById("vr-menu-dropdown");
@@ -16253,6 +16628,7 @@
         }
 
         function initVrDownloadLog() {
+            vrDownloadLogLoaded = false;
             const dateInput = document.getElementById("vr-download-log-date");
             if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
             setVrDownloadLogMode(vrDownloadLogMode || "ALL");
@@ -16313,11 +16689,28 @@
             }
             const renderToken = ++vrDownloadLogRenderToken;
             const isRenderValid = () => renderToken === vrDownloadLogRenderToken && document.getElementById("vr-download-log-view")?.classList.contains("active");
+            if (vrDownloadLogLoaded) {
+                const rows = buildVrDownloadLogGroupedRows();
+                const totalDownloads = rows.reduce((sum, row) => sum + row.count, 0);
+                statusBox.innerHTML = `Total Download: <strong>${totalDownloads}</strong> | Groups: ${rows.length}`;
+                if (!rows.length) {
+                    tableBox.innerHTML = `<div style="background:#ecfdf5; border:1.5px solid #86efac; border-radius:14px; padding:14px; color:#047857; font-size:0.8rem; font-weight:900; text-align:center; margin-top:10px;">Is filter me koi download record nahi mila.</div>`;
+                    return;
+                }
+                let cachedHtml = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.3fr 1.1fr 0.9fr 0.7fr;"><div>DIVISION</div><div>DC</div><div>DATE</div><div>COUNT</div></div>`;
+                rows.forEach((row) => {
+                    cachedHtml += `<div class="summary-table-row" style="grid-template-columns: 1.3fr 1.1fr 0.9fr 0.7fr;"><div>${escapeHtml(row.division)}</div><div>${escapeHtml(row.dc)}</div><div>${escapeHtml(row.date)}</div><div class="font-black">${row.count}</div></div>`;
+                });
+                cachedHtml += `</div>`;
+                tableBox.innerHTML = cachedHtml;
+                return;
+            }
             const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING DOWNLOAD LOG...");
             try {
                 const data = await loadRemoteJson(`${vrDownloadLogScriptUrl}?action=getSummary&t=${Date.now()}`);
                 if (!isRenderValid()) { progress.stop(); return; }
                 vrDownloadLogRawRows = Array.isArray(data) ? data : [];
+                vrDownloadLogLoaded = true;
                 await progress.finish();
                 if (!isRenderValid()) return;
                 const rows = buildVrDownloadLogGroupedRows();
@@ -16376,7 +16769,8 @@
                     if (!window.jspdf?.jsPDF) { setVrDownloadLogDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(13); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
                     doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
                     doc.autoTable({ startY: 25, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
@@ -16446,6 +16840,9 @@
                 }
                 if (id === "mobile-update-report") {
                     initMobileUpdateReport();
+                }
+                if (id === "mobile-update-list") {
+                    initMobileUpdateList();
                 }
                 if (id === "revenue-collection") {
                     initRevenueCollection();
@@ -16552,6 +16949,7 @@
                 if (id === "stock-report") headerTitle = "STOCK REPORT";
                 if (id === "mobile-update") headerTitle = "UPDATE MOBILE NO";
                 if (id === "mobile-update-report") headerTitle = "MOBILE UPDATE REPORT";
+                if (id === "mobile-update-list") headerTitle = "MOBILE UPDATE LIST";
                 if (id === "summary") headerTitle = "PROGRESS REPORT";
                 if (id === "bill-calculator") headerTitle = "BIJLEE BILL CALCULATOR";
                 document.getElementById("main-header-title").innerText = headerTitle;
@@ -16579,7 +16977,7 @@
                     document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)");
                     header.className = "app-header bg-teal-grad";
                     prewarmGpsCameraLocationIfAllowed();
-                } else if (id === "mobile-update" || id === "mobile-update-report") {
+                } else if (id === "mobile-update" || id === "mobile-update-report" || id === "mobile-update-list") {
                     header.className = "app-header bg-red-grad";
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)";
                 } else if (id === "revenue-collection" || id === "revenue-live-progress" || id === "revenue-report-download" || id === "revenue-hq-village" || id === "revenue-target-achievement" || id === "revenue-top-defaulters" || id === "revenue-cash-reconcile" || id === "revenue-pending-list" || id === "revenue-paid-upload" || id === "revenue-message-login") {
@@ -16784,12 +17182,14 @@
         //         par ED हमेशा 0 mila - poori tarah EXEMPT.
         //   - F.C.A. (Fuel Cost Adjustment) tariff order me nahi hoti (DISCOM
         //     har mahine alag notify karta hai) - ledger se hi khud-ba-khud
-        //     nikala: Energy Charge ka ~2.81% (sabse recent bill-date, 9-Jul,
-        //     jiske sabse zyada rows the, us din ka ratio). Bill-date badalte
-        //     hi ye ratio ledger me 3.9% se 2.7% ke beech ghatta-badhta paya
-        //     gaya - matlab DISCOM ye dar bar-bar update karta hai, isliye
-        //     ye ek approximation hai, aage DISCOM rate badalne par is
-        //     constant ko bhi ledger se dobara nikalna padega.
+        //     nikala: Energy Charge ka ~1.65% (NGB_CONSUMER_LEDGER_CHHAPARA1_
+        //     JUL2026.xlsx me sabse zyada rows wali bill-date, 30-Jul-2026,
+        //     us din ka ratio - [UPDATE Aug-2026: pehle ye 2.81% tha, pichle
+        //     ledger/mahine ka; naye ledger se dobara nikala to 1.65% nikla]).
+        //     Bill-date badalte hi ye ratio ledger me 1.1% se 2.2% ke beech
+        //     ghatta-badhta paya gaya - matlab DISCOM ye dar bar-bar update
+        //     karta hai, isliye ye ek approximation hai, aage DISCOM rate
+        //     badalne par is constant ko bhi ledger se dobara nikalna padega.
         //   - LV3.1 (Municipal) aur kuch LV4 rows me billing-cycle ki exact
         //     lambai (30 din se kam/zyada) ki wajah se chhoti si proration
         //     गैप bhi mili - ye calculator poore-mahine ka maan kar chalta
@@ -16802,11 +17202,11 @@
         //     seedhe Contract/Sanctioned load use kiya hai.
         //   - LV-4 Seasonal (4.2), DTR-metered LV5.1(c) jaise special cases
         //     shamil nahi hain.
-        //   - Griha Jyoti Subsidy (LV1) ki asli eligibility average
-        //     consumption/BPL status par bhi depend karti hai - isliye ye ek
-        //     MANUAL "Subsidy Applicable?" toggle hai (sirf LV1 me dikhta
-        //     hai). Amount ledger ki 8,700+ subsidy>0 wali LV1.2 rows se
-        //     nikala gaya empirical interpolation-table hai.
+        //   - Griha Jyoti Subsidy (LV1) MP Govt circular ke anusar SIRF 150
+        //     units tak hai, aur SIRF LV1 category me - isliye ye ek MANUAL
+        //     "Subsidy Applicable?" toggle hai (sirf LV1 me dikhta hai).
+        //     Amount ledger ki 8,700+ subsidy>0 wali LV1.2 rows se nikala
+        //     gaya empirical interpolation-table hai (0-150 units).
         // =====================================================================
 
         function billRoundOff(value) {
@@ -16836,7 +17236,45 @@
             return totalRupees;
         }
 
-        const BILL_FCA_RATIO_OF_ENERGY_CHARGE = 0.0281;
+        // ============ "Calculation kaise hui" summary box (user-facing) ============
+        // Har computeBillXxx() function apne result.explain me plain-Hindi lines
+        // deta hai jisme MPERC Tariff Order FY 2026-27 ke exact rate/slab quote
+        // karke, is consumer ke input-numbers substitute karke dikhaya jata hai -
+        // taaki user ko pata chale ki total kaise nikla, bina code padhe.
+        function billFmtRs(v) {
+            const n = Math.round(Number(v || 0) * 100) / 100;
+            return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+        }
+        function billTelescopicExplain(units, slabs) {
+            let remaining = Math.max(0, Number(units || 0));
+            let prevLimit = 0;
+            let total = 0;
+            const lines = [];
+            for (const [upto, paise] of slabs) {
+                if (remaining <= 0) break;
+                const slabSize = upto - prevLimit;
+                const unitsInSlab = Math.min(remaining, slabSize);
+                const subtotal = unitsInSlab * paise / 100;
+                total += subtotal;
+                const rangeLabel = upto === Infinity ? `${prevLimit}+ units ke slab me` : `${prevLimit === 0 ? 0 : prevLimit + 1}-${upto} units ke slab me`;
+                lines.push(`${(Math.round(unitsInSlab * 100) / 100).toLocaleString("en-IN")} unit ${rangeLabel} × ₹${(paise / 100).toFixed(2)}/unit = ${billFmtRs(subtotal)}`);
+                remaining -= unitsInSlab;
+                prevLimit = upto;
+            }
+            return { total, lines };
+        }
+        function billCiteLine(schedule) {
+            return `MPERC Retail Supply Tariff Order FY 2026-27, Annexure-2, Tariff Schedule ${schedule} ke rates par based.`;
+        }
+
+        // NGB_CONSUMER_LEDGER_CHHAPARA1_JUL2026.xlsx (JUL-2026 bill month) se
+        // dobara nikala gaya: sabse zyada rows wali bill-date (30-Jul-2026,
+        // 1406 rows) par F.C.A./Energy Charge ratio ~1.65% mila, na ki purana
+        // 2.81% (wo pichle ledger/mahine ka tha). DISCOM ye rate har mahine
+        // badalta hai (1.1% se 2.2% tak ghatta-badhta paya gaya isi ledger me
+        // alag-alag bill-dates par) - isliye ye sirf latest-known approximation
+        // hai, agla mahina aane par ledger se dobara nikalna hoga.
+        const BILL_FCA_RATIO_OF_ENERGY_CHARGE = 0.0165;
         function billCalcFcaAuto(energyCharge) {
             return Number(energyCharge || 0) * BILL_FCA_RATIO_OF_ENERGY_CHARGE;
         }
@@ -16865,6 +17303,13 @@
             return ec * lookupBillEdRatioLv1(units);
         }
 
+        // MP Govt circular ke anusar Griha Jyoti subsidy ka pravdhan SIRF LV1
+        // category me aur SIRF 150 units tak hai (150 se upar koi subsidy
+        // nahi, chahe purane bills me average-consumption-based eligibility
+        // ki wajah se ledger me kabhi 150+ unit wale bill me bhi subsidy
+        // dikhi ho - wo sirf capped/carry-over amount tha, official rule
+        // 150-unit cutoff hi hai). Amount ledger ki 8,700+ subsidy>0 wali
+        // LV1.2 rows se nikala gaya empirical interpolation-table hai.
         const BILL_LV1_SUBSIDY_TABLE = [
             [0, 0], [10, 20], [20, 73], [30, 126], [40, 178], [50, 232],
             [60, 340], [70, 402], [80, 465], [90, 531], [100, 594],
@@ -17045,17 +17490,26 @@
             const days = Number(billingDays || 30) || 30;
             const ratio = days / 30;
             const b1 = 50 * ratio, b2 = 150 * ratio, b3 = 300 * ratio;
-            const energyCharge = billTelescopicSum(units, [[b1, 471], [b2, 567], [b3, 705], [Infinity, 724]]);
+            const explain = [billCiteLine("LV-1.2 (Domestic, Metered)")];
+            if (days !== 30) explain.push(`Billing cycle ${days} din ka hai (30 din se ${days > 30 ? "zyada" : "kam"}), isliye Note-2 ke anusar slab-boundaries prorate ki: 50→${b1.toFixed(1)}, 150→${b2.toFixed(1)}, 300→${b3.toFixed(1)} units.`);
+            const et = billTelescopicExplain(units, [[b1, 471], [b2, 567], [b3, 705], [Infinity, 724]]);
+            const energyCharge = et.total;
+            explain.push(`Energy Charge (telescopic, ${area === "URBAN" ? "Urban" : "Rural"}): ${et.lines.join(" + ")} → Total = ${billFmtRs(energyCharge)}.`);
             let fixedCharge;
-            if (units <= b1) fixedCharge = area === "URBAN" ? 81 : 67;
-            else if (units <= b2) fixedCharge = area === "URBAN" ? 134 : 111;
+            if (units <= b1) { fixedCharge = area === "URBAN" ? 81 : 67; explain.push(`Fixed Charge: ${units} units ≤ ${b1.toFixed(0)}, isliye flat ${billFmtRs(fixedCharge)} per connection (${area === "URBAN" ? "Urban" : "Rural"} slab).`); }
+            else if (units <= b2) { fixedCharge = area === "URBAN" ? 134 : 111; explain.push(`Fixed Charge: ${units} units, ${b1.toFixed(0)}-${b2.toFixed(0)} slab me, isliye flat ${billFmtRs(fixedCharge)} per connection.`); }
             else {
                 const blocksOf0p1kW = Math.ceil(units / 15);
                 fixedCharge = blocksOf0p1kW * (area === "URBAN" ? 30 : 28);
+                explain.push(`Fixed Charge: ${units} units > ${b2.toFixed(0)}, Note-1 ke anusar har 15 unit (ya uska hissa) = 0.1kW: ceil(${units}/15) = ${blocksOf0p1kW} block × ₹${area === "URBAN" ? 30 : 28}/block = ${billFmtRs(fixedCharge)}.`);
             }
             const fca = billCalcFcaAuto(energyCharge);
+            explain.push(`F.C.A. (auto): Tariff Order me F.C.A. nahi hoti, DISCOM har mahine alag notify karta hai - ledger se nikala current ratio Energy Charge ka ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% = ${billFmtRs(fca)}.`);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "PROGRESSIVE");
+            explain.push(`Electricity Duty: State Govt notification (Tariff Order me nahi) - ${units} units ke progressive slab ke hisaab se Energy Charge ka ${(lookupBillEdRatioLv1(units) * 100).toFixed(2)}% = ${billFmtRs(electricityDuty)}.`);
             const subsidy = subsidyApplicable ? lookupBillLv1Subsidy(units) : 0;
+            if (subsidyApplicable && units <= 150) explain.push(`Griha Jyoti Subsidy: MP Govt circular ke anusar ≤150 units LV1 par milti hai - is consumption par estimated ${billFmtRs(subsidy)}.`);
+            else if (subsidyApplicable) explain.push(`Griha Jyoti Subsidy: ${units} units > 150, MP Govt circular ke anusar subsidy sirf 150 units tak hai, isliye ₹0.`);
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17064,7 +17518,8 @@
                 ["Subsidy (Griha Jyoti)", -subsidy]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty - subsidy;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total = Energy Charge + F.C.A. + Fixed Charge + Electricity Duty − Subsidy = ${et.lines.length ? billFmtRs(energyCharge) : "₹0"} + ${billFmtRs(fca)} + ${billFmtRs(fixedCharge)} + ${billFmtRs(electricityDuty)} − ${billFmtRs(subsidy)} = ${billFmtRs(total)} ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv1Bpl(units, subsidyApplicable) {
@@ -17074,6 +17529,13 @@
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, cappedUnits, "PROGRESSIVE");
             const subsidy = subsidyApplicable ? lookupBillLv1Subsidy(cappedUnits) : 0;
+            const explain = [
+                billCiteLine("LV-1.1 (BPL / ≤30 units, ≤100W load)"),
+                `Energy Charge: ${cappedUnits} units × ₹3.72/unit = ${billFmtRs(energyCharge)}. Fixed Charge: NIL (tariff order me is slab ke liye ₹0 diya hai).`,
+                `F.C.A. (auto): Energy Charge ka ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% (ledger-based current rate) = ${billFmtRs(fca)}.`,
+                `Electricity Duty: Energy Charge ka ${(lookupBillEdRatioLv1(cappedUnits) * 100).toFixed(2)}% (progressive LV1 slab) = ${billFmtRs(electricityDuty)}.`
+            ];
+            if (subsidyApplicable) explain.push(`Griha Jyoti Subsidy (≤150u LV1 rule ke andar): ${billFmtRs(subsidy)}.`);
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17082,7 +17544,8 @@
                 ["Subsidy (Griha Jyoti)", -subsidy]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty - subsidy;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total = ${billFmtRs(energyCharge)} + ${billFmtRs(fca)} + ₹0 + ${billFmtRs(electricityDuty)} − ${billFmtRs(subsidy)} ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv1Unmetered(subsidyApplicable) {
@@ -17092,6 +17555,13 @@
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "PROGRESSIVE");
             const subsidy = subsidyApplicable ? lookupBillLv1Subsidy(units) : 0;
+            const explain = [
+                billCiteLine("LV-1 (iii) Unmetered rural domestic, ≤500W load"),
+                `Tariff order ke anusar aise connection flat 75 units/month par billed hote hain: 75 × ₹5.74/unit = ${billFmtRs(energyCharge)}. Fixed Charge = ₹122 per connection (flat).`,
+                `F.C.A. (auto): Energy Charge ka ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% = ${billFmtRs(fca)}.`,
+                `Electricity Duty: Energy Charge ka ${(lookupBillEdRatioLv1(units) * 100).toFixed(2)}% = ${billFmtRs(electricityDuty)}.`
+            ];
+            if (subsidyApplicable) explain.push(`Griha Jyoti Subsidy (75 units, ≤150u rule ke andar): ${billFmtRs(subsidy)}.`);
             const components = [
                 ["Assessed Units", units],
                 ["Energy Charge", energyCharge],
@@ -17101,7 +17571,8 @@
                 ["Subsidy (Griha Jyoti)", -subsidy]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty - subsidy;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv21(units, area, load) {
@@ -17109,6 +17580,14 @@
             const fixedCharge = billCalcRoundLoad(load) * (area === "URBAN" ? 172 : 141);
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "EXEMPT");
+            const explain = [
+                billCiteLine("LV-2.1 (Institution/School/Hospital, ≤10kW sanctioned-load-based)"),
+                `Energy Charge: ${units} units × ₹7.00/unit = ${billFmtRs(energyCharge)}.`,
+                `Fixed Charge: ${billCalcRoundLoad(load)} kW (round) × ₹${area === "URBAN" ? 172 : 141}/kW (${area === "URBAN" ? "Urban" : "Rural"}) = ${billFmtRs(fixedCharge)}.`,
+                `F.C.A. (auto): Energy Charge ka ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% = ${billFmtRs(fca)}.`,
+                `Electricity Duty: LV2.1 par ED poori tarah EXEMPT hai (ledger-verified), isliye ₹0.`,
+                `Total = ${billFmtRs(energyCharge)} + ${billFmtRs(fca)} + ${billFmtRs(fixedCharge)} + ₹0 ≈ ₹${billRoundOff(energyCharge + fca + fixedCharge + electricityDuty).toLocaleString("en-IN")}.`
+            ];
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17116,7 +17595,7 @@
                 ["Electricity Duty (Exempt)", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
-            return { components, total: billRoundOff(total) };
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv21Demand(units, area, demand) {
@@ -17124,6 +17603,13 @@
             const fixedCharge = billCalcRoundLoad(demand) * (area === "URBAN" ? 291 : 251);
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "EXEMPT");
+            const explain = [
+                billCiteLine("LV-2.1 Demand based (Institution, Connected load >10kW)"),
+                `Energy Charge: ${units} units × ₹7.20/unit = ${billFmtRs(energyCharge)}.`,
+                `Fixed Charge (Demand): ${billCalcRoundLoad(demand)} kW (round) × ₹${area === "URBAN" ? 291 : 251}/kW (${area === "URBAN" ? "Urban" : "Rural"}, "per kVA" wala alternate option is calculator me shamil nahi) = ${billFmtRs(fixedCharge)}.`,
+                `F.C.A. (auto): ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% of Energy Charge = ${billFmtRs(fca)}.`,
+                `Electricity Duty: EXEMPT (LV2.1) = ₹0.`
+            ];
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17131,7 +17617,8 @@
                 ["Electricity Duty (Exempt)", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv22(units, area, load) {
@@ -17141,6 +17628,13 @@
             const fixedCharge = billCalcRoundLoad(load) * fixedRatePerKw;
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "FLAT");
+            const explain = [
+                billCiteLine("LV-2.2 (Non-domestic shop/office, ≤10kW sanctioned-load-based)"),
+                `${units} units ${units <= 50 ? "≤ 50" : "> 50"} hai, isliye is slab ka rate lagu: Energy Charge = ${units} × ₹${(energyRatePaise / 100).toFixed(2)}/unit = ${billFmtRs(energyCharge)}.`,
+                `Fixed Charge: ${billCalcRoundLoad(load)} kW × ₹${fixedRatePerKw}/kW (${area === "URBAN" ? "Urban" : "Rural"}, same slab) = ${billFmtRs(fixedCharge)}.`,
+                `F.C.A. (auto): ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% of Energy Charge = ${billFmtRs(fca)}.`,
+                `Electricity Duty: LV2.2 par ~9.35% flat (ledger-verified) = ${billFmtRs(electricityDuty)}.`
+            ];
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17148,7 +17642,8 @@
                 ["Electricity Duty", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv22Demand(units, area, demand) {
@@ -17156,6 +17651,13 @@
             const fixedCharge = billCalcRoundLoad(demand) * (area === "URBAN" ? 312 : 230);
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "FLAT");
+            const explain = [
+                billCiteLine("LV-2.2 Demand based (Connected load >10kW)"),
+                `Energy Charge: ${units} units × ₹7.40/unit = ${billFmtRs(energyCharge)}.`,
+                `Fixed Charge (Demand): ${billCalcRoundLoad(demand)} kW × ₹${area === "URBAN" ? 312 : 230}/kW (${area === "URBAN" ? "Urban" : "Rural"}) = ${billFmtRs(fixedCharge)}.`,
+                `F.C.A. (auto): ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% of Energy Charge = ${billFmtRs(fca)}.`,
+                `Electricity Duty: ~9.35% flat (LV2.2) = ${billFmtRs(electricityDuty)}.`
+            ];
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17163,7 +17665,8 @@
                 ["Electricity Duty", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv3(units, load, isMunicipal) {
@@ -17173,6 +17676,13 @@
             const fixedCharge = load * fixedRatePerKw;
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "EXEMPT");
+            const explain = [
+                billCiteLine(isMunicipal ? "LV-3.1 (Municipal Corp/Council/Cantonment)" : "LV-3.2 (Gram Panchayat water supply/street light)"),
+                `Energy Charge: ${units} units × ₹${(energyRatePaise / 100).toFixed(2)}/unit = ${billFmtRs(energyCharge)}.`,
+                `Fixed Charge: ${load} kW × ₹${fixedRatePerKw}/kW = ${billFmtRs(fixedCharge)}.`,
+                `F.C.A. (auto): ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% of Energy Charge = ${billFmtRs(fca)}.`,
+                `Electricity Duty: LV3 par poori tarah EXEMPT (ledger-verified) = ₹0.`
+            ];
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17180,7 +17690,8 @@
                 ["Electricity Duty (Exempt)", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv4(units, area, demand, discounted) {
@@ -17194,9 +17705,17 @@
             // Demand contract se zyada nikle to alag 120%/130% surcharge lagta
             // hai jo is calculator me shamil nahi hai (kyoki future MD pehle
             // se pata nahi hota).
-            const fixedCharge = billCalcFloorLoad(demand) * fixedRatePerKw;
+            const billedDemand = billCalcFloorLoad(demand);
+            const fixedCharge = billedDemand * fixedRatePerKw;
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "FLAT");
+            const explain = [
+                billCiteLine(`LV-4.1 (LT Industrial, Demand-based - ${discounted ? "≤20HP/15kW, 30% chhoot" : ">20HP, normal rate"})`),
+                `Energy Charge: ${units} units × ₹${(energyRatePaise / 100).toFixed(2)}/unit${discounted ? " (normal ₹7.05 par 30% chhoot ke baad)" : ""} = ${billFmtRs(energyCharge)}.`,
+                `Fixed Charge (Demand): Tariff Order ke anusar LT Industrial me Fixed Charge Contract Demand par based hai, units par nahi (Demand-based tariff mandatory hai) - ${billedDemand} kW × ₹${fixedRatePerKw.toFixed(0)}/kW (${area === "URBAN" ? "Urban" : "Rural"}${discounted ? ", 30% chhoot ke baad" : ""}) = ${billFmtRs(fixedCharge)}. Isliye kam units par bhi ye component bada reh sakta hai.`,
+                `F.C.A. (auto): ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% of Energy Charge = ${billFmtRs(fca)}.`,
+                `Electricity Duty: LV4 par ~9.3% flat (ledger-verified) = ${billFmtRs(electricityDuty)}.`
+            ];
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17204,15 +17723,24 @@
                 ["Electricity Duty", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total = Energy + F.C.A. + Fixed(Demand) + ED = ${billFmtRs(energyCharge)} + ${billFmtRs(fca)} + ${billFmtRs(fixedCharge)} + ${billFmtRs(electricityDuty)} ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv51(units, load) {
             const fixedRatePerHp = units <= 300 ? 77 : (units <= 750 ? 93 : 101);
-            const energyCharge = billTelescopicSum(units, [[300, 533], [750, 636], [Infinity, 664]]);
+            const et = billTelescopicExplain(units, [[300, 533], [750, 636], [Infinity, 664]]);
+            const energyCharge = et.total;
             const fixedCharge = load * fixedRatePerHp;
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "EXEMPT");
+            const explain = [
+                billCiteLine("LV-5.1 (Agriculture pump - Metered)"),
+                `Energy Charge (telescopic): ${et.lines.join(" + ")} → Total = ${billFmtRs(energyCharge)}.`,
+                `Fixed Charge: Total ${units} units ke slab ke hisaab se rate ₹${fixedRatePerHp}/HP tay hoti hai; ${load} HP × ₹${fixedRatePerHp}/HP = ${billFmtRs(fixedCharge)}.`,
+                `F.C.A. (auto): ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% of Energy Charge = ${billFmtRs(fca)}.`,
+                `Electricity Duty: LV5 par poori tarah EXEMPT = ₹0.`
+            ];
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17220,7 +17748,8 @@
                 ["Electricity Duty (Exempt)", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv53(units, area, load) {
@@ -17230,6 +17759,13 @@
             const fixedCharge = load * fixedRatePerHp;
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "EXEMPT");
+            const explain = [
+                billCiteLine("LV-5.3 (Fisheries/Poultry/Dairy, ≤25HP connected load)"),
+                `Energy Charge: ${units} units × ₹${(energyRatePaise / 100).toFixed(2)}/unit (${area === "URBAN" ? "Urban" : "Rural"}) = ${billFmtRs(energyCharge)}.`,
+                `Fixed Charge: ${load} HP × ₹${fixedRatePerHp}/HP = ${billFmtRs(fixedCharge)}.`,
+                `F.C.A. (auto): ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% of Energy Charge = ${billFmtRs(fca)}.`,
+                `Electricity Duty: EXEMPT (LV5) = ₹0.`
+            ];
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17237,7 +17773,8 @@
                 ["Electricity Duty (Exempt)", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function computeBillLv54(load, phase, season) {
@@ -17245,6 +17782,7 @@
             const units = load * perHp;
             const result = computeBillLv51(units, load);
             result.components.unshift(["Assessed Units", units]);
+            result.explain.unshift(billCiteLine("LV-5.4 (Flat rate/Unmetered agri pump) - assessment norms para 1.2 ke anusar") + ` Assessed Units = ${load} HP × ${perHp} units/HP (${phase === "1P" ? "Single" : "Three"} Phase, ${season === "OCT_MAR" ? "Oct-March" : "April-Sept"}) = ${units} units. Isके baad LV-5.1 ke rates par bill banta hai:`);
             return result;
         }
 
@@ -17256,6 +17794,13 @@
             const fixedCharge = 0;
             const fca = billCalcFcaAuto(energyCharge);
             const electricityDuty = billCalcEdAuto(energyCharge, units, "EXEMPT");
+            const explain = [
+                billCiteLine("LV-6.0 (EV/E-Rickshaw Charging Station)"),
+                `Base rate ₹7.44/unit ${timing === "SOLAR" ? "par Solar Hours (9AM-5PM) me 20% rebate" : timing === "NONSOLAR" ? "par Non-Solar Hours me 20% surcharge" : "(Mix, average rate)"}: ${units} units × ₹${(energyRatePaise / 100).toFixed(2)}/unit = ${billFmtRs(energyCharge)}.`,
+                `Fixed Charge: NIL (koi minimum charge applicable nahi).`,
+                `F.C.A. (auto): ${(BILL_FCA_RATIO_OF_ENERGY_CHARGE * 100).toFixed(2)}% of Energy Charge = ${billFmtRs(fca)}.`,
+                `Electricity Duty: tariff order me is category ke liye ED explicitly nahi likha, EXEMPT maan kar chala hai (unconfirmed) = ₹0.`
+            ];
             const components = [
                 ["Energy Charge", energyCharge],
                 ["F.C.A. (auto)", fca],
@@ -17263,7 +17808,8 @@
                 ["Electricity Duty (Exempt, unconfirmed)", electricityDuty]
             ];
             const total = energyCharge + fca + fixedCharge + electricityDuty;
-            return { components, total: billRoundOff(total) };
+            explain.push(`Total ≈ ₹${billRoundOff(total).toLocaleString("en-IN")}.`);
+            return { components, total: billRoundOff(total), explain };
         }
 
         function calculateBillEstimate() {
@@ -17348,7 +17894,7 @@
             const consumerName = document.getElementById("bc-consumer-name")?.value?.trim() || "";
             doc.setFontSize(7);
             doc.setTextColor(100);
-            doc.text("SEONI CIRCLE APP - BIJLEE BILL CALCULATOR", 14, 10);
+            doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
             doc.setFontSize(15);
             doc.setTextColor(0);
             doc.text("MONTHLY BIJLEE BILL ESTIMATE", 105, 20, { align: "center" });
@@ -17380,6 +17926,32 @@
                 columnStyles: { 0: { halign: "left" }, 1: { halign: "right" } },
                 footStyles: { fillColor: [253, 242, 248], textColor: [157, 23, 77], fontStyle: "bold", halign: "right" }
             });
+            // "Calculation kaise hui" step-by-step box - screen ke explain-box jaisa
+            // hi content, PDF me bhi Download ke baad user ko dikhe isliye. jsPDF ka
+            // default font ₹ aur Devanagari support nahi karta, isliye Rs. use kiya
+            // hai aur stripDevanagariForPdf() se saaf kiya hai.
+            const explainLines = (lastBillCalcResult.explain || []).map((line) => stripDevanagariForPdf(line.replace(/₹/g, "Rs.")));
+            if (explainLines.length) {
+                const citationLine = explainLines[0];
+                const totalIdx = explainLines.map((l) => /^Total\b/i.test(l)).lastIndexOf(true);
+                const totalLine = totalIdx >= 0 ? explainLines[totalIdx] : null;
+                const stepLines = explainLines.slice(1, totalIdx >= 0 ? totalIdx : undefined);
+                doc.autoTable({
+                    startY: doc.lastAutoTable.finalY + 8,
+                    head: [["CALCULATION KAISE HUI? (Step-by-step)"]],
+                    body: [
+                        [{ content: citationLine, styles: { fontStyle: "italic", textColor: [30, 64, 175], fillColor: [239, 246, 255] } }],
+                        ...stepLines.map((l, i) => [`${i + 1}.  ${l}`])
+                    ],
+                    foot: totalLine ? [[totalLine.replace(/^Total\s*/, "TOTAL ")]] : undefined,
+                    theme: "grid",
+                    tableWidth: 182,
+                    headStyles: { fillColor: [29, 78, 216], halign: "left", fontSize: 10 },
+                    styles: { fontSize: 8, cellPadding: 3, halign: "left", textColor: [51, 65, 85], overflow: "linebreak", cellWidth: "wrap" },
+                    columnStyles: { 0: { cellWidth: 182 } },
+                    footStyles: { fillColor: [253, 242, 248], textColor: [157, 23, 77], fontStyle: "bold", halign: "left", fontSize: 7.5, cellPadding: 4 }
+                });
+            }
             doc.setFontSize(7);
             doc.setTextColor(140);
             doc.text("Ye ek approximate estimate hai (PF surcharge/seasonal/DTR-metered shamil nahi). Arrear/Surcharge is total me shamil nahi hai.", 14, doc.lastAutoTable.finalY + 10);
@@ -17410,5 +17982,67 @@
                 <input id="bc-consumer-name" type="text" class="ivrs-input" style="${billCalcInputStyle}" placeholder="e.g. Ramesh Kumar">
                 <button class="dashboard-btn" style="width:100%; margin-top:12px; background:linear-gradient(135deg,#ef4444 0%,#b91c1c 100%); color:#ffffff !important; font-size:0.8rem; padding:14px;" onclick="downloadBillCalculatorPdf()">DOWNLOAD PDF</button>
                 <div style="font-size:0.58rem; font-weight:800; color:#94a3b8; text-align:center; margin-top:10px; line-height:1.5;">Ye ek approximate estimate hai (PF surcharge/seasonal/DTR-metered shamil nahi). Arrear/Surcharge is total me shamil nahi hai.</div>
+                ${renderBillCalcExplainBox(result)}
+            `;
+        }
+
+        // Har explain-line ka format zyadatar "Label: detail text" hota hai
+        // (jaise computeBillXxx functions me banaya gaya) - isko todke label ko
+        // alag rang/bold me dikhane ke liye chota parser.
+        function billExplainSplitLabel(line) {
+            const m = line.match(/^([A-Za-z0-9À-ž.()\/ ]{2,42}):\s*(.*)$/s);
+            if (!m) return null;
+            return { label: m[1].trim(), detail: m[2].trim() };
+        }
+
+        function renderBillCalcExplainBox(result) {
+            const lines = (result.explain || []).slice();
+            if (!lines.length) return "";
+
+            // Pehli line hamesha tariff-order citation hoti hai (billCiteLine se
+            // shuru hoti hai) - use header ke turant niche ek alag "source" strip
+            // me dikhate hain.
+            const citationLine = lines[0];
+            const totalIdx = lines.map((l) => /^Total\b/i.test(l)).lastIndexOf(true);
+            const totalLine = totalIdx >= 0 ? lines[totalIdx] : null;
+            const stepLines = lines.slice(1, totalIdx >= 0 ? totalIdx : undefined);
+
+            const stepIcons = ["⚡", "🔌", "➕", "🏛️", "🎁", "📐", "🔢", "➗"];
+            const stepsHtml = stepLines.map((line, i) => {
+                const parsed = billExplainSplitLabel(line);
+                const icon = stepIcons[i % stepIcons.length];
+                const numBadge = `<div style="flex-shrink:0; width:22px; height:22px; border-radius:50%; background:linear-gradient(135deg,#dbeafe,#bfdbfe); color:#1d4ed8; font-weight:950; font-size:0.6rem; display:flex; align-items:center; justify-content:center; margin-top:1px;">${i + 1}</div>`;
+                const body = parsed
+                    ? `<span style="color:#1d4ed8; font-weight:950;">${escapeHtml(parsed.label)}:</span> <span style="color:#334155; font-weight:700;">${escapeHtml(parsed.detail)}</span>`
+                    : `<span style="color:#334155; font-weight:700;">${escapeHtml(line)}</span>`;
+                return `
+                    <div style="display:flex; gap:10px; align-items:flex-start; padding:10px 16px; ${i < stepLines.length - 1 ? "border-bottom:1px dashed #e2e8f0;" : ""}">
+                        ${numBadge}
+                        <div style="flex:1; font-size:0.66rem; line-height:1.55;">${body}</div>
+                        <div style="flex-shrink:0; font-size:0.85rem; opacity:0.55; margin-top:1px;">${icon}</div>
+                    </div>`;
+            }).join("");
+
+            const totalHtml = totalLine ? `
+                <div style="background:linear-gradient(135deg,#fdf2f8,#fce7f3); border-top:1.5px dashed #f9a8d4; padding:12px 16px;">
+                    <div style="font-size:0.6rem; font-weight:950; color:#9d174d; letter-spacing:0.4px; margin-bottom:3px;">FINAL TOTAL FORMULA</div>
+                    <div style="font-size:0.68rem; font-weight:800; color:#831843; line-height:1.6;">${escapeHtml(totalLine.replace(/^Total\s*/, ""))}</div>
+                </div>` : "";
+
+            return `
+                <div style="margin-top:16px; border-radius:16px; overflow:hidden; border:1.5px solid #bfdbfe; box-shadow:0 2px 10px rgba(30,64,175,0.10);">
+                    <div style="background:linear-gradient(135deg,#1d4ed8 0%,#1e3a8a 100%); padding:12px 16px; display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:1rem;">📖</span>
+                        <span style="color:#ffffff; font-weight:950; font-size:0.76rem; letter-spacing:0.2px;">CALCULATION KAISE HUI?</span>
+                        <span style="color:#bfdbfe; font-weight:800; font-size:0.58rem; margin-left:auto; background:rgba(255,255,255,0.15); padding:3px 8px; border-radius:999px;">STEP-BY-STEP</span>
+                    </div>
+                    <div style="background:#eff6ff; padding:10px 16px; font-size:0.62rem; font-weight:800; color:#1e40af; line-height:1.5; border-bottom:1px solid #bfdbfe; display:flex; gap:6px;">
+                        <span>📘</span><span>${escapeHtml(citationLine)}</span>
+                    </div>
+                    <div style="background:#ffffff;">
+                        ${stepsHtml}
+                    </div>
+                    ${totalHtml}
+                </div>
             `;
         }
