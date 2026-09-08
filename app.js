@@ -4608,14 +4608,20 @@
         }
 
         // ===================================================================
-        // GROUP MEETING (Jitsi Meet, free) - "GROUP MEETING" home button password
-        // protected hai (meet123). Har baar naya unique room link banta hai (date +
-        // time + random code) - purana link dobara kaam nahi karta, isliye koi bhi
-        // outsider purane share ki hui link se baad me andar nahi ghus sakta. Lobby
-        // (moderator approval) Jitsi me default OFF rehta hai jab tak khud on na
-        // karein, isliye click karte hi seedha meeting me join ho jaata hai - koi
-        // accept/approve nahi karna padta. prejoinPageEnabled=false se naam-poochne
-        // wali screen bhi skip ho jaati hai.
+        // GROUP MEETING (free Jitsi Meet) - "GROUP MEETING" home button password
+        // protected hai (meet123). Click karte hi seedha meeting nahi khulti - pehle
+        // ek "Create New Meeting Link" button dikhta hai; usko dabane par har baar
+        // NAYA unique room link banta hai (date + time + random code) - purana link
+        // dobara kaam nahi karta. Server meet.ffmuc.net use kar rahe hain (meet.jit.si
+        // ki tarah free/bina-account hai, lekin naya meeting host karne par login
+        // maangne wali policy nahi lagati - sirf Full Name poochta hai). Lobby
+        // (moderator approval) default OFF rehta hai, isliye Share hote hi jo bhi link
+        // par click kare seedha meeting me chala jaata hai - koi accept/approve nahi
+        // karna. Jab sab log meeting chhod dete hain to Jitsi khud room band kar deta
+        // hai (server-side, apne aap) - agli baar "Create New Meeting Link" dabane par
+        // hamesha ek naya alag link banega.
+        const GROUP_MEETING_SERVER = "meet.ffmuc.net";
+
         function generateGroupMeetingRoomName() {
             const now = new Date();
             const pad = (n) => String(n).padStart(2, "0");
@@ -4625,35 +4631,46 @@
             return `seonicircle-${dateStr}-${timeStr}-${randomCode}`;
         }
 
-        function startGroupMeeting() {
-            const roomName = generateGroupMeetingRoomName();
-            const meetingUrl = `https://meet.jit.si/${roomName}#config.prejoinPageEnabled=false&config.prejoinConfig.enabled=false&config.disableDeepLinking=true`;
-            // Yahi click ke andar (user-gesture) synchronously naya tab kholte hain,
-            // taaki browser ka popup-blocker na roke - host turant meeting me join ho
-            // jaayega.
-            window.open(meetingUrl, "_blank");
-            showGroupMeetingShareBox(meetingUrl);
-        }
-
-        function showGroupMeetingShareBox(meetingUrl) {
+        function openGroupMeetingLauncher() {
             const oldBox = document.getElementById("group-meeting-share-overlay");
             if (oldBox) oldBox.remove();
             const overlay = document.createElement("div");
             overlay.id = "group-meeting-share-overlay";
             overlay.style.cssText = "position:fixed; inset:0; z-index:9999; background:rgba(15,23,42,0.36); display:flex; align-items:center; justify-content:center; padding:20px;";
             overlay.innerHTML = `
-                <div style="width:min(340px,92vw); background:#ffffff; border:2px solid #86efac; border-radius:22px; box-shadow:0 20px 45px rgba(15,23,42,0.28); padding:18px; text-align:center;">
-                    <div style="display:inline-block; background:#dcfce7; color:#15803d; border:1.5px solid #4ade80; border-radius:999px; padding:7px 18px; font-size:0.9rem; font-weight:950;">📞 GROUP MEETING SHURU HO GAYI</div>
-                    <div style="margin-top:14px; color:#111827; font-size:0.72rem; font-weight:800; word-break:break-all; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:10px;">${escapeHtml(meetingUrl)}</div>
-                    <div style="margin-top:10px; color:#64748b; font-size:0.62rem; font-weight:700; line-height:1.5;">Ye link ek hi baar ke liye hai - agli meeting par naya link banega. Staff isi link par click karke seedha meeting me join ho jaayenge.</div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px;">
-                        <button id="group-meeting-copy-btn" type="button" style="height:42px; border:none; border-radius:999px; background:#e5e7eb; color:#111827; font-size:0.78rem; font-weight:950;">COPY LINK</button>
-                        <button id="group-meeting-wa-btn" type="button" style="height:42px; border:none; border-radius:999px; background:#16a34a; color:#fff; font-size:0.78rem; font-weight:950;">WHATSAPP</button>
-                    </div>
+                <div id="group-meeting-card" style="width:min(340px,92vw); background:#ffffff; border:2px solid #86efac; border-radius:22px; box-shadow:0 20px 45px rgba(15,23,42,0.28); padding:18px; text-align:center;">
+                    <div style="display:inline-block; background:#dcfce7; color:#15803d; border:1.5px solid #4ade80; border-radius:999px; padding:7px 18px; font-size:0.9rem; font-weight:950;">📞 GROUP MEETING</div>
+                    <div style="margin-top:14px; color:#475569; font-size:0.7rem; font-weight:700; line-height:1.5;">Naya meeting link banane ke liye neeche button dabaiye. Har baar bilkul naya link banega.</div>
+                    <button id="group-meeting-create-btn" type="button" style="width:100%; height:48px; margin-top:16px; border:none; border-radius:999px; background:#16a34a; color:#fff; font-size:0.85rem; font-weight:950;">➕ CREATE NEW MEETING LINK</button>
                     <div id="group-meeting-close-btn" style="margin-top:14px; color:#94a3b8; font-weight:800; font-size:0.68rem; cursor:pointer;">BAND KAREIN</div>
                 </div>
             `;
             document.body.appendChild(overlay);
+            const createBtn = document.getElementById("group-meeting-create-btn");
+            if (createBtn) createBtn.onclick = () => renderGroupMeetingLinkCard();
+            const closeBtn = document.getElementById("group-meeting-close-btn");
+            if (closeBtn) closeBtn.onclick = () => overlay.remove();
+            overlay.addEventListener("click", (event) => {
+                if (event.target === overlay) overlay.remove();
+            });
+        }
+
+        function renderGroupMeetingLinkCard() {
+            const card = document.getElementById("group-meeting-card");
+            if (!card) return;
+            const roomName = generateGroupMeetingRoomName();
+            const meetingUrl = `https://${GROUP_MEETING_SERVER}/${roomName}#config.prejoinPageEnabled=true&config.disableDeepLinking=true`;
+            card.innerHTML = `
+                <div style="display:inline-block; background:#dcfce7; color:#15803d; border:1.5px solid #4ade80; border-radius:999px; padding:7px 18px; font-size:0.9rem; font-weight:950;">✅ NAYA LINK TAIYAAR</div>
+                <div style="margin-top:14px; color:#111827; font-size:0.72rem; font-weight:800; word-break:break-all; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:10px;">${escapeHtml(meetingUrl)}</div>
+                <div style="margin-top:10px; color:#64748b; font-size:0.62rem; font-weight:700; line-height:1.5;">Share dabate hi meeting shuru maani jaayegi. Staff link par click karke sirf apna naam likhenge, phir seedha meeting me pahunch jaayenge - koi login/password nahi.</div>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px;">
+                    <button id="group-meeting-copy-btn" type="button" style="height:42px; border:none; border-radius:999px; background:#e5e7eb; color:#111827; font-size:0.78rem; font-weight:950;">COPY LINK</button>
+                    <button id="group-meeting-wa-btn" type="button" style="height:42px; border:none; border-radius:999px; background:#16a34a; color:#fff; font-size:0.78rem; font-weight:950;">SHARE (WHATSAPP)</button>
+                </div>
+                <button id="group-meeting-join-btn" type="button" style="width:100%; height:44px; margin-top:10px; border:none; border-radius:999px; background:#0f172a; color:#fff; font-size:0.8rem; font-weight:950;">MEETING ME KHUD JOIN KAREIN (HOST)</button>
+                <div id="group-meeting-close-btn" style="margin-top:14px; color:#94a3b8; font-weight:800; font-size:0.68rem; cursor:pointer;">BAND KAREIN</div>
+            `;
             const copyBtn = document.getElementById("group-meeting-copy-btn");
             if (copyBtn) {
                 copyBtn.onclick = () => {
@@ -4663,18 +4680,27 @@
             const waBtn = document.getElementById("group-meeting-wa-btn");
             if (waBtn) {
                 waBtn.onclick = () => {
-                    const msg = `📞 SEONI CIRCLE Group Meeting Call\nMeeting join karne ke liye link par click karein:\n${meetingUrl}`;
+                    const msg = `📞 SEONI CIRCLE Group Meeting Call\nMeeting join karne ke liye link par click karein aur apna Full Name likh kar Enter kar dein:\n${meetingUrl}`;
                     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+                    showToast("Share hote hi Meeting Shuru Maani Jaayegi", true);
                 };
             }
+            const joinBtn = document.getElementById("group-meeting-join-btn");
+            if (joinBtn) joinBtn.onclick = () => window.open(meetingUrl, "_blank");
             const closeBtn = document.getElementById("group-meeting-close-btn");
-            if (closeBtn) closeBtn.onclick = () => overlay.remove();
-            overlay.addEventListener("click", (event) => {
-                if (event.target === overlay) overlay.remove();
-            });
+            if (closeBtn) {
+                closeBtn.onclick = () => {
+                    const overlay = document.getElementById("group-meeting-share-overlay");
+                    if (overlay) overlay.remove();
+                };
+            }
         }
 
-        function showToast(message, ok) {
+        function startGroupMeeting() {
+            openGroupMeetingLauncher();
+        }
+
+                function showToast(message, ok) {
             const t = document.getElementById("toast-notif");
             t.innerText = message;
             t.style.background = ok ? "#10b981" : "#ef4444";
