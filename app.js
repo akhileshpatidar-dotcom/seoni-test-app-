@@ -19,7 +19,7 @@
                     { name: "MUNGWANI", subDn: "AE (D)", csvUrl: "" },
                     { name: "PANDIYA CHHAPARA", subDn: "KEOLARI", csvUrl: "" },
                     { name: "SEONI (T)", subDn: "SEONI (T)", csvUrl: "https://docs.google.com/spreadsheets/d/1ugB6evAfEL0t7ffzhmv1G8vwRtdJmz3fsQrt92sWrvM/export?format=csv&gid=0" },
-                    { name: "SEONI (RES)", subDn: "AE (D)", csvUrl: "" },
+                    { name: "SEONI (RES)", subDn: "AE (D)", csvUrl: "https://docs.google.com/spreadsheets/d/12d4nBlUJ5MoamEZdtNteTSixTt9UdvbrPmjS9tBRUw8/export?format=csv&gid=0" },
                     { name: "UGALI", subDn: "KEOLARI", csvUrl: "" }
                 ]
             },
@@ -92,7 +92,8 @@
             "LAKHNADON": "https://docs.google.com/spreadsheets/d/1_r5WgGV9bs-aed86dZLOlDKmK5g9J7qiGsmQAqDE1as/export?format=csv&gid=0",
             "KURAI": "https://docs.google.com/spreadsheets/d/15c2CHolan0YVYh5Hwe4akn1YNk1SUhhLVa24h9ZBQbU/export?format=csv&gid=0",
             "KEDARPUR": "https://docs.google.com/spreadsheets/d/145bjD_AoAKWnTfzSaVAXoFpq9cZooSoM8jl0JKBfDkw/export?format=csv&gid=0",
-            "BARGHAT": "https://docs.google.com/spreadsheets/d/1b5g3VBlKjCiOX0cfE5Na-jyRY4cPCjrIJIsU3YozG_U/export?format=csv&gid=0"
+            "BARGHAT": "https://docs.google.com/spreadsheets/d/1b5g3VBlKjCiOX0cfE5Na-jyRY4cPCjrIJIsU3YozG_U/export?format=csv&gid=0",
+            "SEONIRES": "https://docs.google.com/spreadsheets/d/12d4nBlUJ5MoamEZdtNteTSixTt9UdvbrPmjS9tBRUw8/export?format=csv&gid=0"
         };
         const stockMaterialsCsvUrl = "https://docs.google.com/spreadsheets/d/1OfrU7ZuN5LV9f_3hqORv66BVLYKFGIBBjDyeSXHwldA/export?format=csv&gid=641545139";
         const shmsCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTbq-yne90yg9Vn8eylxM3zKMfZjPLlVhca3JhsjAzMlcm6MAVl8vAA-xXVgZI_XjWQBHyjB36YO1Cz/pub?output=csv";
@@ -307,6 +308,12 @@
             Object.keys(revenueCollectionCsvUrls).forEach((dcKey) => {
                 loadRevenueCollectionData(dcKey).catch(() => {});
             });
+            // AUTO-RETRY (2026-08-21): app open hote hi bhi pending offline submit
+            // (agar koi ho) ko silently retry kar dete hain - agar us waqt signal
+            // theek mile to woh khud submit ho jaayega aur "pending" dialog box khud
+            // hi hat jaayega, user ko RETRY PENDING DATA button dabane ki zaroorat
+            // nahi padegi.
+            retryRevenueOfflineQueue(true).catch(() => {});
             loadCourtCaseData();
             loadStockMaterialsData();
             preloadDuplicateTrackingData();
@@ -1080,12 +1087,16 @@
         }
 
         function verifyPassword() {
-            const pws = { STOCK: "AE123", EXCEL_TOOL_ADMIN: "AE123", PANCHNAMA_TOOL_ADMIN: "AE123" };
+            const pws = { STOCK: "AE123", EXCEL_TOOL_ADMIN: "AE123", PANCHNAMA_TOOL_ADMIN: "AE123", ARRANGE_EXCEL_TOOL_ADMIN: "AE123", IMAGE_TO_EXCEL_TOOL_ADMIN: "AE123", GROUP_MEETING: "meet123" };
             if (document.getElementById("pwd-input").value === pws[pendingLevel]) {
                 activeViewLevel = pendingLevel;
                 closePwdModal();
                 if (pendingLevel === "STOCK") {
                     openStockDashboard();
+                    return;
+                }
+                if (pendingLevel === "GROUP_MEETING") {
+                    startGroupMeeting();
                     return;
                 }
                 if (pendingLevel === "EXCEL_TOOL_ADMIN") {
@@ -1096,6 +1107,16 @@
                 if (pendingLevel === "PANCHNAMA_TOOL_ADMIN") {
                     initPanchnamaToolAdminUpload();
                     switchView("panchnama-tool-admin");
+                    return;
+                }
+                if (pendingLevel === "ARRANGE_EXCEL_TOOL_ADMIN") {
+                    initArrangeExcelToolAdminUpload();
+                    switchView("arrange-excel-tool-admin");
+                    return;
+                }
+                if (pendingLevel === "IMAGE_TO_EXCEL_TOOL_ADMIN") {
+                    initImageToExcelToolAdminUpload();
+                    switchView("image-to-excel-tool-admin");
                     return;
                 }
                 switchView("summary");
@@ -1306,6 +1327,199 @@
                     }
                 } catch (error) {
                     console.log("PANCHNAMA TOOL UPLOAD: failed -", error);
+                    if (statusBox) {
+                        statusBox.style.background = "#fff1f2";
+                        statusBox.style.color = "#991b1b";
+                        statusBox.innerText = "Upload nahi ho paya: " + (error?.message || "network/unknown error");
+                    }
+                    showToast("Upload nahi ho paya", false);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // NEW FEATURE (2026-08-22): "Arrange Excel File" tool - Excel Automation/
+        // Panchnama jaisa hi same flow (password-protected admin upload, generic
+        // backend action=uploadExternalToolHtml/getExternalToolHtml ko sirf
+        // tool_key="ARRANGE_EXCEL" se reuse kiya hai - koi naya .gs backend change
+        // nahi chahiye, isliye baaki koi bhi purana flow (Excel Automation,
+        // Panchnama, ya kuch aur) bilkul touch nahi hua).
+        function openArrangeExcelToolAdminUpload() {
+            closeHeaderMenu();
+            askPassword("ARRANGE_EXCEL_TOOL_ADMIN");
+        }
+
+        function initArrangeExcelToolAdminUpload() {
+            const fileInput = document.getElementById("arrange-excel-tool-html-input");
+            const filenameBox = document.getElementById("arrange-excel-tool-upload-filename");
+            const statusBox = document.getElementById("arrange-excel-tool-upload-status");
+            if (fileInput) fileInput.value = "";
+            if (filenameBox) filenameBox.innerText = "";
+            if (statusBox) statusBox.style.display = "none";
+        }
+
+        function handleArrangeExcelToolHtmlUpload(event) {
+            const file = event?.target?.files?.[0];
+            if (!file) return;
+            const filenameBox = document.getElementById("arrange-excel-tool-upload-filename");
+            const statusBox = document.getElementById("arrange-excel-tool-upload-status");
+            if (filenameBox) filenameBox.innerText = file.name;
+            if (!file.name.toLowerCase().endsWith(".html")) {
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#fff1f2";
+                    statusBox.style.color = "#991b1b";
+                    statusBox.innerText = "Sirf .html file hi upload kijiye";
+                }
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const htmlContent = String(e.target?.result || "");
+                if (!htmlContent.trim()) {
+                    if (statusBox) {
+                        statusBox.style.display = "block";
+                        statusBox.style.background = "#fff1f2";
+                        statusBox.style.color = "#991b1b";
+                        statusBox.innerText = "File khali hai ya padhi nahi ja saki";
+                    }
+                    return;
+                }
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#eff6ff";
+                    statusBox.style.color = "#1d4ed8";
+                    statusBox.innerText = "Upload ho raha hai...";
+                }
+                try {
+                    const payload = JSON.stringify({
+                        action: "uploadExternalToolHtml",
+                        tool_key: "ARRANGE_EXCEL",
+                        html: htmlContent,
+                        file_name: file.name
+                    });
+                    console.log("ARRANGE EXCEL TOOL UPLOAD: starting, html length =", htmlContent.length, "payload length =", payload.length, "file =", file.name);
+                    const response = await fetchWithTimeout(revenueCollectionSubmitScriptUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+                        body: payload
+                    }, 40000);
+                    const responseText = await response.text();
+                    console.log("ARRANGE EXCEL TOOL UPLOAD: http status =", response.status, "body (first 300 chars) =", responseText.slice(0, 300));
+                    let parsed = {};
+                    let parseFailed = false;
+                    try { parsed = JSON.parse(responseText || "{}"); } catch (_) { parseFailed = true; }
+                    if (response.ok && parsed.status !== "error") {
+                        if (statusBox) {
+                            statusBox.style.background = "#ecfdf5";
+                            statusBox.style.color = "#047857";
+                            statusBox.innerText = "Arrange Excel File tool update ho gaya - sabhi DC me turant reflect hoga";
+                        }
+                        showToast("Tool update ho gaya", true);
+                    } else {
+                        const detail = parsed.message
+                            ? parsed.message
+                            : (parseFailed ? `Server se JSON nahi mila (HTTP ${response.status}): ${responseText.slice(0, 150)}` : `HTTP ${response.status}`);
+                        throw new Error(detail);
+                    }
+                } catch (error) {
+                    console.log("ARRANGE EXCEL TOOL UPLOAD: failed -", error);
+                    if (statusBox) {
+                        statusBox.style.background = "#fff1f2";
+                        statusBox.style.color = "#991b1b";
+                        statusBox.innerText = "Upload nahi ho paya: " + (error?.message || "network/unknown error");
+                    }
+                    showToast("Upload nahi ho paya", false);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // NEW FEATURE (2026-08-25): "Image To Excel Converter" tool - Arrange Excel
+        // File jaisa hi same flow (password-protected admin upload, generic backend
+        // action=uploadExternalToolHtml/getExternalToolHtml ko sirf
+        // tool_key="IMAGE_TO_EXCEL" se reuse kiya hai - koi naya .gs backend change
+        // nahi chahiye, isliye baaki koi bhi purana flow bilkul touch nahi hua).
+        function openImageToExcelToolAdminUpload() {
+            closeHeaderMenu();
+            askPassword("IMAGE_TO_EXCEL_TOOL_ADMIN");
+        }
+
+        function initImageToExcelToolAdminUpload() {
+            const fileInput = document.getElementById("image-to-excel-tool-html-input");
+            const filenameBox = document.getElementById("image-to-excel-tool-upload-filename");
+            const statusBox = document.getElementById("image-to-excel-tool-upload-status");
+            if (fileInput) fileInput.value = "";
+            if (filenameBox) filenameBox.innerText = "";
+            if (statusBox) statusBox.style.display = "none";
+        }
+
+        function handleImageToExcelToolHtmlUpload(event) {
+            const file = event?.target?.files?.[0];
+            if (!file) return;
+            const filenameBox = document.getElementById("image-to-excel-tool-upload-filename");
+            const statusBox = document.getElementById("image-to-excel-tool-upload-status");
+            if (filenameBox) filenameBox.innerText = file.name;
+            if (!file.name.toLowerCase().endsWith(".html")) {
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#fff1f2";
+                    statusBox.style.color = "#991b1b";
+                    statusBox.innerText = "Sirf .html file hi upload kijiye";
+                }
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const htmlContent = String(e.target?.result || "");
+                if (!htmlContent.trim()) {
+                    if (statusBox) {
+                        statusBox.style.display = "block";
+                        statusBox.style.background = "#fff1f2";
+                        statusBox.style.color = "#991b1b";
+                        statusBox.innerText = "File khali hai ya padhi nahi ja saki";
+                    }
+                    return;
+                }
+                if (statusBox) {
+                    statusBox.style.display = "block";
+                    statusBox.style.background = "#eff6ff";
+                    statusBox.style.color = "#1d4ed8";
+                    statusBox.innerText = "Upload ho raha hai...";
+                }
+                try {
+                    const payload = JSON.stringify({
+                        action: "uploadExternalToolHtml",
+                        tool_key: "IMAGE_TO_EXCEL",
+                        html: htmlContent,
+                        file_name: file.name
+                    });
+                    console.log("IMAGE TO EXCEL TOOL UPLOAD: starting, html length =", htmlContent.length, "payload length =", payload.length, "file =", file.name);
+                    const response = await fetchWithTimeout(revenueCollectionSubmitScriptUrl, {
+                        method: "POST",
+                        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+                        body: payload
+                    }, 40000);
+                    const responseText = await response.text();
+                    console.log("IMAGE TO EXCEL TOOL UPLOAD: http status =", response.status, "body (first 300 chars) =", responseText.slice(0, 300));
+                    let parsed = {};
+                    let parseFailed = false;
+                    try { parsed = JSON.parse(responseText || "{}"); } catch (_) { parseFailed = true; }
+                    if (response.ok && parsed.status !== "error") {
+                        if (statusBox) {
+                            statusBox.style.background = "#ecfdf5";
+                            statusBox.style.color = "#047857";
+                            statusBox.innerText = "Image To Excel Converter tool update ho gaya - sabhi DC me turant reflect hoga";
+                        }
+                        showToast("Tool update ho gaya", true);
+                    } else {
+                        const detail = parsed.message
+                            ? parsed.message
+                            : (parseFailed ? `Server se JSON nahi mila (HTTP ${response.status}): ${responseText.slice(0, 150)}` : `HTTP ${response.status}`);
+                        throw new Error(detail);
+                    }
+                } catch (error) {
+                    console.log("IMAGE TO EXCEL TOOL UPLOAD: failed -", error);
                     if (statusBox) {
                         statusBox.style.background = "#fff1f2";
                         statusBox.style.color = "#991b1b";
@@ -3518,9 +3732,16 @@
                         await loadRevenueCollectionData(activeDC, forceMasterRefresh);
                         revenueSummaryMasterLoadedDcKey = revenueSummaryDcKey;
                     }
+                    // PERF FIX (2026-08-21): Daily Progress (Revenue tab) DC scope me ho
+                    // to sirf usi DC ka data maango (Point 1 jaisa hi scope-tracking wala
+                    // safe tarika - poori history, date-filter NAHI, kyunki yahan dropdown
+                    // se date/month switch karne par bhi purana hi fetched data reuse hota
+                    // hai). DIVISION/CIRCLE scope me pehle jaisa hi (sabhi DC) fetch hota
+                    // hai, kyunki wahan sach me sabhi DC ka data chahiye.
+                    const revenueSummaryScopeDc = activeViewLevel === "DC" ? activeDC : null;
                     await Promise.all([
-                        syncRevenueLiveEntriesFromSheet(),
-                        syncRevenueTdEntriesFromSheet()
+                        syncRevenueLiveEntriesFromSheet(3, false, revenueSummaryScopeDc),
+                        syncRevenueTdEntriesFromSheet(3, false, revenueSummaryScopeDc)
                     ]);
                     if (isStaleSummaryRefresh()) return;
 
@@ -4386,6 +4607,73 @@
             }
         }
 
+        // ===================================================================
+        // GROUP MEETING (Jitsi Meet, free) - "GROUP MEETING" home button password
+        // protected hai (meet123). Har baar naya unique room link banta hai (date +
+        // time + random code) - purana link dobara kaam nahi karta, isliye koi bhi
+        // outsider purane share ki hui link se baad me andar nahi ghus sakta. Lobby
+        // (moderator approval) Jitsi me default OFF rehta hai jab tak khud on na
+        // karein, isliye click karte hi seedha meeting me join ho jaata hai - koi
+        // accept/approve nahi karna padta. prejoinPageEnabled=false se naam-poochne
+        // wali screen bhi skip ho jaati hai.
+        function generateGroupMeetingRoomName() {
+            const now = new Date();
+            const pad = (n) => String(n).padStart(2, "0");
+            const dateStr = `${pad(now.getDate())}${pad(now.getMonth() + 1)}${now.getFullYear()}`;
+            const timeStr = `${pad(now.getHours())}${pad(now.getMinutes())}`;
+            const randomCode = Math.random().toString(36).slice(2, 6);
+            return `seonicircle-${dateStr}-${timeStr}-${randomCode}`;
+        }
+
+        function startGroupMeeting() {
+            const roomName = generateGroupMeetingRoomName();
+            const meetingUrl = `https://meet.jit.si/${roomName}#config.prejoinPageEnabled=false&config.prejoinConfig.enabled=false&config.disableDeepLinking=true`;
+            // Yahi click ke andar (user-gesture) synchronously naya tab kholte hain,
+            // taaki browser ka popup-blocker na roke - host turant meeting me join ho
+            // jaayega.
+            window.open(meetingUrl, "_blank");
+            showGroupMeetingShareBox(meetingUrl);
+        }
+
+        function showGroupMeetingShareBox(meetingUrl) {
+            const oldBox = document.getElementById("group-meeting-share-overlay");
+            if (oldBox) oldBox.remove();
+            const overlay = document.createElement("div");
+            overlay.id = "group-meeting-share-overlay";
+            overlay.style.cssText = "position:fixed; inset:0; z-index:9999; background:rgba(15,23,42,0.36); display:flex; align-items:center; justify-content:center; padding:20px;";
+            overlay.innerHTML = `
+                <div style="width:min(340px,92vw); background:#ffffff; border:2px solid #86efac; border-radius:22px; box-shadow:0 20px 45px rgba(15,23,42,0.28); padding:18px; text-align:center;">
+                    <div style="display:inline-block; background:#dcfce7; color:#15803d; border:1.5px solid #4ade80; border-radius:999px; padding:7px 18px; font-size:0.9rem; font-weight:950;">📞 GROUP MEETING SHURU HO GAYI</div>
+                    <div style="margin-top:14px; color:#111827; font-size:0.72rem; font-weight:800; word-break:break-all; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:10px;">${escapeHtml(meetingUrl)}</div>
+                    <div style="margin-top:10px; color:#64748b; font-size:0.62rem; font-weight:700; line-height:1.5;">Ye link ek hi baar ke liye hai - agli meeting par naya link banega. Staff isi link par click karke seedha meeting me join ho jaayenge.</div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px;">
+                        <button id="group-meeting-copy-btn" type="button" style="height:42px; border:none; border-radius:999px; background:#e5e7eb; color:#111827; font-size:0.78rem; font-weight:950;">COPY LINK</button>
+                        <button id="group-meeting-wa-btn" type="button" style="height:42px; border:none; border-radius:999px; background:#16a34a; color:#fff; font-size:0.78rem; font-weight:950;">WHATSAPP</button>
+                    </div>
+                    <div id="group-meeting-close-btn" style="margin-top:14px; color:#94a3b8; font-weight:800; font-size:0.68rem; cursor:pointer;">BAND KAREIN</div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            const copyBtn = document.getElementById("group-meeting-copy-btn");
+            if (copyBtn) {
+                copyBtn.onclick = () => {
+                    copyRevenueText(meetingUrl).then((ok) => showToast(ok ? "Link Copy Ho Gaya" : "Copy Nahi Ho Paya", ok));
+                };
+            }
+            const waBtn = document.getElementById("group-meeting-wa-btn");
+            if (waBtn) {
+                waBtn.onclick = () => {
+                    const msg = `📞 SEONI CIRCLE Group Meeting Call\nMeeting join karne ke liye link par click karein:\n${meetingUrl}`;
+                    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+                };
+            }
+            const closeBtn = document.getElementById("group-meeting-close-btn");
+            if (closeBtn) closeBtn.onclick = () => overlay.remove();
+            overlay.addEventListener("click", (event) => {
+                if (event.target === overlay) overlay.remove();
+            });
+        }
+
         function showToast(message, ok) {
             const t = document.getElementById("toast-notif");
             t.innerText = message;
@@ -5105,13 +5393,36 @@
                 if (modal) modal.style.display = "none";
                 return;
             }
-            const link = document.createElement("a");
-            link.href = gpsCameraPhotoDataUrl;
-            link.download = fileName;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            showToast("Browser download start hua, mobile me Save to Photos/Gallery support na mile to share panel use kijiye", true);
+            // BUG FIX (2026-08-22): pehle yahan seedha `data:` URI (poora base64
+            // photo data) ko <a href> me daal kar download trigger karte the.
+            // Camera photo ka base64 data: URI bahut lamba (kai MB tak) ho sakta
+            // hai - kai Android/Chrome versions par itna bada `data:` URI href se
+            // download reliably start nahi hota (kabhi photo bas naye tab me khul
+            // jaati hai, kabhi kuch bhi nahi hota) - isi wajah se "image download
+            // nahi ho rahi" jaisa mehsoos hota tha. Ab pehle photo ko Blob me
+            // convert karke `blob:` URL banate hain - yeh mobile browsers par
+            // bade images/files download karne ka standard, zyada bharosemand
+            // tarika hai. Agar kisi wajah se yeh bhi fail ho jaaye, to purana
+            // `data:` URI tarika hi fallback ke roop me chalta hai.
+            try {
+                const file = dataUrlToFile(gpsCameraPhotoDataUrl, fileName);
+                const blobUrl = URL.createObjectURL(file);
+                const link = document.createElement("a");
+                link.href = blobUrl;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 4000);
+            } catch (_) {
+                const link = document.createElement("a");
+                link.href = gpsCameraPhotoDataUrl;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+            showToast("Download start hua, mobile me Save to Photos/Gallery support na mile to share panel use kijiye", true);
         }
 
         function retakeGpsCameraPhoto() {
@@ -10106,7 +10417,7 @@
             if (excelAutomationToolOpening) return;
             excelAutomationToolOpening = true;
             const btn = document.getElementById("excel-automation-open-btn");
-            const originalBtnText = btn ? btn.innerText : "Compare Two Excel File";
+            const originalBtnText = btn ? btn.innerText : "Compare 2 Excel File (V-LOOKUP)";
             if (btn) {
                 btn.disabled = true;
                 btn.style.opacity = "0.65";
@@ -10218,6 +10529,132 @@
                 const toolUrl = baseUrl.replace(/[^/]*$/, "") + "panchnama/index.html";
                 try {
                     const fetchUrl = `${revenueCollectionSubmitScriptUrl}?action=getExternalToolHtml&tool_key=PANCHNAMA&t=${Date.now()}`;
+                    const response = await fetchWithTimeout(fetchUrl, {}, 40000);
+                    const parsed = await response.json();
+                    if (parsed && parsed.status === "success" && parsed.html) {
+                        if (newTab && !newTab.closed) {
+                            newTab.document.open();
+                            newTab.document.write(parsed.html);
+                            newTab.document.close();
+                        } else {
+                            const blob = new Blob([parsed.html], { type: "text/html" });
+                            window.open(URL.createObjectURL(blob), "_blank", "noopener");
+                        }
+                        return;
+                    }
+                    showToast("Latest tool fetch nahi ho paya, purani file khul rahi hai", false);
+                } catch (_) {
+                    showToast("Latest tool fetch nahi ho paya, purani file khul rahi hai", false);
+                }
+                if (newTab && !newTab.closed) {
+                    newTab.location.href = toolUrl;
+                } else {
+                    window.open(toolUrl, "_blank", "noopener");
+                }
+            } finally {
+                restoreBtn();
+            }
+        }
+
+        // "Arrange Excel File" tool ka "open new tab" flow bhi Excel Automation/
+        // Panchnama jaisa hi hai (same synchronous-tab-open + reentrancy-guard +
+        // 40-second backend-fetch-with-static-fallback pattern). Static fallback
+        // file arrange-excel.html root me hai (excel-automation.html ke sath).
+        let arrangeExcelToolOpening = false;
+        async function openArrangeExcelTool() {
+            if (arrangeExcelToolOpening) return;
+            arrangeExcelToolOpening = true;
+            const btn = document.getElementById("arrange-excel-tool-open-btn");
+            const originalBtnText = btn ? btn.innerText : "Arrange Excel File";
+            if (btn) {
+                btn.disabled = true;
+                btn.style.opacity = "0.65";
+                btn.style.pointerEvents = "none";
+                btn.innerText = "Opening...";
+            }
+            const restoreBtn = () => {
+                arrangeExcelToolOpening = false;
+                if (!btn) return;
+                btn.disabled = false;
+                btn.style.opacity = "1";
+                btn.style.pointerEvents = "auto";
+                btn.innerText = originalBtnText;
+            };
+            try {
+                const newTab = window.open("", "_blank");
+                if (newTab) {
+                    try {
+                        newTab.document.write("<!DOCTYPE html><html><head><title>Arrange Excel File - Loading...</title></head><body style=\"background:#0f172a; color:#e2e8f0; font-family:Arial,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;\"><div style=\"text-align:center;\"><div style=\"font-size:1rem; font-weight:700;\">Arrange Excel File Tool load ho raha hai...</div></div></body></html>");
+                        newTab.document.close();
+                    } catch (_) {}
+                } else {
+                    showToast("Naya tab nahi khul paya - browser me popup allow kijiye", false);
+                }
+                const baseUrl = window.location.href.split("#")[0].split("?")[0];
+                const toolUrl = baseUrl.replace(/[^/]*$/, "") + "arrange-excel.html";
+                try {
+                    const fetchUrl = `${revenueCollectionSubmitScriptUrl}?action=getExternalToolHtml&tool_key=ARRANGE_EXCEL&t=${Date.now()}`;
+                    const response = await fetchWithTimeout(fetchUrl, {}, 40000);
+                    const parsed = await response.json();
+                    if (parsed && parsed.status === "success" && parsed.html) {
+                        if (newTab && !newTab.closed) {
+                            newTab.document.open();
+                            newTab.document.write(parsed.html);
+                            newTab.document.close();
+                        } else {
+                            const blob = new Blob([parsed.html], { type: "text/html" });
+                            window.open(URL.createObjectURL(blob), "_blank", "noopener");
+                        }
+                        return;
+                    }
+                    showToast("Latest tool fetch nahi ho paya, purani file khul rahi hai", false);
+                } catch (_) {
+                    showToast("Latest tool fetch nahi ho paya, purani file khul rahi hai", false);
+                }
+                if (newTab && !newTab.closed) {
+                    newTab.location.href = toolUrl;
+                } else {
+                    window.open(toolUrl, "_blank", "noopener");
+                }
+            } finally {
+                restoreBtn();
+            }
+        }
+
+        let imageToExcelToolOpening = false;
+        async function openImageToExcelTool() {
+            if (imageToExcelToolOpening) return;
+            imageToExcelToolOpening = true;
+            const btn = document.getElementById("image-to-excel-tool-open-btn");
+            const originalBtnText = btn ? btn.innerText : "Image To Excel Converter";
+            if (btn) {
+                btn.disabled = true;
+                btn.style.opacity = "0.65";
+                btn.style.pointerEvents = "none";
+                btn.innerText = "Opening...";
+            }
+            const restoreBtn = () => {
+                imageToExcelToolOpening = false;
+                if (!btn) return;
+                btn.disabled = false;
+                btn.style.opacity = "1";
+                btn.style.pointerEvents = "auto";
+                btn.innerText = originalBtnText;
+            };
+            try {
+                const newTab = window.open("", "_blank");
+                if (newTab) {
+                    try {
+                        newTab.document.write("<!DOCTYPE html><html><head><title>Image To Excel Converter - Loading...</title></head><body style=\"background:#0f172a; color:#e2e8f0; font-family:Arial,sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0;\"><div style=\"text-align:center;\"><div style=\"font-size:1rem; font-weight:700;\">Image To Excel Converter Tool load ho raha hai...</div></div></body></html>");
+                        newTab.document.close();
+                    } catch (_) {}
+                } else {
+                    showToast("Naya tab nahi khul paya - browser me popup allow kijiye", false);
+                }
+                const baseUrl = window.location.href.split("#")[0].split("?")[0];
+                const toolUrl = baseUrl.replace(/[^/]*$/, "") + "image-to-excel.html";
+                try {
+                    const fetchUrl = `${revenueCollectionSubmitScriptUrl}?action=getExternalToolHtml&tool_key=IMAGE_TO_EXCEL&t=${Date.now()}`;
                     const response = await fetchWithTimeout(fetchUrl, {}, 40000);
                     const parsed = await response.json();
                     if (parsed && parsed.status === "success" && parsed.html) {
@@ -10558,6 +10995,19 @@
             return item;
         }
 
+        // BUG FIX (2026-08-21): "Paid Amount" submit par backend me ek IVRS par max 2
+        // baar hi payment allow hai (submitRevenuePayment_ me "Already submitted 2
+        // times" error) - agar pehli submit dobara asal me backend tak pahunch chuki
+        // thi (bas response app tak time par nahi aaya, isliye app ne "fail" maan liya
+        // aur local pending-queue me daal diya), to har retry hamesha yahi error dobara
+        // dega, kyunki data already sahi se save ho chuka hai. Aisi permanent error ko
+        // "fail" na maan kar "already done, safe hai" maan kar queue se hata dete hain -
+        // warna yeh "1 pending" box KABHI nahi hatega, chahe kitni baar retry karo.
+        function isRevenueOfflineQueuePermanentError_(error) {
+            const message = String(error?.message || "").toLowerCase();
+            return message.includes("already submitted");
+        }
+
         async function syncRevenueQueueItemInBackground(item) {
             if (!item || !item.body || !revenueCollectionSubmitScriptUrl) return;
             try {
@@ -10570,7 +11020,13 @@
                     syncedTdEntry.paidStatus = parsed.paid_status || syncedTdEntry.paidStatus || "";
                     saveRevenueTdEntryLocal(syncedTdEntry);
                 }
-            } catch (_) {
+            } catch (error) {
+                if (isRevenueOfflineQueuePermanentError_(error)) {
+                    const itemKey = getRevenueOfflineItemKey(item);
+                    setRevenueOfflineQueue(getRevenueOfflineQueue().filter((row) => getRevenueOfflineItemKey(row) !== itemKey));
+                    renderRevenueOfflineRetryBox();
+                    return;
+                }
                 renderRevenueOfflineRetryBox();
             }
         }
@@ -10605,13 +11061,24 @@
             return parsed || {};
         }
 
-        async function retryRevenueOfflineQueue() {
+        // AUTO-RETRY FEATURE (2026-08-21): pehle pending offline submit sirf tabhi
+        // dobara try hota tha jab user khud "RETRY PENDING DATA" button dabata tha.
+        // Ab yeh function app khulte hi (DOMContentLoaded) aur jab bhi internet
+        // wapas aata hai (window "online" event) khud-b-khud (silently, background
+        // me) bhi chal jaata hai - agar us waqt signal strong mila aur submit ho
+        // gaya, to "pending" wala dialog box khud hi hat jaata hai, user ko kuch
+        // bhi manually karne ki zaroorat nahi. `silent = true` par koi toast/UI
+        // disturbance nahi hota (kyunki yeh background me, bina user action ke,
+        // chal raha hota hai) - sirf queue clear hoti hai aur box update hota hai.
+        async function retryRevenueOfflineQueue(silent = false) {
             const retryBtn = document.getElementById("revenue-offline-retry-btn");
             const text = document.getElementById("revenue-offline-retry-text");
             const queue = getRevenueOfflineQueue();
             if (!queue.length) return renderRevenueOfflineRetryBox();
-            setActionButtonState(retryBtn, "processing", "Retry Pending Data");
-            if (text) text.innerText = getActionStatusText("processing");
+            if (!silent) {
+                setActionButtonState(retryBtn, "processing", "Retry Pending Data");
+                if (text) text.innerText = getActionStatusText("processing");
+            }
 
             const failed = [];
             let successCount = 0;
@@ -10628,18 +11095,42 @@
                         saveRevenueTdEntryLocal(tdEntry);
                     }
                     successCount += 1;
-                } catch (_) {
-                    failed.push(item);
+                } catch (error) {
+                    // "Already submitted 2 times" jaisi permanent error ka matlab hai
+                    // data pehle se hi safely server par maujood hai - isko baar-baar
+                    // retry karna kabhi safal nahi hoga, isliye ise bhi "resolved" maan
+                    // kar queue se hata dete hain (dekhein isRevenueOfflineQueuePermanentError_
+                    // ka detailed comment upar).
+                    if (isRevenueOfflineQueuePermanentError_(error)) {
+                        successCount += 1;
+                    } else {
+                        failed.push(item);
+                    }
                 }
             }
 
             setRevenueOfflineQueue(failed);
-            setActionButtonState(retryBtn, failed.length ? "failed" : "done", "Retry Pending Data");
-            if (text) text.innerText = failed.length ? getActionStatusText("failed") : getActionStatusText("done");
-            if (currentRevenueRecord) renderRevenueConsumer(currentRevenueRecord, currentRevenueRecord.ivrsNo);
-            showToast(failed.length ? `${successCount} submit ho gaya, ${failed.length} pending hai` : "Pending data submit ho gaya", !failed.length);
+            if (!silent) {
+                setActionButtonState(retryBtn, failed.length ? "failed" : "done", "Retry Pending Data");
+                if (text) text.innerText = failed.length ? getActionStatusText("failed") : getActionStatusText("done");
+                if (currentRevenueRecord) renderRevenueConsumer(currentRevenueRecord, currentRevenueRecord.ivrsNo);
+                showToast(failed.length ? `${successCount} submit ho gaya, ${failed.length} pending hai` : "Pending data submit ho gaya", !failed.length);
+            } else if (successCount) {
+                // Silent/background retry me bhi agar kuch submit ho gaya ho, to ek
+                // halka sa toast dikha dete hain - taaki user ko pata chale ki uska
+                // pending data ab safaltapoorvak submit ho gaya, bina unhe kuch kiye.
+                showToast(`${successCount} pending data automatic submit ho gaya`, true);
+            }
             setTimeout(() => renderRevenueOfflineRetryBox(), 900);
         }
+
+        // App khulte hi ek baar silently try karo (agar us waqt hi acha signal
+        // mile), aur jab bhi browser "online" event fire kare (internet wapas aane
+        // par) dobara try karo - is tarah user ko manually retry button dabane ki
+        // zaroorat kam se kam padegi.
+        window.addEventListener("online", () => {
+            retryRevenueOfflineQueue(true).catch(() => {});
+        });
 
         function mapRevenueTdSheetEntry(row) {
             return {
@@ -13259,15 +13750,23 @@
             setRevenueLiveEntries(filteredRows);
         }
 
+        // BUG FIX (2026-08-22): "2 baar Paid Amount" wala limit pehle HAMESHA KE
+        // LIYE (lifetime) count hota tha - ab backend (submitRevenuePayment_) me
+        // yeh limit sirf CURRENT MONTH ke liye hai, isliye yahan bhi wahi current-
+        // month filter lagaya hai, taaki app ka "X/2" display aur submit-cap check
+        // dono backend ke naye (monthly) rule se match karein.
         function getRevenuePaidEntries(ivrsNo) {
             const entryKey = normalizeRevenueIvrs(ivrsNo);
             const dcKey = normalizeLookupValue(activeDC || "");
+            const currentMonthKey = getRevenueMonthKey(getCurrentDateDDMMYYYY());
             const seenPayments = new Set();
             return getRevenueLiveEntries().filter((row) => {
                 const paymentKey = `${normalizeRevenueIvrs(row.ivrsNo)}|${normalizeLookupValue(row.dcName || "")}|${row.paidAmount || ""}|${row.paidDate || ""}|${row.paidTime || ""}`;
                 if (seenPayments.has(paymentKey)) return false;
                 seenPayments.add(paymentKey);
-                return normalizeRevenueIvrs(row.ivrsNo) === entryKey && normalizeLookupValue(row.dcName || "") === dcKey;
+                return normalizeRevenueIvrs(row.ivrsNo) === entryKey
+                    && normalizeLookupValue(row.dcName || "") === dcKey
+                    && getRevenueMonthKey(row.paidDate) === currentMonthKey;
             }).sort((a, b) => String(b.paidAt || "").localeCompare(String(a.paidAt || "")));
         }
 
@@ -17046,6 +17545,8 @@
                 if (id === "excel-tool-admin") headerTitle = "EXCEL AUTOMATION";
                 if (id === "panchnama-tool") headerTitle = "PANCHNAMA";
                 if (id === "panchnama-tool-admin") headerTitle = "PANCHNAMA TEMPLATE";
+                if (id === "arrange-excel-tool-admin") headerTitle = "ARRANGE EXCEL FILE";
+                if (id === "image-to-excel-tool-admin") headerTitle = "IMAGE TO EXCEL CONVERTER";
                 if (id === "vr-download-log") headerTitle = "VR DOWNLOAD LOG";
                 if (id === "stock-material") headerTitle = "STOCK MATERIAL";
                 if (id === "shms-entry") headerTitle = "SHMS ENTRY";
@@ -17091,6 +17592,10 @@
                 if (excelToolAdminMenuItem) excelToolAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 const panchnamaToolAdminMenuItem = document.getElementById("panchnama-tool-admin-header-menu-item");
                 if (panchnamaToolAdminMenuItem) panchnamaToolAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
+                const arrangeExcelToolAdminMenuItem = document.getElementById("arrange-excel-tool-admin-header-menu-item");
+                if (arrangeExcelToolAdminMenuItem) arrangeExcelToolAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
+                const imageToExcelToolAdminMenuItem = document.getElementById("image-to-excel-tool-admin-header-menu-item");
+                if (imageToExcelToolAdminMenuItem) imageToExcelToolAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 closeHeaderMenu();
                 const searchBtn = document.getElementById("search-btn");
                 if (id === "home") {
