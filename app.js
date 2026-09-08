@@ -122,7 +122,7 @@
             { type: "ISSUE", material: "LT Pin Insulator", qty: 20, date: "22/04/2026", note: "Village feeder replacement" }
         ];
 
-        let activeDiv = "", activeDC = "", activeGrad = "bg-teal-grad", summaryMode = "DAILY", summaryModule = "MOBILE", activeViewLevel = "", currentData = null, pendingLevel = "", dcCacheRaw = {}, dcCacheRows = {}, uiListSummary = [], grandTC = 0, grandTU = 0, courtCaseRaw = "", courtCaseCacheByDc = {}, courtCaseLines = [], courtCaseRecords = [], lokDistributedRows = [], lokDistributedLoaded = false, currentCourtRecord = null, receiverGeoData = null;
+        let activeDiv = "", activeDC = "", activeGrad = "bg-teal-grad", summaryMode = "DAILY", summaryModule = "MOBILE", activeViewLevel = "", currentData = null, pendingLevel = "", dcCacheRaw = {}, dcCacheRows = {}, uiListSummary = [], grandTC = 0, grandTU = 0, grandTW = 0, courtCaseRaw = "", courtCaseCacheByDc = {}, courtCaseLines = [], courtCaseRecords = [], lokDistributedRows = [], lokDistributedLoaded = false, currentCourtRecord = null, receiverGeoData = null;
         // Progress Report (Daily Progress) ke Revenue tab me Category Wise ke saath-saath
         // Target vs Achievement aur Top 20/50 Defaulters bhi dropdown se select ho sakein -
         // teeno DC/Division/Circle scope automatically activeViewLevel se hi follow karte
@@ -813,6 +813,339 @@
             switchView("mobile-update-list");
         }
 
+        // ===================================================================
+        // WRONG / MISSING MOBILE NO LIST ("Update Mobile No" 3-dot menu) - poore
+        // DC ki consumer master file scan karke un sabhi consumers ki HQ-wise list
+        // banata hai jinka mobile number sheet me galat/khaali hai (10 digit nahi
+        // hai ya 6-9 se shuru nahi hota - wahi validity check jo already SMS/WhatsApp
+        // button enable/disable karne me use hota hai, normalizeRevenueMessageMobile).
+        // Jis consumer ka number "Update Mobile No" screen se already sahi (valid 10
+        // digit) submit ho chuka hai (backend action=getSummary me mil jaata hai),
+        // wo yahan se turant apne aap hat jaata hai - koi alag "resolved" state kahin
+        // save nahi karni padti, list hamesha latest data se taaza calculate hoti hai.
+        function openMobileUpdateWrongList() {
+            closeHeaderMenu();
+            switchView("mobile-update-wrong-list");
+        }
+
+        // Poore DC ki consumer master file + backend "getSummary" ek hi baar (screen
+        // khulte waqt) fetch karke cache kar lete hain (mobileUpdateWrongListAllRows) -
+        // isme wo saare consumers hain jinka mobile number master sheet me ORIGINALLY
+        // galat/khaali tha, har ek par "fixed: true/false" (Update Mobile No se sahi ho
+        // chuka hai ya abhi bhi wrong hai) tag laga hota hai. HQ/Village dropdown badalne
+        // par sirf isi cached data par local filter chalta hai - dobara backend/sheet
+        // sync NAHI hota (user ki specific request). Screen dobara khulne par (ya DC badalne
+        // par) hi taaza sync hota hai.
+        let mobileUpdateWrongListAllRows = [];
+        let mobileUpdateWrongListLoadedDcKey = "";
+        let mobileUpdateWrongListHq = "";
+        let mobileUpdateWrongListVillage = "";
+        let mobileUpdateWrongListRenderToken = 0;
+
+        function initMobileUpdateWrongList() {
+            mobileUpdateWrongListHq = "";
+            mobileUpdateWrongListVillage = "";
+            const scopeLabel = document.getElementById("mobile-update-wrong-list-scope-label");
+            if (scopeLabel) scopeLabel.innerText = activeDC ? `DC: ${activeDC} - Galat / Missing Mobile No wale Consumer` : "Galat / Missing Mobile No wale Consumer";
+            loadMobileUpdateWrongListData();
+        }
+
+        function buildMobileUpdateWrongListRows(rows, dcName, cloudData) {
+            const normDc = normalizeDcName(dcName);
+            const updatedMobileByIvrs = {};
+            (cloudData || []).forEach((u) => {
+                const uDc = (u.dc || "").trim().toUpperCase();
+                if (uDc !== normDc) return;
+                const validMobile = normalizeRevenueMessageMobile(u.correct_mobile || "");
+                if (!validMobile) return;
+                const ivrs = normalizeLookupDigits(u.ivrs || "");
+                if (!ivrs) return;
+                const existing = updatedMobileByIvrs[ivrs];
+                if (!existing || String(u.date || "") >= String(existing.date || "")) {
+                    updatedMobileByIvrs[ivrs] = { mobile: validMobile, date: (u.date || "").trim() };
+                }
+            });
+
+            return rows
+                .map((row) => {
+                    const ivrs = normalizeLookupDigits(row.ivrsNo);
+                    if (!ivrs) return null;
+                    // "Originally wrong" - master sheet me hi number galat/khaali tha.
+                    if (normalizeRevenueMessageMobile(row.mobileNo)) return null;
+                    return {
+                        ivrsNo: row.ivrsNo || "",
+                        consumerName: row.consumerName || "",
+                        hqName: String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL",
+                        village: String(row.village || "UNKNOWN").trim().toUpperCase() || "UNKNOWN",
+                        rawMobile: String(row.mobileNo || "").trim(),
+                        fixed: !!updatedMobileByIvrs[ivrs]
+                    };
+                })
+                .filter(Boolean);
+        }
+
+        async function loadMobileUpdateWrongListData(forceRefresh = false) {
+            const tableBox = document.getElementById("mobile-update-wrong-list-table");
+            const summaryBox = document.getElementById("mobile-update-wrong-list-summary");
+            if (!tableBox) return;
+            const dcName = activeDC;
+            const dcKey = normalizeDcName(dcName);
+            if (!forceRefresh && mobileUpdateWrongListLoadedDcKey === dcKey && dcKey) {
+                renderMobileUpdateWrongList();
+                return;
+            }
+            const renderToken = ++mobileUpdateWrongListRenderToken;
+            const isRenderValid = () => renderToken === mobileUpdateWrongListRenderToken && document.getElementById("mobile-update-wrong-list-view")?.classList.contains("active");
+            if (summaryBox) summaryBox.innerHTML = "";
+            const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING LATEST DATA...");
+            try {
+                if (!dcName) throw new Error("DC select nahi hai");
+                await ensureConsumerDataLoadedFor([dcName]);
+                const cloudData = await loadRemoteJson(`${scriptURL}?action=getSummary`);
+                if (!isRenderValid()) { progress.stop(); return; }
+                const rows = getConsumerRows(dcName).map(mapRevenueConsumerRow).filter((row) => normalizeLookupDigits(row.ivrsNo));
+                mobileUpdateWrongListAllRows = buildMobileUpdateWrongListRows(rows, dcName, cloudData);
+                mobileUpdateWrongListLoadedDcKey = dcKey;
+                await progress.finish();
+                if (!isRenderValid()) return;
+                renderMobileUpdateWrongList();
+            } catch (error) {
+                progress.stop();
+                tableBox.innerHTML = `<div style="text-align:center; color:#991b1b; font-size:0.72rem; font-weight:900; padding:14px;">List load nahi ho payi</div>`;
+            }
+        }
+
+        // HQ/Village dropdown change par sirf yahi call hota hai - koi network/sheet
+        // sync nahi, sirf mobileUpdateWrongListAllRows (already cache me) par filter.
+        function setMobileUpdateWrongListHq(value) {
+            mobileUpdateWrongListHq = value || "";
+            mobileUpdateWrongListVillage = "";
+            renderMobileUpdateWrongList();
+        }
+
+        function setMobileUpdateWrongListVillage(value) {
+            mobileUpdateWrongListVillage = value || "";
+            renderMobileUpdateWrongList();
+        }
+
+        function renderMobileUpdateWrongList() {
+            const summaryBox = document.getElementById("mobile-update-wrong-list-summary");
+            const tableBox = document.getElementById("mobile-update-wrong-list-table");
+            const hqSelect = document.getElementById("mobile-update-wrong-list-hq");
+            const villageSelect = document.getElementById("mobile-update-wrong-list-village");
+            const downloadRow = document.getElementById("mobile-update-wrong-list-download-row");
+            if (!tableBox) return;
+            const allRows = mobileUpdateWrongListAllRows;
+
+            if (hqSelect) {
+                populateRevenueSelect(hqSelect, getRevenueUniqueValues(allRows, "hqName"), "ALL HQ");
+                hqSelect.value = mobileUpdateWrongListHq;
+            }
+            const hqScopedRows = mobileUpdateWrongListHq
+                ? allRows.filter((row) => normalizeLookupValue(row.hqName) === normalizeLookupValue(mobileUpdateWrongListHq))
+                : allRows;
+            if (villageSelect) {
+                populateRevenueSelect(villageSelect, getRevenueUniqueValues(hqScopedRows, "village"), "ALL VILLAGE");
+                villageSelect.value = mobileUpdateWrongListVillage;
+            }
+
+            if (downloadRow) downloadRow.style.display = "flex";
+
+            if (!mobileUpdateWrongListHq) {
+                // ===== ALL HQ: HQ-wise SUMMARY + PDF/Excel download (HQ ke baad detail
+                // list bhi agle pages me PDF me shamil hoti hai - downloadMobileUpdateWrongListAllHq() dekhiye) =====
+                const hqMap = {};
+                allRows.forEach((row) => {
+                    if (!hqMap[row.hqName]) hqMap[row.hqName] = { total: 0, updated: 0 };
+                    hqMap[row.hqName].total++;
+                    if (row.fixed) hqMap[row.hqName].updated++;
+                });
+                mobileUpdateWrongListSummaryRows = Object.keys(hqMap).sort((a, b) => a.localeCompare(b)).map((hqName) => ({
+                    hqName,
+                    total: hqMap[hqName].total,
+                    updated: hqMap[hqName].updated
+                }));
+                if (summaryBox) {
+                    summaryBox.innerHTML = `
+                        <div style="background:#fff1f2; border:1.5px solid #fca5a5; border-radius:14px; padding:10px; text-align:center; margin-bottom:8px;">
+                            <div style="font-size:0.58rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Total Wrong Mobile No (Sabhi HQ)</div>
+                            <div style="font-size:1.15rem; font-weight:950; color:#991b1b; margin-top:3px;">${allRows.length}</div>
+                        </div>
+                    `;
+                }
+                if (!mobileUpdateWrongListSummaryRows.length) {
+                    tableBox.innerHTML = `<div style="text-align:center; color:#166534; font-size:0.75rem; font-weight:900; padding:14px;">Sabhi consumers ke number sahi hain</div>`;
+                    return;
+                }
+                let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.4fr 0.85fr 0.85fr;"><div>HQ NAME</div><div>TOTAL WRONG</div><div>UPDATED</div></div>`;
+                mobileUpdateWrongListSummaryRows.forEach((row) => {
+                    html += `<div class="summary-table-row" style="grid-template-columns: 1.4fr 0.85fr 0.85fr;"><div>${escapeHtml(row.hqName)}</div><div class="text-rose-700 font-black">${row.total}</div><div class="text-emerald-700 font-black">${row.updated}</div></div>`;
+                });
+                html += `</div>`;
+                tableBox.innerHTML = html;
+            } else {
+                // ===== Specific HQ chuna hua: sirf ABHI BHI WRONG waali chhoti list =====
+                // (yahan bhi neeche PDF/Excel download milega - isi filtered list ka,
+                // downloadMobileUpdateWrongListFiltered() dekhiye)
+                if (summaryBox) summaryBox.innerHTML = "";
+                const villageScopedRows = mobileUpdateWrongListVillage
+                    ? hqScopedRows.filter((row) => normalizeLookupValue(row.village) === normalizeLookupValue(mobileUpdateWrongListVillage))
+                    : hqScopedRows;
+                const stillWrongRows = villageScopedRows.filter((row) => !row.fixed);
+                mobileUpdateWrongListCurrentDetailRows = stillWrongRows;
+                if (!stillWrongRows.length) {
+                    tableBox.innerHTML = `<div style="text-align:center; color:#166534; font-size:0.72rem; font-weight:900; padding:12px;">Is HQ/Village me sabhi number sahi hain</div>`;
+                    return;
+                }
+                tableBox.innerHTML = stillWrongRows.map((row) => `
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; background:#ffffff; border:1px solid #fecaca; border-radius:10px; padding:6px 8px; margin-top:6px;">
+                        <div style="text-align:left; min-width:0;">
+                            <div style="font-size:0.66rem; font-weight:900; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(row.consumerName || "-")}</div>
+                            <div style="font-size:0.56rem; font-weight:750; color:#64748b;">IVRS ${escapeHtml(row.ivrsNo)} | ${escapeHtml(row.village)}</div>
+                            <div style="font-size:0.56rem; font-weight:800; color:#991b1b;">No: ${escapeHtml(row.rawMobile || "KHALI")}</div>
+                        </div>
+                        <button type="button" onclick="jumpToUpdateMobileNoFromWrongList('${escapeHtml(row.ivrsNo)}')" style="flex:0 0 auto; height:28px; padding:0 9px; border:none; border-radius:8px; background:#dc2626; color:#fff; font-size:0.52rem; font-weight:950; white-space:nowrap;">UPDATE MOBILE NO</button>
+                    </div>
+                `).join("");
+            }
+        }
+
+        let mobileUpdateWrongListSummaryRows = [];
+        let mobileUpdateWrongListCurrentDetailRows = [];
+
+        function setMobileUpdateWrongListDownloadState(isLoading, message = "", ok = true) {
+            const pdfBtn = document.getElementById("mobile-update-wrong-list-pdf-btn");
+            const excelBtn = document.getElementById("mobile-update-wrong-list-excel-btn");
+            const statusBox = document.getElementById("mobile-update-wrong-list-download-status");
+            const statusMessage = normalizeActionStatusMessage(message, isLoading, ok);
+            [pdfBtn, excelBtn].forEach((btn) => {
+                if (!btn) return;
+                btn.disabled = isLoading;
+                btn.style.opacity = isLoading ? "0.65" : "1";
+                btn.style.pointerEvents = isLoading ? "none" : "auto";
+            });
+            if (!statusBox) return;
+            statusBox.style.display = statusMessage ? "block" : "none";
+            statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
+            statusBox.style.borderColor = ok ? "#86efac" : "#fca5a5";
+            statusBox.style.color = ok ? "#166534" : "#991b1b";
+            statusBox.innerHTML = escapeHtml(statusMessage);
+        }
+
+        function downloadMobileUpdateWrongList(type) {
+            if (mobileUpdateWrongListHq) {
+                downloadMobileUpdateWrongListFiltered(type);
+            } else {
+                downloadMobileUpdateWrongListAllHq(type);
+            }
+        }
+
+        const MOBILE_UPDATE_WRONG_LIST_DETAIL_HEADERS = ["IVRS NO", "CONSUMER NAME", "VILLAGE", "MOBILE NO (WRONG)"];
+
+        function getMobileUpdateWrongListDetailRowsForHq(hqName) {
+            return mobileUpdateWrongListAllRows
+                .filter((row) => row.hqName === hqName && !row.fixed)
+                .map((row) => [row.ivrsNo, row.consumerName, row.village, row.rawMobile || "KHALI"]);
+        }
+
+        // ALL HQ mode: pehle page par HQ-wise SUMMARY (Total Wrong / Updated), uske
+        // baad har HQ ke liye ek naya page - us HQ ke abhi bhi wrong consumers ki
+        // poori detail list (IVRS/Name/Village/Mobile).
+        function downloadMobileUpdateWrongListAllHq(type) {
+            if (!mobileUpdateWrongListSummaryRows.length) return showToast("Download ke liye data nahi hai", false);
+            setMobileUpdateWrongListDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
+            try {
+                const summaryHeaders = ["HQ NAME", "TOTAL WRONG", "UPDATED"];
+                const summaryBodyRows = mobileUpdateWrongListSummaryRows.map((row) => [row.hqName, row.total, row.updated]);
+                const reportTitle = `Wrong Mobile No List - DC ${activeDC}`;
+                const scopeLine = `Scope: DC - ${activeDC} (All HQ)`;
+                const fileName = `${reportTitle}`.replace(/[\/:*?"<>|]+/g, "_");
+                if (type === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setMobileUpdateWrongListDownloadState(false, "PDF library load nahi hui", false); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
+                    doc.autoTable({ startY: 25, head: [summaryHeaders], body: summaryBodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
+                    mobileUpdateWrongListSummaryRows.forEach((hqRow) => {
+                        const detailRows = getMobileUpdateWrongListDetailRowsForHq(hqRow.hqName);
+                        if (!detailRows.length) return;
+                        doc.addPage();
+                        doc.setFontSize(12); doc.setTextColor(0); doc.text(`HQ: ${hqRow.hqName} - Wrong Mobile No List`, 148, 12, { align: "center" });
+                        doc.autoTable({ startY: 18, head: [MOBILE_UPDATE_WRONG_LIST_DETAIL_HEADERS], body: detailRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
+                    });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                    setMobileUpdateWrongListDownloadState(false, "PDF download ho chuki hai", true);
+                    return;
+                }
+                const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                const csvLines = [[reportTitle], [scopeLine], [], summaryHeaders, ...summaryBodyRows, []];
+                mobileUpdateWrongListSummaryRows.forEach((hqRow) => {
+                    const detailRows = getMobileUpdateWrongListDetailRowsForHq(hqRow.hqName);
+                    if (!detailRows.length) return;
+                    csvLines.push([`HQ: ${hqRow.hqName}`]);
+                    csvLines.push(MOBILE_UPDATE_WRONG_LIST_DETAIL_HEADERS);
+                    detailRows.forEach((row) => csvLines.push(row));
+                    csvLines.push([]);
+                });
+                const csv = csvLines.map((row) => row.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = `${fileName}.csv`;
+                link.click();
+                setMobileUpdateWrongListDownloadState(false, "Excel download ho chuki hai", true);
+            } catch (error) {
+                setMobileUpdateWrongListDownloadState(false, "Download nahi ho paya", false);
+                showToast(error?.message || "Report download nahi ho payi", false);
+            }
+        }
+
+        // Specific HQ (aur Village) chuna hua ho to sirf usi filtered - abhi bhi
+        // wrong - list ka download (IVRS/Name/Village/Mobile).
+        function downloadMobileUpdateWrongListFiltered(type) {
+            if (!mobileUpdateWrongListCurrentDetailRows.length) return showToast("Download ke liye data nahi hai", false);
+            setMobileUpdateWrongListDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
+            try {
+                const headers = MOBILE_UPDATE_WRONG_LIST_DETAIL_HEADERS;
+                const bodyRows = mobileUpdateWrongListCurrentDetailRows.map((row) => [row.ivrsNo, row.consumerName, row.village, row.rawMobile || "KHALI"]);
+                const scopeText = mobileUpdateWrongListVillage ? `HQ ${mobileUpdateWrongListHq} - Village ${mobileUpdateWrongListVillage}` : `HQ ${mobileUpdateWrongListHq}`;
+                const reportTitle = `Wrong Mobile No List - DC ${activeDC} - ${scopeText}`;
+                const scopeLine = `Scope: DC - ${activeDC} (${scopeText})`;
+                const fileName = `${reportTitle}`.replace(/[\/:*?"<>|]+/g, "_");
+                if (type === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setMobileUpdateWrongListDownloadState(false, "PDF library load nahi hui", false); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
+                    doc.autoTable({ startY: 25, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                    setMobileUpdateWrongListDownloadState(false, "PDF download ho chuki hai", true);
+                    return;
+                }
+                const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                const csv = [[reportTitle], [scopeLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = `${fileName}.csv`;
+                link.click();
+                setMobileUpdateWrongListDownloadState(false, "Excel download ho chuki hai", true);
+            } catch (error) {
+                setMobileUpdateWrongListDownloadState(false, "Download nahi ho paya", false);
+                showToast(error?.message || "Report download nahi ho payi", false);
+            }
+        }
+
+        function jumpToUpdateMobileNoFromWrongList(ivrsNo) {
+            const ivrs = normalizeLookupDigits(ivrsNo);
+            if (!ivrs) return;
+            switchView("mobile-update");
+            const searchInput = document.getElementById("search-ivrs");
+            if (searchInput) searchInput.value = ivrs;
+        }
+
         function initMobileUpdateList() {
             const dateInput = document.getElementById("mobile-update-list-date");
             const monthInput = document.getElementById("mobile-update-list-month");
@@ -1087,16 +1420,12 @@
         }
 
         function verifyPassword() {
-            const pws = { STOCK: "AE123", EXCEL_TOOL_ADMIN: "AE123", PANCHNAMA_TOOL_ADMIN: "AE123", ARRANGE_EXCEL_TOOL_ADMIN: "AE123", IMAGE_TO_EXCEL_TOOL_ADMIN: "AE123", GROUP_MEETING: "meet123" };
+            const pws = { STOCK: "AE123", EXCEL_TOOL_ADMIN: "AE123", PANCHNAMA_TOOL_ADMIN: "AE123", ARRANGE_EXCEL_TOOL_ADMIN: "AE123", IMAGE_TO_EXCEL_TOOL_ADMIN: "AE123" };
             if (document.getElementById("pwd-input").value === pws[pendingLevel]) {
                 activeViewLevel = pendingLevel;
                 closePwdModal();
                 if (pendingLevel === "STOCK") {
                     openStockDashboard();
-                    return;
-                }
-                if (pendingLevel === "GROUP_MEETING") {
-                    startGroupMeeting();
                     return;
                 }
                 if (pendingLevel === "EXCEL_TOOL_ADMIN") {
@@ -3790,12 +4119,42 @@
                 uiListSummary = [];
                 grandTC = 0;
                 grandTU = 0;
+                grandTW = 0;
+
+                // "Wrong Mobile No" (tw) - date-independent hai (jaisa TOTAL CONS. bhi
+                // hai): consumer master me jiska number invalid/khaali hai AUR jiske
+                // liye kabhi bhi (kisi bhi date par) Update Mobile No se sahi number
+                // submit nahi hua - "Wrong Mobile No List" screen wali hi definition,
+                // bas yahan DC/HQ-wise summary-count ke roop me.
+                const getFixedIvrsSetForDc = (dcName) => {
+                    const normDc = normalizeDcName(dcName);
+                    const set = new Set();
+                    cloudData.forEach((u) => {
+                        const uDc = (u.dc || "").trim().toUpperCase();
+                        if (uDc !== normDc) return;
+                        if (!normalizeRevenueMessageMobile(u.correct_mobile || "")) return;
+                        const ivrs = normalizeLookupDigits(u.ivrs || "");
+                        if (ivrs) set.add(ivrs);
+                    });
+                    return set;
+                };
+                const isRowStillWrong = (row, fixedSet) => {
+                    const ivrs = normalizeLookupDigits(getConsumerField(row, ["IVRS", "IVRS NO", "IVRS NUMBER", "IVRSNO"]));
+                    if (normalizeRevenueMessageMobile(getConsumerField(row, ["MOBILE NO", "MOBILE NUMBER", "MOBILE"]))) return false;
+                    return !(ivrs && fixedSet.has(ivrs));
+                };
 
                 const getStats = (dcName) => {
                     let tc = 0;
                     let tu = 0;
+                    let tw = 0;
                     const normDc = normalizeDcName(dcName);
-                    tc = getConsumerRows(normDc).length;
+                    const rows = getConsumerRows(normDc);
+                    tc = rows.length;
+                    const fixedSet = getFixedIvrsSetForDc(dcName);
+                    rows.forEach((row) => {
+                        if (isRowStillWrong(row, fixedSet)) tw++;
+                    });
                     cloudData.forEach((u) => {
                         const ts = (u.date || "").trim();
                         const uDc = (u.dc || "").trim().toUpperCase();
@@ -3804,15 +4163,17 @@
                         const matchesDate = matchesProgressDate(ts, summaryMode, dStr, mStr);
                         if (uDc === normDc && hasMobile && matchesDate) tu++;
                     });
-                    return { tc, tu };
+                    return { tc, tu, tw };
                 };
 
                 if (activeViewLevel === "DC") {
                     const stats = {};
+                    const fixedSet = getFixedIvrsSetForDc(activeDC);
                     getConsumerRows(activeDC).forEach((row) => {
                         const h = getConsumerField(row, ["HQ", "HQ NAME", "HEADQUARTER", "HEAD QUARTER", "H.Q."], "GENERAL").trim().toUpperCase() || "GENERAL";
-                        stats[h] = stats[h] || { tc: 0, tu: 0 };
+                        stats[h] = stats[h] || { tc: 0, tu: 0, tw: 0 };
                         stats[h].tc++;
+                        if (isRowStillWrong(row, fixedSet)) stats[h].tw++;
                     });
                     cloudData.forEach((u) => {
                         const ts = (u.date || "").trim();
@@ -3822,47 +4183,54 @@
                         const hasMobile = mobileVal.toString().trim().length === 10;
                         const matchesDate = matchesProgressDate(ts, summaryMode, dStr, mStr);
                         if (uDc === normalizeDcName(activeDC) && hasMobile && matchesDate) {
-                            if (!stats[uHq]) stats[uHq] = { tc: 0, tu: 0 };
+                            if (!stats[uHq]) stats[uHq] = { tc: 0, tu: 0, tw: 0 };
                             stats[uHq].tu++;
                         }
                     });
                     Object.keys(stats).sort().forEach((h) => {
-                        uiListSummary.push({ name: h, tc: stats[h].tc, tu: stats[h].tu });
+                        uiListSummary.push({ name: h, tc: stats[h].tc, tu: stats[h].tu, tw: stats[h].tw });
                         grandTC += stats[h].tc;
                         grandTU += stats[h].tu;
+                        grandTW += stats[h].tw;
                     });
                 } else {
                     const targetDivs = activeViewLevel === "DIVISION" ? [activeDiv] : Object.keys(divisionConfigs);
                     targetDivs.forEach((div) => {
                         let divTC = 0;
                         let divTU = 0;
+                        let divTW = 0;
                         getDivisionSubDnGroups(div).forEach((group) => {
                             let subTC = 0;
                             let subTU = 0;
+                            let subTW = 0;
                             group.dcs.forEach((dc) => {
                                 const s = getStats(dc);
-                                uiListSummary.push({ name: dc, tc: s.tc, tu: s.tu });
+                                uiListSummary.push({ name: dc, tc: s.tc, tu: s.tu, tw: s.tw });
                                 subTC += s.tc;
                                 subTU += s.tu;
+                                subTW += s.tw;
                             });
-                            uiListSummary.push({ name: `SUB DN ${group.subDn} TOTAL`, tc: subTC, tu: subTU, type: "SUBDN_TOTAL" });
+                            uiListSummary.push({ name: `SUB DN ${group.subDn} TOTAL`, tc: subTC, tu: subTU, tw: subTW, type: "SUBDN_TOTAL" });
                             divTC += subTC;
                             divTU += subTU;
+                            divTW += subTW;
                         });
-                        if (activeViewLevel === "CIRCLE") uiListSummary.push({ name: `${div} TOTAL`, tc: divTC, tu: divTU, type: "DIV_TOTAL" });
+                        if (activeViewLevel === "CIRCLE") uiListSummary.push({ name: `${div} TOTAL`, tc: divTC, tu: divTU, tw: divTW, type: "DIV_TOTAL" });
                         grandTC += divTC;
                         grandTU += divTU;
+                        grandTW += divTW;
                     });
                 }
 
                 const colLabel = activeViewLevel === "DC" ? "HQ NAME" : "DC NAME";
-                let html = `<div class="summary-wrapper"><div class="summary-table-header"><div>${colLabel}</div><div>TOTAL CONS.</div><div>UPDATED MOBILE NO</div></div>`;
+                const mobileGridCols = "1.4fr 0.85fr 0.85fr 0.85fr";
+                let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: ${mobileGridCols};"><div>${colLabel}</div><div>TOTAL CONS.</div><div>WRONG MOBILE NO</div><div>UPDATED MOBILE NO</div></div>`;
                 uiListSummary.forEach((r) => {
                     const rowClass = r.type === "DIV_TOTAL" ? "blue-bold" : (r.type === "SUBDN_TOTAL" ? "subdn-bold" : "");
-                    html += `<div class="summary-table-row ${rowClass}"><div>${r.name}</div><div>${r.tc}</div><div class="text-teal-600 font-black">${r.tu}</div></div>`;
+                    html += `<div class="summary-table-row ${rowClass}" style="grid-template-columns: ${mobileGridCols};"><div>${r.name}</div><div>${r.tc}</div><div class="text-rose-600 font-black">${r.tw || 0}</div><div class="text-teal-600 font-black">${r.tu}</div></div>`;
                 });
 
-                html += `</div><div class="summary-footer"><div class="flex justify-between font-black"><span>GRAND TOTAL (${label})</span><span class="text-rose-600 text-lg">${grandTU}</span></div>
+                html += `</div><div class="summary-footer"><div class="flex justify-between font-black"><span>GRAND TOTAL (${label})</span><span class="text-rose-600 text-lg">${grandTU}</span></div><div class="flex justify-between font-black" style="margin-top:4px;"><span>TOTAL WRONG MOBILE NO</span><span class="text-rose-600 text-lg">${grandTW}</span></div>
                     <div class="btn-export-row">
                         <button class="btn-unique btn-excel-unique" onclick="doExport('XLS')">
                             <svg width="18" height="18" fill="white" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16h-8v-2h8v2zm0-4h-8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
@@ -4384,11 +4752,11 @@
                     });
                     csv += `GRAND TOTAL,${grandTC},${grandTU}`;
                 } else {
-                    csv += `${colLabel},TOTAL CONS.,${valueLabel}\n`;
+                    csv += `${colLabel},TOTAL CONS.,WRONG MOBILE NO,${valueLabel}\n`;
                     uiListSummary.forEach((r) => {
-                        csv += `${r.name},${r.tc},${r.tu}\n`;
+                        csv += `${r.name},${r.tc},${r.tw || 0},${r.tu}\n`;
                     });
-                    csv += `GRAND TOTAL,${grandTC},${grandTU}`;
+                    csv += `GRAND TOTAL,${grandTC},${grandTW},${grandTU}`;
                 }
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -4410,12 +4778,12 @@
                 doc.text(reportHeading, 105, 34, { align: "center" });
                 doc.autoTable({
                     startY: 40,
-                    head: [summaryModule === "LOK_ADALAT" ? [colLabel, valueLabel, "DISTRIBUTED NOTICE"] : [colLabel, "TOTAL CONS.", valueLabel]],
-                    body: summaryModule === "LOK_ADALAT" ? uiListSummary.map((r) => [r.name, r.tc, r.tu]) : uiListSummary.map((r) => [r.name, r.tc, r.tu]),
-                    foot: [summaryModule === "LOK_ADALAT" ? ["GRAND TOTAL", grandTC, grandTU] : ["GRAND TOTAL", grandTC, grandTU]],
+                    head: [summaryModule === "LOK_ADALAT" ? [colLabel, valueLabel, "DISTRIBUTED NOTICE"] : [colLabel, "TOTAL CONS.", "WRONG MOBILE NO", valueLabel]],
+                    body: summaryModule === "LOK_ADALAT" ? uiListSummary.map((r) => [r.name, r.tc, r.tu]) : uiListSummary.map((r) => [r.name, r.tc, r.tw || 0, r.tu]),
+                    foot: [summaryModule === "LOK_ADALAT" ? ["GRAND TOTAL", grandTC, grandTU] : ["GRAND TOTAL", grandTC, grandTW, grandTU]],
                     theme: "grid",
                     headStyles: { fillColor: [13, 148, 136], halign: "center" },
-                    columnStyles: summaryModule === "LOK_ADALAT" ? { 0: { halign: "left" }, 1: { halign: "center" }, 2: { halign: "center" } } : { 0: { halign: "left" }, 1: { halign: "center" }, 2: { halign: "center" } },
+                    columnStyles: summaryModule === "LOK_ADALAT" ? { 0: { halign: "left" }, 1: { halign: "center" }, 2: { halign: "center" } } : { 0: { halign: "left" }, 1: { halign: "center" }, 2: { halign: "center" }, 3: { halign: "center" } },
                     footStyles: { fillColor: [241, 245, 249], textColor: [190, 18, 60], fontStyle: "bold", halign: "center" },
                     didParseCell(data) {
                         if (data.section === "body") {
@@ -4607,100 +4975,7 @@
             }
         }
 
-        // ===================================================================
-        // GROUP MEETING (free Jitsi Meet) - "GROUP MEETING" home button password
-        // protected hai (meet123). Click karte hi seedha meeting nahi khulti - pehle
-        // ek "Create New Meeting Link" button dikhta hai; usko dabane par har baar
-        // NAYA unique room link banta hai (date + time + random code) - purana link
-        // dobara kaam nahi karta. Server meet.ffmuc.net use kar rahe hain (meet.jit.si
-        // ki tarah free/bina-account hai, lekin naya meeting host karne par login
-        // maangne wali policy nahi lagati - sirf Full Name poochta hai). Lobby
-        // (moderator approval) default OFF rehta hai, isliye Share hote hi jo bhi link
-        // par click kare seedha meeting me chala jaata hai - koi accept/approve nahi
-        // karna. Jab sab log meeting chhod dete hain to Jitsi khud room band kar deta
-        // hai (server-side, apne aap) - agli baar "Create New Meeting Link" dabane par
-        // hamesha ek naya alag link banega.
-        const GROUP_MEETING_SERVER = "meet.ffmuc.net";
-
-        function generateGroupMeetingRoomName() {
-            const now = new Date();
-            const pad = (n) => String(n).padStart(2, "0");
-            const dateStr = `${pad(now.getDate())}${pad(now.getMonth() + 1)}${now.getFullYear()}`;
-            const timeStr = `${pad(now.getHours())}${pad(now.getMinutes())}`;
-            const randomCode = Math.random().toString(36).slice(2, 6);
-            return `seonicircle-${dateStr}-${timeStr}-${randomCode}`;
-        }
-
-        function openGroupMeetingLauncher() {
-            const oldBox = document.getElementById("group-meeting-share-overlay");
-            if (oldBox) oldBox.remove();
-            const overlay = document.createElement("div");
-            overlay.id = "group-meeting-share-overlay";
-            overlay.style.cssText = "position:fixed; inset:0; z-index:9999; background:rgba(15,23,42,0.36); display:flex; align-items:center; justify-content:center; padding:20px;";
-            overlay.innerHTML = `
-                <div id="group-meeting-card" style="width:min(340px,92vw); background:#ffffff; border:2px solid #86efac; border-radius:22px; box-shadow:0 20px 45px rgba(15,23,42,0.28); padding:18px; text-align:center;">
-                    <div style="display:inline-block; background:#dcfce7; color:#15803d; border:1.5px solid #4ade80; border-radius:999px; padding:7px 18px; font-size:0.9rem; font-weight:950;">📞 GROUP MEETING</div>
-                    <div style="margin-top:14px; color:#475569; font-size:0.7rem; font-weight:700; line-height:1.5;">Naya meeting link banane ke liye neeche button dabaiye. Har baar bilkul naya link banega.</div>
-                    <button id="group-meeting-create-btn" type="button" style="width:100%; height:48px; margin-top:16px; border:none; border-radius:999px; background:#16a34a; color:#fff; font-size:0.85rem; font-weight:950;">➕ CREATE NEW MEETING LINK</button>
-                    <div id="group-meeting-close-btn" style="margin-top:14px; color:#94a3b8; font-weight:800; font-size:0.68rem; cursor:pointer;">BAND KAREIN</div>
-                </div>
-            `;
-            document.body.appendChild(overlay);
-            const createBtn = document.getElementById("group-meeting-create-btn");
-            if (createBtn) createBtn.onclick = () => renderGroupMeetingLinkCard();
-            const closeBtn = document.getElementById("group-meeting-close-btn");
-            if (closeBtn) closeBtn.onclick = () => overlay.remove();
-            overlay.addEventListener("click", (event) => {
-                if (event.target === overlay) overlay.remove();
-            });
-        }
-
-        function renderGroupMeetingLinkCard() {
-            const card = document.getElementById("group-meeting-card");
-            if (!card) return;
-            const roomName = generateGroupMeetingRoomName();
-            const meetingUrl = `https://${GROUP_MEETING_SERVER}/${roomName}#config.prejoinPageEnabled=true&config.disableDeepLinking=true`;
-            card.innerHTML = `
-                <div style="display:inline-block; background:#dcfce7; color:#15803d; border:1.5px solid #4ade80; border-radius:999px; padding:7px 18px; font-size:0.9rem; font-weight:950;">✅ NAYA LINK TAIYAAR</div>
-                <div style="margin-top:14px; color:#111827; font-size:0.72rem; font-weight:800; word-break:break-all; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:10px;">${escapeHtml(meetingUrl)}</div>
-                <div style="margin-top:10px; color:#64748b; font-size:0.62rem; font-weight:700; line-height:1.5;">Share dabate hi meeting shuru maani jaayegi. Staff link par click karke sirf apna naam likhenge, phir seedha meeting me pahunch jaayenge - koi login/password nahi.</div>
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px;">
-                    <button id="group-meeting-copy-btn" type="button" style="height:42px; border:none; border-radius:999px; background:#e5e7eb; color:#111827; font-size:0.78rem; font-weight:950;">COPY LINK</button>
-                    <button id="group-meeting-wa-btn" type="button" style="height:42px; border:none; border-radius:999px; background:#16a34a; color:#fff; font-size:0.78rem; font-weight:950;">SHARE (WHATSAPP)</button>
-                </div>
-                <button id="group-meeting-join-btn" type="button" style="width:100%; height:44px; margin-top:10px; border:none; border-radius:999px; background:#0f172a; color:#fff; font-size:0.8rem; font-weight:950;">MEETING ME KHUD JOIN KAREIN (HOST)</button>
-                <div id="group-meeting-close-btn" style="margin-top:14px; color:#94a3b8; font-weight:800; font-size:0.68rem; cursor:pointer;">BAND KAREIN</div>
-            `;
-            const copyBtn = document.getElementById("group-meeting-copy-btn");
-            if (copyBtn) {
-                copyBtn.onclick = () => {
-                    copyRevenueText(meetingUrl).then((ok) => showToast(ok ? "Link Copy Ho Gaya" : "Copy Nahi Ho Paya", ok));
-                };
-            }
-            const waBtn = document.getElementById("group-meeting-wa-btn");
-            if (waBtn) {
-                waBtn.onclick = () => {
-                    const msg = `📞 SEONI CIRCLE Group Meeting Call\nMeeting join karne ke liye link par click karein aur apna Full Name likh kar Enter kar dein:\n${meetingUrl}`;
-                    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
-                    showToast("Share hote hi Meeting Shuru Maani Jaayegi", true);
-                };
-            }
-            const joinBtn = document.getElementById("group-meeting-join-btn");
-            if (joinBtn) joinBtn.onclick = () => window.open(meetingUrl, "_blank");
-            const closeBtn = document.getElementById("group-meeting-close-btn");
-            if (closeBtn) {
-                closeBtn.onclick = () => {
-                    const overlay = document.getElementById("group-meeting-share-overlay");
-                    if (overlay) overlay.remove();
-                };
-            }
-        }
-
-        function startGroupMeeting() {
-            openGroupMeetingLauncher();
-        }
-
-                function showToast(message, ok) {
+        function showToast(message, ok) {
             const t = document.getElementById("toast-notif");
             t.innerText = message;
             t.style.background = ok ? "#10b981" : "#ef4444";
@@ -17490,6 +17765,9 @@
                 if (id === "mobile-update-list") {
                     initMobileUpdateList();
                 }
+                if (id === "mobile-update-wrong-list") {
+                    initMobileUpdateWrongList();
+                }
                 if (id === "revenue-collection") {
                     initRevenueCollection();
                 }
@@ -17752,7 +18030,7 @@
                 switchView("revenue-collection");
             } else if (act === "vr-download-log-view") {
                 switchView("vr-calculation");
-            } else if (act === "mobile-update-report-view") {
+            } else if (act === "mobile-update-report-view" || act === "mobile-update-wrong-list-view") {
                 switchView("mobile-update");
             } else if (act === "dc-dashboard-view" || act === "mobile-update-view" || act === "revenue-collection-view") {
                 if (act === "mobile-update-view") {
