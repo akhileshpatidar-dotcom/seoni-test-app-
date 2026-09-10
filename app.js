@@ -18151,7 +18151,11 @@
             if (!forceRefresh && meterCheckingStaffLoadedDcKey === dcKey && meterCheckingStaffNames.length) return meterCheckingStaffNames;
             const cfg = meterCheckingConfig[dcKey];
             if (!cfg || !cfg.staffCsvUrl) return [];
-            const staffCacheKey = `seoni-meter-checking-staff-csv-v1-${dcKey}`;
+            // v2 (2026-09-10): cache-key version bump - purani (test ke waqt sirf 24
+            // naam wali) cached list ko automatically invalid karne ke liye, taaki sabke
+            // browser me fresh (48 naam wali) list dobara load ho jaye, kisi ko manually
+            // kuch clear na karna pade.
+            const staffCacheKey = `seoni-meter-checking-staff-csv-v2-${dcKey}`;
 
             if (!forceRefresh) {
                 try {
