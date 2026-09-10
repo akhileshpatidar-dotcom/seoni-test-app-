@@ -81,6 +81,21 @@
         const vehicleReadingVehicles = ["407- MP22ZB6089", "BOLERO- MP22ZC1591", "407- MP22G4316", "CAMPER- MP22G4342"];
         const revenueCollectionSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbzaimPwzUYELgmujpaBbfByy0BcjOERA8e0mslNdbH5uUw2L6L24785obmdcpcDOc53Ww/exec";
         const revenueOfflineQueueStorageKey = "seoni-revenue-offline-submit-queue-v1";
+        // Meeter Cheking (2026-09-10 addition) - abhi sirf SEONI (T) DC ke liye live hai.
+        // Forward-compatible design (user requirement): future me kisi aur DC me yeh feature
+        // add karna ho to sirf yahan meterCheckingConfig me us DC ka key (getRevenueCollection-
+        // DcKey() jaisa hi normalized, e.g. "BARGHAT") add karke uska apna consumer/staff CSV
+        // url daalna hoga - button/section apne aap us DC par bhi dikhne lagega. Submit script
+        // URL aur report spreadsheet ID sabhi DC ke liye SAME rahenge (backend .gs file me
+        // dc_name se hi tab decide hota hai), sirf dc_name payload me badalta hai.
+        const meterCheckingConfig = {
+            "SEONIT": {
+                consumerCsvUrl: "https://docs.google.com/spreadsheets/d/1CGS2blrlv91w0QAupQq4tSGgSpc3E_w8yMuPwkMbFME/export?format=csv&gid=0",
+                staffCsvUrl: "https://docs.google.com/spreadsheets/d/1CGS2blrlv91w0QAupQq4tSGgSpc3E_w8yMuPwkMbFME/export?format=csv&gid=1334246662"
+            }
+        };
+        const meterCheckingSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbwUxFlfDqzzcQvJgMe0umCwy73MOhP8ChX3Xd-wox7BOpsk6ttZsUazEzu6kyiRM9Yx/exec";
+        const meterCheckingReportSpreadsheetId = "1LtBrMNlTtX89pTBK8IZWL4ILLYu3WvjQ532JpInps0s";
         const revenueCollectionCsvUrls = {
             "CHHAPARA1": "https://docs.google.com/spreadsheets/d/1ehSaUQyrV1ZzwH0lbdhLdXRYkPdapdm5hhu0Gz0vulk/export?format=csv&gid=0",
             "CHHAPARA2": "https://docs.google.com/spreadsheets/d/1TvhGlARSxZVMq5GYDZEGAHuV6vBXRKxe_nMun4dUby0/export?format=csv&gid=0",
@@ -135,6 +150,23 @@
         // Defaulters me pehle se hai).
         let progressTargetGovtFilter = "";
         let progressStaffTypeFilter = "";
+        // USER REQUEST (2026-09-09): "Paid Count Summary" - 8th Revenue dropdown
+        // report. DC level: dropdown holds HQ names ("" = ALL HQ, shows HQ-wise
+        // summary; specific HQ shows that HQ's village-wise list). Division/Circle
+        // level: same idea one level up (dropdown holds DC names, "" = ALL DC shows
+        // DC-wise summary; specific DC shows that DC's HQ-wise list). Same state
+        // var reused for both levels since only one dropdown is ever active at a time.
+        let progressPaidCountFilter = "";
+
+        // ===== Meeter Cheking state (2026-09-10) =====
+        let meterCheckingRows = [], meterCheckingRowsLoadedDcKey = "";
+        let meterCheckingStaffNames = [], meterCheckingStaffLoadedDcKey = "";
+        let currentMeterCheckingRecord = null;
+        let meterCheckingPhoto1 = { base64: "", name: "" };
+        let meterCheckingPhoto2 = { base64: "", name: "" };
+        let meterCheckingPhoto3 = { base64: "", name: "" };
+        let meterCheckingReportRows = [], meterCheckingReportLoadedDcKey = "";
+        let meterCheckingReportMode = "DAILY";
         let lastRevenueProgressBoxData = null;
         let lastRevenueProgressStaffData = null;
         // Target vs Achievement ke liye - jab Govt/Non-Govt filter select ho, tab
@@ -856,8 +888,8 @@
             (cloudData || []).forEach((u) => {
                 const uDc = (u.dc || "").trim().toUpperCase();
                 if (uDc !== normDc) return;
+                if (isMobileNoConsideredWrong(u.correct_mobile || "")) return;
                 const validMobile = normalizeRevenueMessageMobile(u.correct_mobile || "");
-                if (!validMobile) return;
                 const ivrs = normalizeLookupDigits(u.ivrs || "");
                 if (!ivrs) return;
                 const existing = updatedMobileByIvrs[ivrs];
@@ -866,18 +898,43 @@
                 }
             });
 
+            // Duplicate-count SIRF un consumers se calculate hota hai jinka mobile no
+            // abhi bhi wrong hai (jinke IVRS ke liye Update Mobile No se koi sahi number
+            // submit NAHI hua) - isliye REASON me dikhne wali ginti (jaise "11 CONSUMER")
+            // hamesha utne hi consumers se match karegi jitne is list me actually dikhte
+            // hain. Jo consumer pehle hi fix ho chuke hain unko count me nahi jodte -
+            // isliye agar kaafi consumers fix ho jayen aur bacha hua group threshold (10)
+            // se niche aa jaye, to bache consumer bhi apne aap "duplicate" nahi maane
+            // jayenge (ab itne connection ek number par practically possible lag sakte hain).
+            const stillActiveRowsForDup = rows.filter((row) => {
+                const ivrs = normalizeLookupDigits(row.ivrsNo);
+                return !(ivrs && updatedMobileByIvrs[ivrs]);
+            });
+            const duplicateFreqMap = computeMobileDuplicateFreqMap(stillActiveRowsForDup, (row) => row.mobileNo);
+
             return rows
                 .map((row) => {
                     const ivrs = normalizeLookupDigits(row.ivrsNo);
                     if (!ivrs) return null;
-                    // "Originally wrong" - master sheet me hi number galat/khaali tha.
-                    if (normalizeRevenueMessageMobile(row.mobileNo)) return null;
+                    const rawMobile = String(row.mobileNo || "").trim();
+                    // "Originally wrong" - master sheet me hi number galat/khaali tha, ya
+                    // dummy/placeholder number (jaise 9999999999) tha.
+                    const originallyWrong = isMobileNoConsideredWrong(rawMobile);
+                    // "Duplicate" - number format se to sahi dikhta hai lekin isi DC me
+                    // 10 baar se adhik alag consumers me repeat ho raha hai (practically
+                    // itne connection ek hi mobile no par sahi nahi ho sakte).
+                    const isDuplicate = !originallyWrong && isMobileNoDuplicateOverThreshold(rawMobile, duplicateFreqMap);
+                    if (!originallyWrong && !isDuplicate) return null;
+                    const reason = originallyWrong
+                        ? "KHALI / GALAT FORMAT"
+                        : `DUPLICATE - EK HI NO PAR ${duplicateFreqMap[normalizeRevenueMessageMobile(rawMobile)]} CONSUMER`;
                     return {
                         ivrsNo: row.ivrsNo || "",
                         consumerName: row.consumerName || "",
                         hqName: String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL",
                         village: String(row.village || "UNKNOWN").trim().toUpperCase() || "UNKNOWN",
-                        rawMobile: String(row.mobileNo || "").trim(),
+                        rawMobile,
+                        reason,
                         fixed: !!updatedMobileByIvrs[ivrs]
                     };
                 })
@@ -991,7 +1048,11 @@
                 const villageScopedRows = mobileUpdateWrongListVillage
                     ? hqScopedRows.filter((row) => normalizeLookupValue(row.village) === normalizeLookupValue(mobileUpdateWrongListVillage))
                     : hqScopedRows;
-                const stillWrongRows = villageScopedRows.filter((row) => !row.fixed);
+                // Mobile No ke ascending order me sort - taki jinka mobile no same/
+                // duplicate hai wo ek sath (lagatar) dikhein, manual verify karna aasan
+                // ho jaye.
+                const stillWrongRows = villageScopedRows.filter((row) => !row.fixed)
+                    .sort((a, b) => (a.rawMobile || "").localeCompare(b.rawMobile || ""));
                 mobileUpdateWrongListCurrentDetailRows = stillWrongRows;
                 if (!stillWrongRows.length) {
                     tableBox.innerHTML = `<div style="text-align:center; color:#166534; font-size:0.72rem; font-weight:900; padding:12px;">Is HQ/Village me sabhi number sahi hain</div>`;
@@ -1003,6 +1064,7 @@
                             <div style="font-size:0.66rem; font-weight:900; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(row.consumerName || "-")}</div>
                             <div style="font-size:0.56rem; font-weight:750; color:#64748b;">IVRS ${escapeHtml(row.ivrsNo)} | ${escapeHtml(row.village)}</div>
                             <div style="font-size:0.56rem; font-weight:800; color:#991b1b;">No: ${escapeHtml(row.rawMobile || "KHALI")}</div>
+                            <div style="font-size:0.5rem; font-weight:750; color:#b45309;">${escapeHtml(row.reason || "")}</div>
                         </div>
                         <button type="button" onclick="jumpToUpdateMobileNoFromWrongList('${escapeHtml(row.ivrsNo)}')" style="flex:0 0 auto; height:28px; padding:0 9px; border:none; border-radius:8px; background:#dc2626; color:#fff; font-size:0.52rem; font-weight:950; white-space:nowrap;">UPDATE MOBILE NO</button>
                     </div>
@@ -1040,12 +1102,13 @@
             }
         }
 
-        const MOBILE_UPDATE_WRONG_LIST_DETAIL_HEADERS = ["IVRS NO", "CONSUMER NAME", "VILLAGE", "MOBILE NO (WRONG)"];
+        const MOBILE_UPDATE_WRONG_LIST_DETAIL_HEADERS = ["IVRS NO", "CONSUMER NAME", "VILLAGE", "MOBILE NO (WRONG)", "REASON"];
 
         function getMobileUpdateWrongListDetailRowsForHq(hqName) {
             return mobileUpdateWrongListAllRows
                 .filter((row) => row.hqName === hqName && !row.fixed)
-                .map((row) => [row.ivrsNo, row.consumerName, row.village, row.rawMobile || "KHALI"]);
+                .sort((a, b) => (a.rawMobile || "").localeCompare(b.rawMobile || ""))
+                .map((row) => [row.ivrsNo, row.consumerName, row.village, row.rawMobile || "KHALI", row.reason || ""]);
         }
 
         // ALL HQ mode: pehle page par HQ-wise SUMMARY (Total Wrong / Updated), uske
@@ -1108,7 +1171,7 @@
             setMobileUpdateWrongListDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
             try {
                 const headers = MOBILE_UPDATE_WRONG_LIST_DETAIL_HEADERS;
-                const bodyRows = mobileUpdateWrongListCurrentDetailRows.map((row) => [row.ivrsNo, row.consumerName, row.village, row.rawMobile || "KHALI"]);
+                const bodyRows = mobileUpdateWrongListCurrentDetailRows.map((row) => [row.ivrsNo, row.consumerName, row.village, row.rawMobile || "KHALI", row.reason || ""]);
                 const scopeText = mobileUpdateWrongListVillage ? `HQ ${mobileUpdateWrongListHq} - Village ${mobileUpdateWrongListVillage}` : `HQ ${mobileUpdateWrongListHq}`;
                 const reportTitle = `Wrong Mobile No List - DC ${activeDC} - ${scopeText}`;
                 const scopeLine = `Scope: DC - ${activeDC} (${scopeText})`;
@@ -3206,6 +3269,7 @@
             if (progressRevenueReportType === "NONPAYEE_3M") return downloadProgressRevenueNonPayeeSummary(fmt, "3M");
             if (progressRevenueReportType === "NONPAYEE_6M") return downloadProgressRevenueNonPayeeSummary(fmt, "6M");
             if (progressRevenueReportType === "NONPAYEE_SINCE_CONNECTION") return downloadProgressRevenueNonPayeeSummary(fmt, "SINCE_CONNECTION");
+            if (progressRevenueReportType === "PAIDCOUNT") return downloadProgressRevenuePaidCountSummary(fmt);
             return downloadProgressRevenueCategorySummary(fmt);
         }
 
@@ -3415,6 +3479,160 @@
             `;
         }
 
+        // ===== Paid Count Summary (8th Revenue dropdown report, added 2026-09-09) =====
+        // Reuses the same buildRevenueHqVillagePaidUnpaidTree() tree that Category Wise/
+        // Target already load (data.hqVillageSummaryData) - no extra fetch needed, dropdown
+        // switch is instant. DC level tree top rows = HQ nodes (each with village children).
+        // Division/Circle level tree top rows = DC nodes (each with HQ children, mixed with
+        // SUBDN_TOTAL/SUB_TOTAL rows we deliberately drop here - user only asked for a plain
+        // DC-wise/HQ-wise/Village-wise summary, no sub-division subtotal rows).
+        function getRevenuePaidCountPlainRows(tree) {
+            return (tree || []).filter((row) => row.type !== "SUB_TOTAL" && row.type !== "SUBDN_TOTAL");
+        }
+
+        function sortRevenuePaidCountRowsAscPct(rows) {
+            // USER REQUEST: sabse kam Paid % wali row sabse upar (default alphabetical
+            // tree order ke bajaye) - taaki kam-performing HQ/Village/DC turant dikhe.
+            return (rows || []).slice().sort((a, b) => {
+                const totalA = Number(a.paidTotal || 0) + Number(a.unpaidTotal || 0);
+                const totalB = Number(b.paidTotal || 0) + Number(b.unpaidTotal || 0);
+                return getRevenueAchievementPct(a.paidTotal, totalA) - getRevenueAchievementPct(b.paidTotal, totalB);
+            });
+        }
+
+        function findRevenuePaidCountNode(rows, name) {
+            const normalized = normalizeLookupValue(name);
+            return (rows || []).find((row) => normalizeLookupValue(row.name) === normalized);
+        }
+
+        function renderRevenuePaidCountTableHtml(rows, colLabel) {
+            const sorted = sortRevenuePaidCountRowsAscPct(rows);
+            const cols = "1.4fr 0.85fr 0.85fr 0.7fr";
+            let html = `<div class="summary-wrapper" style="margin-top:6px;"><div class="summary-table-header" style="grid-template-columns: ${cols};"><div>${escapeHtml(colLabel)}</div><div>TOTAL</div><div>PAID</div><div>%</div></div>`;
+            if (!sorted.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Data nahi mila.</div></div>`;
+            } else {
+                let grandTotal = 0, grandPaid = 0;
+                sorted.forEach((row) => {
+                    const total = Number(row.paidTotal || 0) + Number(row.unpaidTotal || 0);
+                    const paid = Number(row.paidTotal || 0);
+                    grandTotal += total; grandPaid += paid;
+                    const pct = getRevenueAchievementPct(paid, total);
+                    const pctColor = pct >= 75 ? "#166534" : (pct >= 40 ? "#b45309" : "#9f1239");
+                    html += `<div class="summary-table-row" style="grid-template-columns: ${cols};"><div>${escapeHtml(row.name)}</div><div class="font-black">${total}</div><div class="text-emerald-700 font-black">${paid}</div><div style="color:${pctColor}; font-weight:950;">${pct}%</div></div>`;
+                });
+                const grandPct = getRevenueAchievementPct(grandPaid, grandTotal);
+                html += `<div class="summary-table-row blue-bold" style="grid-template-columns: ${cols};"><div>TOTAL</div><div class="font-black">${grandTotal}</div><div class="text-emerald-700 font-black">${grandPaid}</div><div style="font-weight:950;">${grandPct}%</div></div>`;
+            }
+            html += `</div>`;
+            return html;
+        }
+
+        function renderRevenueProgressPaidCountSummaryHtml(summaryData) {
+            const tree = summaryData?.tree || [];
+            const plainRows = getRevenuePaidCountPlainRows(tree);
+            const isDc = activeViewLevel === "DC";
+            const topLabel = isDc ? revenueHqLabelUpper() : "DC NAME";
+            const topAllLabel = isDc ? revenueHqAllLabel().toUpperCase() : "ALL DC";
+            const selectedNode = progressPaidCountFilter ? findRevenuePaidCountNode(plainRows, progressPaidCountFilter) : null;
+            const optionsHtml = [`<option value="">${escapeHtml(topAllLabel)}</option>`]
+                .concat(plainRows.map((row) => `<option value="${escapeHtml(row.name)}" ${selectedNode && normalizeLookupValue(selectedNode.name) === normalizeLookupValue(row.name) ? "selected" : ""}>${escapeHtml(row.name)}</option>`))
+                .join("");
+            const bodyRows = selectedNode ? (selectedNode.children || []) : plainRows;
+            const colLabel = selectedNode ? (isDc ? revenueVillageLabelUpper() : "HQ NAME") : topLabel;
+            return `
+                <div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Paid Count Summary</div>
+                <select onchange="setProgressPaidCountFilter(this.value)" style="width:100%; height:44px; margin:9px auto 0; display:block; border:1.5px solid #93c5fd; border-radius:12px; padding:0 12px; font-size:0.76rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                    ${optionsHtml}
+                </select>
+                <div style="font-size:0.62rem; font-weight:900; color:#1d4ed8; text-align:center; margin-top:10px;">${escapeHtml(colLabel)} WISE</div>
+                ${renderRevenuePaidCountTableHtml(bodyRows, colLabel)}
+            `;
+        }
+
+        // Download scope follows the on-screen dropdown exactly (USER REQUEST 2026-09-09):
+        // - Kisi specific HQ/DC select hai to sirf usi ke andar wali rows (Village/HQ) download
+        //   hongi.
+        // - "ALL HQ"/"ALL DC" (dropdown khaali) par DC level = pura HQ-wise + village-wise
+        //   combined data; Division/Circle level = DC-wise + har DC ke andar HQ-wise (village
+        //   tak nahi) - jaisa user ne confirm kiya.
+        function downloadProgressRevenuePaidCountSummary(fmt) {
+            const summaryData = lastRevenueProgressBoxData?.hqVillageSummaryData;
+            if (!summaryData) return showToast("Report ke liye data nahi hai", false);
+            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
+            setProgressCategoryDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
+            try {
+                const tree = summaryData.tree || [];
+                const plainRows = getRevenuePaidCountPlainRows(tree);
+                const isDc = activeViewLevel === "DC";
+                const topLabel = isDc ? revenueHqLabelUpper() : "DC NAME";
+                const childLabel = isDc ? revenueVillageLabelUpper() : "HQ NAME";
+                const selectedNode = progressPaidCountFilter ? findRevenuePaidCountNode(plainRows, progressPaidCountFilter) : null;
+                const grandRow = (rows) => {
+                    const grandTotal = rows.reduce((s, r) => s + Number(r.paidTotal || 0) + Number(r.unpaidTotal || 0), 0);
+                    const grandPaid = rows.reduce((s, r) => s + Number(r.paidTotal || 0), 0);
+                    return { grandTotal, grandPaid, pct: getRevenueAchievementPct(grandPaid, grandTotal) };
+                };
+
+                let headers, bodyRows, reportTitle;
+                if (selectedNode) {
+                    const childRows = sortRevenuePaidCountRowsAscPct(selectedNode.children || []);
+                    headers = [childLabel, "TOTAL CONSUMER", "PAID CONSUMER", "PAID %"];
+                    bodyRows = childRows.map((row) => {
+                        const total = Number(row.paidTotal || 0) + Number(row.unpaidTotal || 0);
+                        return [row.name, total, row.paidTotal, `${getRevenueAchievementPct(row.paidTotal, total)}%`];
+                    });
+                    const g = grandRow(childRows);
+                    bodyRows.push(["TOTAL", g.grandTotal, g.grandPaid, `${g.pct}%`]);
+                    reportTitle = `Paid Count Summary (${selectedNode.name} - ${childLabel} Wise)`;
+                } else {
+                    headers = [topLabel, childLabel, "TOTAL CONSUMER", "PAID CONSUMER", "PAID %"];
+                    bodyRows = [];
+                    const topSorted = sortRevenuePaidCountRowsAscPct(plainRows);
+                    topSorted.forEach((topRow) => {
+                        const childRows = sortRevenuePaidCountRowsAscPct(topRow.children || []);
+                        childRows.forEach((childRow) => {
+                            const total = Number(childRow.paidTotal || 0) + Number(childRow.unpaidTotal || 0);
+                            bodyRows.push([topRow.name, childRow.name, total, childRow.paidTotal, `${getRevenueAchievementPct(childRow.paidTotal, total)}%`]);
+                        });
+                    });
+                    const g = grandRow(topSorted);
+                    bodyRows.push(["TOTAL", "", g.grandTotal, g.grandPaid, `${g.pct}%`]);
+                    reportTitle = isDc ? "Paid Count Summary (All HQ Wise)" : "Paid Count Summary (All DC Wise)";
+                }
+
+                const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+                reportTitle = `${reportTitle} - ${scope}`;
+                const rawVal = document.getElementById("report-date")?.value || "";
+                const parsed = parseSummarySelection(rawVal, summaryMode);
+                const periodLine = `Period: ${parsed.label || getTodayIsoDate()}`;
+                const fileName = `${reportTitle}-${parsed.label || getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (fmt === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
+                    doc.text(periodLine, 148, 25, { align: "center" });
+                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                } else {
+                    const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                    const csv = [[reportTitle], [`Scope: ${scope}`], [periodLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                    link.download = `${fileName}.csv`;
+                    link.click();
+                }
+                setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
+            } catch (error) {
+                setProgressCategoryDownloadState(false, "Download nahi ho paya");
+                showToast(error?.message || "Paid Count Summary download nahi ho payi", false);
+            }
+        }
+        // ===== End Paid Count Summary =====
+
         // Top 20/50 Defaulters ka data buildRevenueHqVillageConsumerRows() se aata hai - isi
         // function ka data "HQ / Village Wise Paid-Unpaid" list section aur dedicated "Top
         // 20/50 Defaulters" report dono use karte hain. Yahan par (Daily/Progress Report ki
@@ -3619,12 +3837,21 @@
         }
 
         function setProgressRevenueReportType(value) {
-            const validValues = ["STAFF", "CATEGORY", "TARGET", "DEFAULTERS", "NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION"];
+            const validValues = ["STAFF", "CATEGORY", "TARGET", "DEFAULTERS", "NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION", "PAIDCOUNT"];
             progressRevenueReportType = validValues.includes(value) ? value : "STAFF";
             resetProgressNonPayeeFilterState();
             progressDefaultersGovtFilter = "";
             progressTargetGovtFilter = "";
             progressStaffTypeFilter = "";
+            progressPaidCountFilter = "";
+            const body = document.getElementById("progress-revenue-body");
+            if (body) body.innerHTML = renderProgressRevenueBodyInner();
+        }
+
+        // Paid Count Summary ke apne dropdown (HQ ya DC chunne wala) ke liye - baaki
+        // sab progressXxxFilter setters jaisa hi, sirf re-render karta hai.
+        function setProgressPaidCountFilter(value) {
+            progressPaidCountFilter = value || "";
             const body = document.getElementById("progress-revenue-body");
             if (body) body.innerHTML = renderProgressRevenueBodyInner();
         }
@@ -3642,6 +3869,7 @@
             if (progressRevenueReportType === "NONPAYEE_3M") return "Non Payee From 3 Month";
             if (progressRevenueReportType === "NONPAYEE_6M") return "Non Payee From 6 Month";
             if (progressRevenueReportType === "NONPAYEE_SINCE_CONNECTION") return "Non Payee From Date of Connection";
+            if (progressRevenueReportType === "PAIDCOUNT") return "Paid Count Summary";
             return "Category Wise";
         }
 
@@ -3769,6 +3997,8 @@
                 bodyHtml = renderRevenueProgressNonPayeeSummaryHtml(data.mode || "DAILY", data.filterValue || "", "6M");
             } else if (progressRevenueReportType === "NONPAYEE_SINCE_CONNECTION") {
                 bodyHtml = renderRevenueProgressNonPayeeSummaryHtml(data.mode || "DAILY", data.filterValue || "", "SINCE_CONNECTION");
+            } else if (progressRevenueReportType === "PAIDCOUNT") {
+                bodyHtml = renderRevenueProgressPaidCountSummaryHtml(data.hqVillageSummaryData);
             } else {
                 bodyHtml = data.hqVillageSummaryData ? renderRevenueProgressHqVillageSummaryHtml(data.hqVillageSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Category Wise Paid/Unpaid Summary</div>`;
             }
@@ -3787,7 +4017,7 @@
         }
 
         function renderProgressRevenueBodyInner() {
-            if (["CATEGORY", "TARGET", "DEFAULTERS", "NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION"].includes(progressRevenueReportType)) {
+            if (["CATEGORY", "TARGET", "DEFAULTERS", "NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION", "PAIDCOUNT"].includes(progressRevenueReportType)) {
                 return renderRevenueProgressNonStaffBoxHtml();
             }
             const staffData = lastRevenueProgressStaffData || { rows: [], label: "" };
@@ -3806,6 +4036,7 @@
                     <option value="NONPAYEE_3M" ${progressRevenueReportType === "NONPAYEE_3M" ? "selected" : ""}>Non Payee From 3 Month</option>
                     <option value="NONPAYEE_6M" ${progressRevenueReportType === "NONPAYEE_6M" ? "selected" : ""}>Non Payee From 6 Month</option>
                     <option value="NONPAYEE_SINCE_CONNECTION" ${progressRevenueReportType === "NONPAYEE_SINCE_CONNECTION" ? "selected" : ""}>Non Payee From Date of Connection</option>
+                    <option value="PAIDCOUNT" ${progressRevenueReportType === "PAIDCOUNT" ? "selected" : ""}>Paid Count Summary</option>
                 </select>
             `;
             return `${selectHtml}<div id="progress-revenue-body">${renderProgressRevenueBodyInner()}</div>`;
@@ -4132,15 +4363,22 @@
                     cloudData.forEach((u) => {
                         const uDc = (u.dc || "").trim().toUpperCase();
                         if (uDc !== normDc) return;
-                        if (!normalizeRevenueMessageMobile(u.correct_mobile || "")) return;
+                        if (isMobileNoConsideredWrong(u.correct_mobile || "")) return;
                         const ivrs = normalizeLookupDigits(u.ivrs || "");
                         if (ivrs) set.add(ivrs);
                     });
                     return set;
                 };
-                const isRowStillWrong = (row, fixedSet) => {
+                const getMobileFieldFromRow = (row) => getConsumerField(row, ["MOBILE NO", "MOBILE NUMBER", "MOBILE"]);
+                const isRowStillWrong = (row, fixedSet, freqMap) => {
                     const ivrs = normalizeLookupDigits(getConsumerField(row, ["IVRS", "IVRS NO", "IVRS NUMBER", "IVRSNO"]));
-                    if (normalizeRevenueMessageMobile(getConsumerField(row, ["MOBILE NO", "MOBILE NUMBER", "MOBILE"]))) return false;
+                    const mobileVal = getMobileFieldFromRow(row);
+                    // Ya to master sheet me hi khaali/galat-format/dummy number hai, ya
+                    // isi DC me yah number 10 baar se adhik alag consumers me repeat ho
+                    // raha hai (duplicate - practically itne connection ek number par
+                    // sahi nahi ho sakte).
+                    const isWrong = isMobileNoConsideredWrong(mobileVal) || isMobileNoDuplicateOverThreshold(mobileVal, freqMap);
+                    if (!isWrong) return false;
                     return !(ivrs && fixedSet.has(ivrs));
                 };
 
@@ -4152,8 +4390,15 @@
                     const rows = getConsumerRows(normDc);
                     tc = rows.length;
                     const fixedSet = getFixedIvrsSetForDc(dcName);
+                    // Duplicate-count sirf abhi-bhi-wrong consumers se (Wrong Mobile No
+                    // List screen jaisa hi) - taki dono jagah ka number match kare.
+                    const stillActiveRowsForDup = rows.filter((row) => {
+                        const ivrs = normalizeLookupDigits(getConsumerField(row, ["IVRS", "IVRS NO", "IVRS NUMBER", "IVRSNO"]));
+                        return !(ivrs && fixedSet.has(ivrs));
+                    });
+                    const freqMap = computeMobileDuplicateFreqMap(stillActiveRowsForDup, getMobileFieldFromRow);
                     rows.forEach((row) => {
-                        if (isRowStillWrong(row, fixedSet)) tw++;
+                        if (isRowStillWrong(row, fixedSet, freqMap)) tw++;
                     });
                     cloudData.forEach((u) => {
                         const ts = (u.date || "").trim();
@@ -4169,11 +4414,17 @@
                 if (activeViewLevel === "DC") {
                     const stats = {};
                     const fixedSet = getFixedIvrsSetForDc(activeDC);
-                    getConsumerRows(activeDC).forEach((row) => {
+                    const dcRows = getConsumerRows(activeDC);
+                    const stillActiveDcRowsForDup = dcRows.filter((row) => {
+                        const ivrs = normalizeLookupDigits(getConsumerField(row, ["IVRS", "IVRS NO", "IVRS NUMBER", "IVRSNO"]));
+                        return !(ivrs && fixedSet.has(ivrs));
+                    });
+                    const freqMap = computeMobileDuplicateFreqMap(stillActiveDcRowsForDup, getMobileFieldFromRow);
+                    dcRows.forEach((row) => {
                         const h = getConsumerField(row, ["HQ", "HQ NAME", "HEADQUARTER", "HEAD QUARTER", "H.Q."], "GENERAL").trim().toUpperCase() || "GENERAL";
                         stats[h] = stats[h] || { tc: 0, tu: 0, tw: 0 };
                         stats[h].tc++;
-                        if (isRowStillWrong(row, fixedSet)) stats[h].tw++;
+                        if (isRowStillWrong(row, fixedSet, freqMap)) stats[h].tw++;
                     });
                     cloudData.forEach((u) => {
                         const ts = (u.date || "").trim();
@@ -5367,11 +5618,6 @@
             } catch (_) {
                 return `${latitude}, ${longitude}`;
             }
-        }
-
-        function getCurrentTimeHHMM() {
-            const now = new Date();
-            return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
         }
 
         function getCurrentDayName() {
@@ -12281,6 +12527,48 @@
             return /^[6-9]\d{9}$/.test(mobile) ? mobile : "";
         }
 
+        // "Wrong Mobile No List" (aur Daily Progress ka WRONG MOBILE NO column) ke
+        // liye - format-valid (10 digit, 6-9 se start) ke aage bhi ek check: agar
+        // sabhi 10 digit ek hi anka ke repeat hain (9999999999, 8888888888 waghera -
+        // field me commonly dala jaane wala dummy/placeholder number), usko bhi
+        // "wrong" maante hain. normalizeRevenueMessageMobile() KHUD nahi badla -
+        // wahi SMS/WhatsApp button enable/disable jaise purane, alag features me
+        // bhi use hoti hai, unko chhedna nahi hai (strict scope).
+        function isMobileNoConsideredWrong(value) {
+            const valid = normalizeRevenueMessageMobile(value);
+            if (!valid) return true;
+            if (/^(\d)\1{9}$/.test(valid)) return true;
+            return false;
+        }
+
+        // Ek hi mobile no yadi ek DC me 10 baar se adhik (11 ya usse zyada) alag-alag
+        // consumers me mile to practically itne connection ek hi number par sahi nahi
+        // ho sakte - is threshold se zyada baar repeat hone wale number "duplicate"
+        // maane jaate hain aur unke saare consumer bhi Wrong Mobile No List me dikhaye
+        // jaate hain (dobara manual verify karne ke liye). Pehle se blank/galat-format/
+        // dummy-repeated-digit wale number is duplicate-check me shamil nahi kiye jaate
+        // (wo already isMobileNoConsideredWrong se pakde ja chuke hain).
+        const MOBILE_WRONG_DUPLICATE_THRESHOLD = 10;
+
+        function computeMobileDuplicateFreqMap(rows, getMobile) {
+            const freq = {};
+            rows.forEach((row) => {
+                const raw = getMobile(row);
+                if (isMobileNoConsideredWrong(raw)) return;
+                const valid = normalizeRevenueMessageMobile(raw);
+                if (!valid) return;
+                freq[valid] = (freq[valid] || 0) + 1;
+            });
+            return freq;
+        }
+
+        function isMobileNoDuplicateOverThreshold(raw, freqMap) {
+            if (isMobileNoConsideredWrong(raw)) return false;
+            const valid = normalizeRevenueMessageMobile(raw);
+            if (!valid) return false;
+            return (freqMap[valid] || 0) > MOBILE_WRONG_DUPLICATE_THRESHOLD;
+        }
+
         function buildRevenueConsumerMessage(row) {
             return `सम्मानीय उपभोक्ता - ${String(row?.consumerName || "उपभोक्ता").trim()} जी, आपका बिजली बिल ₹${String(row?.netBill || "0").trim()} है। IVRS: ${normalizeRevenueIvrs(row?.ivrsNo)}। कृपया समय पर भुगतान करें। — विद्युत वितरण केंद्र ${activeDC || revenueMessageSession?.staff?.dc_name || ""}`;
         }
@@ -17748,6 +18036,536 @@
             }
         }
 
+        // ===================================================================
+        // Meeter Cheking (SEONI (T) DC only, added 2026-09-10)
+        // Consumer/staff data ek DEDICATED sheet se aata hai (Revenue ke consumer
+        // master se alag) - meterCheckingConfig me har DC ka apna consumerCsvUrl/
+        // staffCsvUrl hai. Submit backend ek naya standalone script
+        // (meter-checking-submit-script.gs) hai, jo revenue-submit-script-dc-wise.gs
+        // ko chhedta nahi - risk kam rakhne ke liye. Report screen par CSV bhi
+        // client-side hi (submission sheet ka gviz export) padha jaata hai, koi
+        // backend doGet nahi chahiye.
+        // ===================================================================
+
+        function getMeterCheckingDcKey(dcName = activeDC) {
+            return getRevenueCollectionDcKey(dcName);
+        }
+
+        function isMeterCheckingAvailableForDc(dcName = activeDC) {
+            return !!meterCheckingConfig[getMeterCheckingDcKey(dcName)];
+        }
+
+        function updateMeterCheckingButtonVisibility() {
+            const btn = document.getElementById("meter-checking-dashboard-btn");
+            if (btn) btn.style.display = isMeterCheckingAvailableForDc(activeDC) ? "block" : "none";
+        }
+
+        function parseMeterCheckingConsumerCsv(csvText) {
+            const lines = (csvText || "").split(/\r?\n/).filter((line) => line.trim());
+            if (lines.length < 2) return [];
+            const headers = splitCsvLine(lines[0]).map((h) => normalizeLookupValue(h));
+            const findIndex = (aliases, fallback) => {
+                const idx = headers.findIndex((h) => aliases.some((key) => h.includes(key)));
+                return idx >= 0 ? idx : fallback;
+            };
+            const ivrsIdx = findIndex(["IVRS"], 0);
+            const meterIdx = findIndex(["METERNO", "METER"], 1);
+            const nameIdx = findIndex(["CONSUMERNAME", "CONSUMER"], 2);
+            const fatherIdx = findIndex(["FATHERNAME", "FATHER"], 3);
+            const mobileIdx = findIndex(["MOBILENO", "MOBILE"], 4);
+            const tariffIdx = findIndex(["TARIFFCODE", "TARIFF"], 5);
+            const loadIdx = findIndex(["LOAD"], 6);
+            return lines.slice(1).map((line) => {
+                const cols = splitCsvLine(line);
+                return {
+                    ivrsNo: String(cols[ivrsIdx] || "").trim(),
+                    meterNo: String(cols[meterIdx] || "").trim(),
+                    consumerName: String(cols[nameIdx] || "").trim(),
+                    fatherName: String(cols[fatherIdx] || "").trim(),
+                    mobileNo: String(cols[mobileIdx] || "").trim(),
+                    tariffCode: String(cols[tariffIdx] || "").trim(),
+                    load: String(cols[loadIdx] || "").trim()
+                };
+            }).filter((row) => row.ivrsNo || row.meterNo);
+        }
+
+        async function loadMeterCheckingConsumerData(dcName = activeDC, forceRefresh = false) {
+            const dcKey = getMeterCheckingDcKey(dcName);
+            if (!forceRefresh && meterCheckingRowsLoadedDcKey === dcKey && meterCheckingRows.length) return meterCheckingRows;
+            const cfg = meterCheckingConfig[dcKey];
+            if (!cfg || !cfg.consumerCsvUrl) return [];
+            const cacheKey = `seoni-meter-checking-consumer-csv-v1-${dcKey}`;
+
+            if (!forceRefresh) {
+                try {
+                    const cachedText = localStorage.getItem(cacheKey) || "";
+                    if (isLikelyCsvPayload(cachedText)) {
+                        const rows = parseMeterCheckingConsumerCsv(cachedText);
+                        if (rows.length) {
+                            meterCheckingRows = rows;
+                            meterCheckingRowsLoadedDcKey = dcKey;
+                            loadRemoteText(cfg.consumerCsvUrl).then((fresh) => {
+                                if (isLikelyCsvPayload(fresh)) {
+                                    const freshRows = parseMeterCheckingConsumerCsv(fresh);
+                                    if (freshRows.length) {
+                                        meterCheckingRows = freshRows;
+                                        try { localStorage.setItem(cacheKey, fresh); } catch (_) {}
+                                    }
+                                }
+                            }).catch(() => {});
+                            return rows;
+                        }
+                    }
+                } catch (_) {}
+            }
+
+            try {
+                const rawCsv = await loadRemoteText(cfg.consumerCsvUrl);
+                const rows = isLikelyCsvPayload(rawCsv) ? parseMeterCheckingConsumerCsv(rawCsv) : [];
+                if (rows.length) {
+                    meterCheckingRows = rows;
+                    meterCheckingRowsLoadedDcKey = dcKey;
+                    try { localStorage.setItem(cacheKey, rawCsv); } catch (_) {}
+                }
+                return rows;
+            } catch (_) {
+                return meterCheckingRows;
+            }
+        }
+
+        function parseMeterCheckingStaffCsv(csvText) {
+            const lines = (csvText || "").split(/\r?\n/).filter((line) => line.trim());
+            return lines.slice(1).map((line) => (splitCsvLine(line)[0] || "").trim()).filter(Boolean);
+        }
+
+        async function loadMeterCheckingStaffNames(dcName = activeDC, forceRefresh = false) {
+            const dcKey = getMeterCheckingDcKey(dcName);
+            if (!forceRefresh && meterCheckingStaffLoadedDcKey === dcKey && meterCheckingStaffNames.length) return meterCheckingStaffNames;
+            const cfg = meterCheckingConfig[dcKey];
+            if (!cfg || !cfg.staffCsvUrl) return [];
+            try {
+                const rawCsv = await loadRemoteText(cfg.staffCsvUrl);
+                const names = isLikelyCsvPayload(rawCsv) ? parseMeterCheckingStaffCsv(rawCsv) : [];
+                if (names.length) {
+                    meterCheckingStaffNames = names;
+                    meterCheckingStaffLoadedDcKey = dcKey;
+                }
+                return meterCheckingStaffNames;
+            } catch (_) {
+                return meterCheckingStaffNames;
+            }
+        }
+
+        function populateMeterCheckingStaffOptions(names) {
+            const datalist = document.getElementById("meter-checking-staff-datalist");
+            if (datalist) datalist.innerHTML = (names || []).map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
+            const reportSelect = document.getElementById("meter-checking-report-staff");
+            if (reportSelect) {
+                const current = reportSelect.value;
+                reportSelect.innerHTML = `<option value="">All Staff</option>` + (names || []).map((n) => `<option value="${escapeHtml(n)}" ${n === current ? "selected" : ""}>${escapeHtml(n)}</option>`).join("");
+            }
+        }
+
+        function resetMeterCheckingSearch() {
+            currentMeterCheckingRecord = null;
+            meterCheckingPhoto1 = { base64: "", name: "" };
+            meterCheckingPhoto2 = { base64: "", name: "" };
+            meterCheckingPhoto3 = { base64: "", name: "" };
+            const ivrsInput = document.getElementById("meter-checking-search-ivrs");
+            const meterInput = document.getElementById("meter-checking-search-meter");
+            const searchBtn = document.getElementById("meter-checking-search-btn");
+            if (ivrsInput) { ivrsInput.value = ""; ivrsInput.style.display = ""; }
+            if (meterInput) { meterInput.value = ""; meterInput.style.display = ""; }
+            if (searchBtn) searchBtn.style.display = "";
+            const moreBtn = document.getElementById("meter-checking-search-more-btn");
+            if (moreBtn) moreBtn.style.display = "none";
+            const resultBox = document.getElementById("meter-checking-result-box");
+            const formBox = document.getElementById("meter-checking-form-box");
+            if (resultBox) { resultBox.style.display = "none"; resultBox.innerHTML = ""; }
+            if (formBox) formBox.style.display = "none";
+            ["meter-checking-staff-input", "meter-checking-phase-current", "meter-checking-remark"].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) el.value = "";
+            });
+            [1, 2, 3].forEach((n) => {
+                const status = document.getElementById(`meter-checking-photo${n}-status`);
+                if (status) { status.innerText = "Pending"; status.style.color = "#a16207"; }
+                const input = document.getElementById(`meter-checking-photo${n}`);
+                if (input) input.value = "";
+            });
+            if (ivrsInput) ivrsInput.focus();
+        }
+
+        function initMeterChecking() {
+            resetMeterCheckingSearch();
+            loadMeterCheckingConsumerData(activeDC).catch(() => {});
+            loadMeterCheckingStaffNames(activeDC).then((names) => populateMeterCheckingStaffOptions(names)).catch(() => {});
+        }
+
+        function renderMeterCheckingConsumer(record) {
+            const resultBox = document.getElementById("meter-checking-result-box");
+            const formBox = document.getElementById("meter-checking-form-box");
+            if (!resultBox) return;
+            resultBox.innerHTML = `
+                <div style="background:linear-gradient(180deg,#fefce8 0%,#ffffff 100%); border:1.5px solid #fde047; border-radius:16px; padding:9px; text-align:left;">
+                    <div style="display:flex; justify-content:space-between; gap:7px; align-items:center; margin-bottom:6px; background:#fef9c3; border:1.5px solid #eab308; border-radius:12px; padding:7px 9px;">
+                        <span style="font-size:0.64rem; font-weight:950; color:#854d0e; letter-spacing:0.03em;">IVRS NO</span>
+                        <span style="flex:1; text-align:center; font-size:0.82rem; font-weight:950; color:#dc2626;">${escapeHtml(record.ivrsNo || "-")}</span>
+                    </div>
+                    <div style="background:#ffffff; border:1px solid #fde047; border-radius:13px; padding:7px 10px;">
+                        <div style="font-size:0.82rem; line-height:1.15; font-weight:950; color:#0f172a; text-align:center;">${escapeHtml(record.consumerName || "-")}</div>
+                        <div style="margin-top:2px; font-size:0.67rem; font-weight:850; color:#475569; text-align:center;">S/o ${escapeHtml(record.fatherName || "-")}</div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:7px;">
+                        ${renderRevenueMiniBox("Meter No", record.meterNo)}
+                        ${renderRevenueMiniBox("Mobile No", normalizeMobileDisplayValue(record.mobileNo))}
+                        ${renderRevenueMiniBox("Tariff Code", record.tariffCode)}
+                        ${renderRevenueMiniBox("Load", record.load)}
+                    </div>
+                </div>
+            `;
+            resultBox.style.display = "block";
+            if (formBox) formBox.style.display = "block";
+        }
+
+        async function searchMeterChecking() {
+            const ivrsInput = document.getElementById("meter-checking-search-ivrs");
+            const meterInput = document.getElementById("meter-checking-search-meter");
+            const ivrs = String(ivrsInput?.value || "").trim();
+            const meterNo = String(meterInput?.value || "").trim();
+            if (!ivrs && !meterNo) return showToast("IVRS No ya Meter No me se koi ek dalen", false);
+
+            const searchBtn = document.getElementById("meter-checking-search-btn");
+            const oldText = searchBtn ? searchBtn.innerText : "Search";
+            try {
+                setActionButtonState(searchBtn, "processing", oldText);
+                let rows = await loadMeterCheckingConsumerData(activeDC);
+                const matcher = (row) => (ivrs && row.ivrsNo === ivrs) || (meterNo && normalizeLookupValue(row.meterNo) === normalizeLookupValue(meterNo));
+                let found = rows.find(matcher);
+                if (!found) {
+                    rows = await loadMeterCheckingConsumerData(activeDC, true);
+                    found = rows.find(matcher);
+                }
+                if (!found) {
+                    const resultBox = document.getElementById("meter-checking-result-box");
+                    if (resultBox) {
+                        resultBox.innerHTML = `<div style="background:#fff1f2; border:1.5px solid #fda4af; border-radius:16px; padding:16px; color:#991b1b; font-weight:900; text-align:center;">Consumer Not Found in CSV</div>`;
+                        resultBox.style.display = "block";
+                    }
+                    return showToast("Consumer Not Found in CSV", false);
+                }
+                currentMeterCheckingRecord = found;
+                renderMeterCheckingConsumer(found);
+                if (ivrsInput) ivrsInput.style.display = "none";
+                if (meterInput) meterInput.style.display = "none";
+                if (searchBtn) searchBtn.style.display = "none";
+                const moreBtn = document.getElementById("meter-checking-search-more-btn");
+                if (moreBtn) moreBtn.style.display = "block";
+            } catch (_) {
+                showToast("Consumer Not Found in CSV", false);
+            } finally {
+                setActionButtonState(searchBtn, "idle", oldText || "Search");
+            }
+        }
+
+        async function handleMeterCheckingPhoto(index, input) {
+            const file = input?.files?.[0] || null;
+            const status = document.getElementById(`meter-checking-photo${index}-status`);
+            if (!file) return;
+            try {
+                if (status) { status.innerText = "Processing..."; status.style.color = "#a16207"; }
+                const base64 = await resizeImageForUpload(file, 1280, 0.78);
+                const photoObj = { base64, name: file.name || `meter-checking-photo${index}-${Date.now()}.jpg` };
+                if (index === 1) meterCheckingPhoto1 = photoObj;
+                else if (index === 2) meterCheckingPhoto2 = photoObj;
+                else meterCheckingPhoto3 = photoObj;
+                if (status) { status.innerText = "Ready"; status.style.color = "#166534"; }
+            } catch (_) {
+                if (status) { status.innerText = "Failed"; status.style.color = "#991b1b"; }
+                showToast("Photo process nahi ho payi", false);
+            }
+        }
+
+        async function submitMeterChecking() {
+            if (!currentMeterCheckingRecord) return showToast("Pehle consumer search karein", false);
+            const staffName = String(document.getElementById("meter-checking-staff-input")?.value || "").trim();
+            const phaseCurrent = String(document.getElementById("meter-checking-phase-current")?.value || "").trim();
+            const remark = String(document.getElementById("meter-checking-remark")?.value || "").trim();
+            if (!staffName) return showToast("Staff ka naam select karein", false);
+            if (!meterCheckingStaffNames.some((n) => normalizeLookupValue(n) === normalizeLookupValue(staffName))) {
+                return showToast("Staff list se hi valid naam select karein", false);
+            }
+            if (!phaseCurrent) return showToast("Phase Current dalen", false);
+            if (!remark) return showToast("Remark likhen", false);
+            if (!meterCheckingSubmitScriptUrl || meterCheckingSubmitScriptUrl.indexOf("PASTE_") === 0) {
+                return showToast("Submit script URL abhi set nahi hai", false);
+            }
+
+            const submitBtn = document.getElementById("meter-checking-submit-btn");
+            setActionButtonState(submitBtn, "processing", "Submit");
+            try {
+                const record = currentMeterCheckingRecord;
+                const payload = {
+                    action: "submitMeterChecking",
+                    dc_name: activeDC,
+                    ivrs_no: record.ivrsNo || "",
+                    meter_no: record.meterNo || "",
+                    consumer_name: record.consumerName || "",
+                    father_name: record.fatherName || "",
+                    mobile_no: record.mobileNo || "",
+                    tariff_code: record.tariffCode || "",
+                    load: record.load || "",
+                    staff_name: staffName,
+                    phase_current: phaseCurrent,
+                    remark: remark,
+                    photo1_base64: meterCheckingPhoto1.base64 || "",
+                    photo1_name: meterCheckingPhoto1.name || "",
+                    photo1_mime_type: "image/jpeg",
+                    photo2_base64: meterCheckingPhoto2.base64 || "",
+                    photo2_name: meterCheckingPhoto2.name || "",
+                    photo2_mime_type: "image/jpeg",
+                    photo3_base64: meterCheckingPhoto3.base64 || "",
+                    photo3_name: meterCheckingPhoto3.name || "",
+                    photo3_mime_type: "image/jpeg"
+                };
+                const response = await fetch(meterCheckingSubmitScriptUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify(payload)
+                });
+                const responseText = await response.text();
+                let parsed = {};
+                try { parsed = JSON.parse(responseText || "{}"); } catch (_) {}
+                if (!response.ok || (parsed.status && parsed.status !== "success")) {
+                    throw new Error(parsed.message || "Meter Checking submit nahi ho payi");
+                }
+                setActionButtonState(submitBtn, "done", "Submit");
+                showToast(parsed.message || "Meter Checking data submit ho gaya", true);
+                resetMeterCheckingSearch();
+            } catch (error) {
+                setActionButtonState(submitBtn, "idle", "Submit");
+                showToast(error?.message || "Submit nahi ho paya", false);
+            }
+        }
+
+        // ----- Meeter Cheking Report (Date/Month wise, Staff wise) -----
+
+        function getMeterCheckingReportSheetName(dcName = activeDC) {
+            return `Script Meter Checking ${normalizeDcName(dcName)}`;
+        }
+
+        function getMeterCheckingReportCsvUrl(dcName = activeDC) {
+            return `https://docs.google.com/spreadsheets/d/${meterCheckingReportSpreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(getMeterCheckingReportSheetName(dcName))}`;
+        }
+
+        function parseMeterCheckingReportCsv(csvText) {
+            const lines = (csvText || "").split(/\r?\n/).filter((line) => line.trim());
+            if (lines.length < 2) return [];
+            const headers = splitCsvLine(lines[0]).map((h) => normalizeLookupValue(h));
+            const idx = (aliases) => headers.findIndex((h) => aliases.includes(h));
+            const ivrsIdx = idx(["IVRSNO"]);
+            const meterIdx = idx(["METERNO"]);
+            const nameIdx = idx(["CONSUMERNAME"]);
+            const fatherIdx = idx(["FATHERNAME"]);
+            const mobileIdx = idx(["MOBILENO"]);
+            const tariffIdx = idx(["TARIFFCODE"]);
+            const loadIdx = idx(["LOAD"]);
+            const staffIdx = idx(["STAFFNAME"]);
+            const phaseIdx = idx(["PHASECURRENT"]);
+            const remarkIdx = idx(["REMARK"]);
+            const photo1Idx = idx(["PHOTO1"]);
+            const photo2Idx = idx(["PHOTO2"]);
+            const photo3Idx = idx(["PHOTO3"]);
+            const dateIdx = idx(["DATE"]);
+            const timeIdx = idx(["TIME"]);
+            return lines.slice(1).map((line) => {
+                const cols = splitCsvLine(line);
+                return {
+                    ivrsNo: String(cols[ivrsIdx] || "").trim(),
+                    meterNo: String(cols[meterIdx] || "").trim(),
+                    consumerName: String(cols[nameIdx] || "").trim(),
+                    fatherName: String(cols[fatherIdx] || "").trim(),
+                    mobileNo: String(cols[mobileIdx] || "").trim(),
+                    tariffCode: String(cols[tariffIdx] || "").trim(),
+                    load: String(cols[loadIdx] || "").trim(),
+                    staffName: String(cols[staffIdx] || "").trim(),
+                    phaseCurrent: String(cols[phaseIdx] || "").trim(),
+                    remark: String(cols[remarkIdx] || "").trim(),
+                    photo1: String(cols[photo1Idx] || "").trim(),
+                    photo2: String(cols[photo2Idx] || "").trim(),
+                    photo3: String(cols[photo3Idx] || "").trim(),
+                    date: String(cols[dateIdx] || "").trim(),
+                    time: String(cols[timeIdx] || "").trim()
+                };
+            }).filter((row) => row.ivrsNo || row.meterNo);
+        }
+
+        async function loadMeterCheckingReportRows(dcName = activeDC, forceRefresh = false) {
+            const dcKey = getMeterCheckingDcKey(dcName);
+            if (!forceRefresh && meterCheckingReportLoadedDcKey === dcKey) return meterCheckingReportRows;
+            try {
+                const rawCsv = await loadRemoteText(getMeterCheckingReportCsvUrl(dcName));
+                const rows = isLikelyCsvPayload(rawCsv) ? parseMeterCheckingReportCsv(rawCsv) : [];
+                meterCheckingReportRows = rows;
+                meterCheckingReportLoadedDcKey = dcKey;
+                return rows;
+            } catch (_) {
+                return meterCheckingReportRows;
+            }
+        }
+
+        // DD/MM/YYYY (jaisa backend likhta hai) -> YYYY-MM-DD, taaki date/month
+        // <input> values (jo ISO format me aate hain) se seedha compare ho sake.
+        function meterCheckingDateToIso(dateText) {
+            const parts = String(dateText || "").split("/");
+            if (parts.length !== 3) return "";
+            const [dd, mm, yyyy] = parts;
+            if (!dd || !mm || !yyyy) return "";
+            return `${yyyy}-${mm.padStart(2, "0")}-${dd.padStart(2, "0")}`;
+        }
+
+        function getMeterCheckingReportFilteredRows(rows) {
+            const staffFilter = document.getElementById("meter-checking-report-staff")?.value || "";
+            const periodValue = meterCheckingReportMode === "MONTHLY"
+                ? (document.getElementById("meter-checking-report-month")?.value || getTodayIsoDate().slice(0, 7))
+                : (document.getElementById("meter-checking-report-date")?.value || getTodayIsoDate());
+            return (rows || []).filter((row) => {
+                const iso = meterCheckingDateToIso(row.date);
+                if (!iso) return false;
+                const periodMatch = meterCheckingReportMode === "MONTHLY" ? iso.slice(0, 7) === periodValue : iso === periodValue;
+                if (!periodMatch) return false;
+                if (staffFilter && normalizeLookupValue(row.staffName) !== normalizeLookupValue(staffFilter)) return false;
+                return true;
+            });
+        }
+
+        function initMeterCheckingReport() {
+            meterCheckingReportLoadedDcKey = "";
+            const dateInput = document.getElementById("meter-checking-report-date");
+            const monthInput = document.getElementById("meter-checking-report-month");
+            if (dateInput && !dateInput.value) dateInput.value = getTodayIsoDate();
+            if (monthInput && !monthInput.value) monthInput.value = getTodayIsoDate().slice(0, 7);
+            loadMeterCheckingStaffNames(activeDC).then((names) => populateMeterCheckingStaffOptions(names)).finally(() => {
+                setMeterCheckingReportMode(meterCheckingReportMode || "DAILY");
+            });
+        }
+
+        function setMeterCheckingReportMode(mode) {
+            meterCheckingReportMode = mode === "MONTHLY" ? "MONTHLY" : "DAILY";
+            const dateInput = document.getElementById("meter-checking-report-date");
+            const monthInput = document.getElementById("meter-checking-report-month");
+            const dateBtn = document.getElementById("meter-checking-report-date-mode-btn");
+            const monthBtn = document.getElementById("meter-checking-report-month-mode-btn");
+            if (dateInput) dateInput.style.display = meterCheckingReportMode === "DAILY" ? "block" : "none";
+            if (monthInput) monthInput.style.display = meterCheckingReportMode === "MONTHLY" ? "block" : "none";
+            if (dateBtn) { dateBtn.style.background = meterCheckingReportMode === "DAILY" ? "#ca8a04" : "#fef9c3"; dateBtn.style.color = meterCheckingReportMode === "DAILY" ? "#ffffff" : "#854d0e"; }
+            if (monthBtn) { monthBtn.style.background = meterCheckingReportMode === "MONTHLY" ? "#ca8a04" : "#fef9c3"; monthBtn.style.color = meterCheckingReportMode === "MONTHLY" ? "#ffffff" : "#854d0e"; }
+            renderMeterCheckingReport();
+        }
+
+        async function renderMeterCheckingReport() {
+            const tableBox = document.getElementById("meter-checking-report-table");
+            if (!tableBox) return;
+            const rows = await loadMeterCheckingReportRows(activeDC);
+            const filtered = getMeterCheckingReportFilteredRows(rows);
+            const staffFilter = document.getElementById("meter-checking-report-staff")?.value || "";
+
+            if (meterCheckingReportMode === "MONTHLY") {
+                // Month-wise: date ke hisaab se group karke sirf count dikhate hain
+                // (staff filter select hone par "kis date pe kitne check kiye" wahi
+                // ask hai) - poora consumer-level data download me milega.
+                const byDate = {};
+                filtered.forEach((row) => {
+                    const key = row.date || "-";
+                    byDate[key] = (byDate[key] || 0) + 1;
+                });
+                const dateKeys = Object.keys(byDate).sort((a, b) => meterCheckingDateToIso(a).localeCompare(meterCheckingDateToIso(b)));
+                let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.4fr 1fr;"><div>DATE</div><div>CHECKED COUNT</div></div>`;
+                if (!dateKeys.length) {
+                    html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is month me koi data nahi mila.</div></div>`;
+                } else {
+                    dateKeys.forEach((key) => {
+                        html += `<div class="summary-table-row" style="grid-template-columns: 1.4fr 1fr;"><div>${escapeHtml(key)}</div><div class="font-black">${byDate[key]}</div></div>`;
+                    });
+                }
+                html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL CHECKED${staffFilter ? ` - ${escapeHtml(staffFilter)}` : ""}</div><div class="mt-2 text-center text-[13px] font-black">${filtered.length}</div></div>`;
+                tableBox.innerHTML = html;
+            } else {
+                let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1fr 1fr 0.8fr;"><div>CONSUMER</div><div>STAFF</div><div>TIME</div></div>`;
+                if (!filtered.length) {
+                    html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is date me koi data nahi mila.</div></div>`;
+                } else {
+                    filtered.forEach((row) => {
+                        html += `<div class="summary-table-row" style="grid-template-columns: 1fr 1fr 0.8fr;"><div>${escapeHtml(row.consumerName || "-")}<br><span style="font-size:0.56rem; color:#64748b;">IVRS: ${escapeHtml(row.ivrsNo)} / Meter: ${escapeHtml(row.meterNo)}</span></div><div class="font-black">${escapeHtml(row.staffName || "-")}</div><div>${escapeHtml(row.time || "-")}</div></div>`;
+                    });
+                }
+                html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL CHECKED${staffFilter ? ` - ${escapeHtml(staffFilter)}` : ""}</div><div class="mt-2 text-center text-[13px] font-black">${filtered.length}</div></div>`;
+                tableBox.innerHTML = html;
+            }
+        }
+
+        function setMeterCheckingReportDownloadState(isDownloading, message = "") {
+            const status = document.getElementById("meter-checking-report-download-status");
+            const buttons = document.querySelectorAll("#meter-checking-report-view .btn-export-row, #meter-checking-report-pdf-btn, #meter-checking-report-excel-btn");
+            buttons.forEach((button) => {
+                if (!button || button.tagName !== "BUTTON") return;
+                button.disabled = isDownloading;
+                button.style.opacity = isDownloading ? "0.65" : "1";
+                button.style.pointerEvents = isDownloading ? "none" : "auto";
+            });
+            if (status) {
+                status.style.display = message ? "block" : "none";
+                status.textContent = message;
+            }
+        }
+
+        async function downloadMeterCheckingReport(fmt) {
+            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
+            setMeterCheckingReportDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
+            try {
+                const rows = await loadMeterCheckingReportRows(activeDC, true);
+                const filtered = getMeterCheckingReportFilteredRows(rows);
+                if (!filtered.length) { setMeterCheckingReportDownloadState(false, "Download ke liye data nahi hai"); return; }
+                const staffFilter = document.getElementById("meter-checking-report-staff")?.value || "";
+                const headers = ["DATE", "TIME", "IVRS NO", "METER NO", "CONSUMER NAME", "FATHER NAME", "MOBILE NO", "TARIFF CODE", "LOAD", "STAFF NAME", "PHASE CURRENT", "REMARK"];
+                const bodyRows = filtered.map((row) => [
+                    row.date, row.time, row.ivrsNo, row.meterNo, row.consumerName, row.fatherName, row.mobileNo, row.tariffCode, row.load, row.staffName, row.phaseCurrent, row.remark
+                ]);
+                const periodLabel = meterCheckingReportMode === "MONTHLY"
+                    ? (document.getElementById("meter-checking-report-month")?.value || getTodayIsoDate().slice(0, 7))
+                    : (document.getElementById("meter-checking-report-date")?.value || getTodayIsoDate());
+                const reportTitle = `Meeter Cheking Report - DC ${activeDC}${staffFilter ? ` - ${staffFilter}` : ""}`;
+                const fileName = `${reportTitle}-${periodLabel}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (fmt === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setMeterCheckingReportDownloadState(false, "PDF library load nahi hui"); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Period: ${periodLabel}`, 148, 19, { align: "center" });
+                    doc.autoTable({ startY: 25, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [161, 98, 7] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                } else {
+                    const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                    const csv = [[reportTitle], [`Period: ${periodLabel}`], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                    link.download = `${fileName}.csv`;
+                    link.click();
+                }
+                setTimeout(() => setMeterCheckingReportDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
+            } catch (error) {
+                setMeterCheckingReportDownloadState(false, "Download nahi ho paya");
+                showToast(error?.message || "Meeter Cheking report download nahi ho payi", false);
+            }
+        }
+
+        function openMeterCheckingReport() {
+            closeHeaderMenu();
+            switchView("meter-checking-report");
+        }
+        // ===== End Meeter Cheking =====
+
         function switchView(id) {
             if (!suppressHistoryPush) {
                 try { history.pushState({ appView: id }, "", ""); } catch (_) {}
@@ -17830,6 +18648,13 @@
                 }
                 if (id === "dc-dashboard") {
                     checkRevenueUploadFreshness();
+                    updateMeterCheckingButtonVisibility();
+                }
+                if (id === "meter-checking") {
+                    initMeterChecking();
+                }
+                if (id === "meter-checking-report") {
+                    initMeterCheckingReport();
                 }
                 if (id === "bill-calculator") {
                     resetBillCalculator();
@@ -17867,6 +18692,8 @@
                 if (id === "revenue-pending-list") headerTitle = "PENDING DO LIST";
                 if (id === "revenue-paid-upload") headerTitle = "ADMIN UPLOAD CASH LIST";
                 if (id === "revenue-message-login") headerTitle = "SEND MESSAGE";
+                if (id === "meter-checking") headerTitle = "MEETER CHEKING";
+                if (id === "meter-checking-report") headerTitle = "MEETER CHEKING REPORT";
                 if (id === "material-list") headerTitle = "MATERIAL LIST";
                 if (id === "material-receive") headerTitle = "MATERIAL RECEIVE";
                 if (id === "material-issue") headerTitle = "MATERIAL ISSUE";
@@ -17885,11 +18712,13 @@
                 const mobileUpdateMenuVisible = (id === "mobile-update");
                 const vrMenuVisible = (id === "vr-calculation");
                 const dcDashboardMenuVisible = (id === "dc-dashboard");
-                if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || mobileUpdateMenuVisible || vrMenuVisible || dcDashboardMenuVisible || id === "subdn-chhapara") ? "block" : "none";
+                const meterCheckingMenuVisible = (id === "meter-checking");
+                if (headerMenuWrap) headerMenuWrap.style.display = (revenueMenuVisible || mobileUpdateMenuVisible || vrMenuVisible || dcDashboardMenuVisible || meterCheckingMenuVisible || id === "subdn-chhapara") ? "block" : "none";
                 document.querySelectorAll(".revenue-header-menu-item").forEach((item) => item.style.display = revenueMenuVisible ? "block" : "none");
                 document.querySelectorAll(".mobile-update-header-menu-item").forEach((item) => item.style.display = mobileUpdateMenuVisible ? "block" : "none");
                 document.querySelectorAll(".vr-header-menu-item").forEach((item) => item.style.display = vrMenuVisible ? "block" : "none");
                 document.querySelectorAll(".dc-dashboard-header-menu-item").forEach((item) => item.style.display = dcDashboardMenuVisible ? "block" : "none");
+                document.querySelectorAll(".meter-checking-header-menu-item").forEach((item) => item.style.display = meterCheckingMenuVisible ? "block" : "none");
                 const staffAdminMenuItem = document.getElementById("staff-admin-header-menu-item");
                 if (staffAdminMenuItem) staffAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 const excelToolAdminMenuItem = document.getElementById("excel-tool-admin-header-menu-item");
