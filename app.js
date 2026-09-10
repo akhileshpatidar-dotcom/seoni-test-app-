@@ -18195,7 +18195,29 @@
             }
         }
 
+        // Staff list fetch ho rahe waqt input box me chhota spinner + "load ho rahi
+        // hai" wala placeholder dikhane ke liye (2026-09-10 addition) - taaki user ko
+        // pata chale ki list abhi load ho rahi hai, khaali box na lage.
+        function setMeterCheckingStaffLoadingState(isLoading) {
+            const input = document.getElementById("meter-checking-staff-input");
+            const chevron = document.getElementById("meter-checking-staff-chevron");
+            const spinner = document.getElementById("meter-checking-staff-spinner");
+            if (input) {
+                if (isLoading) {
+                    if (input.dataset.origPlaceholder === undefined) input.dataset.origPlaceholder = input.placeholder;
+                    input.placeholder = "Staff list load ho rahi hai...";
+                    input.disabled = true;
+                } else {
+                    if (input.dataset.origPlaceholder !== undefined) input.placeholder = input.dataset.origPlaceholder;
+                    input.disabled = false;
+                }
+            }
+            if (chevron) chevron.style.display = isLoading ? "none" : "";
+            if (spinner) spinner.style.display = isLoading ? "block" : "none";
+        }
+
         function populateMeterCheckingStaffOptions(names) {
+            setMeterCheckingStaffLoadingState(false);
             if (Array.isArray(names) && names.length) meterCheckingStaffNames = names;
             renderMeterCheckingStaffDropdownList(meterCheckingStaffNames);
             const reportSelect = document.getElementById("meter-checking-report-staff");
@@ -18275,7 +18297,12 @@
         function initMeterChecking() {
             resetMeterCheckingSearch();
             loadMeterCheckingConsumerData(activeDC).catch(() => {});
-            loadMeterCheckingStaffNames(activeDC).then((names) => populateMeterCheckingStaffOptions(names)).catch(() => {});
+            if (!meterCheckingStaffNames.length || meterCheckingStaffLoadedDcKey !== getMeterCheckingDcKey(activeDC)) {
+                setMeterCheckingStaffLoadingState(true);
+            }
+            loadMeterCheckingStaffNames(activeDC)
+                .then((names) => populateMeterCheckingStaffOptions(names))
+                .catch(() => setMeterCheckingStaffLoadingState(false));
         }
 
         function renderMeterCheckingConsumer(record) {
