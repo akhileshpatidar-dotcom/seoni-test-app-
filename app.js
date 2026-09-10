@@ -18151,11 +18151,38 @@
             if (!forceRefresh && meterCheckingStaffLoadedDcKey === dcKey && meterCheckingStaffNames.length) return meterCheckingStaffNames;
             const cfg = meterCheckingConfig[dcKey];
             if (!cfg || !cfg.staffCsvUrl) return [];
+            const staffCacheKey = `seoni-meter-checking-staff-csv-v1-${dcKey}`;
+
+            if (!forceRefresh) {
+                try {
+                    const cachedText = localStorage.getItem(staffCacheKey) || "";
+                    if (isLikelyCsvPayload(cachedText)) {
+                        const cachedNames = parseMeterCheckingStaffCsv(cachedText);
+                        if (cachedNames.length) {
+                            meterCheckingStaffNames = cachedNames;
+                            meterCheckingStaffLoadedDcKey = dcKey;
+                            loadRemoteText(cfg.staffCsvUrl).then((fresh) => {
+                                if (isLikelyCsvPayload(fresh)) {
+                                    const freshNames = parseMeterCheckingStaffCsv(fresh);
+                                    if (freshNames.length) {
+                                        meterCheckingStaffNames = freshNames;
+                                        try { localStorage.setItem(staffCacheKey, fresh); } catch (_) {}
+                                        populateMeterCheckingStaffOptions(freshNames);
+                                    }
+                                }
+                            }).catch(() => {});
+                            return cachedNames;
+                        }
+                    }
+                } catch (_) {}
+            }
+
             try {
                 const rawCsv = await loadRemoteText(cfg.staffCsvUrl);
                 const names = isLikelyCsvPayload(rawCsv) ? parseMeterCheckingStaffCsv(rawCsv) : [];
                 if (names.length) {
                     meterCheckingStaffNames = names;
+                    try { localStorage.setItem(staffCacheKey, rawCsv); } catch (_) {}
                     meterCheckingStaffLoadedDcKey = dcKey;
                 }
                 return meterCheckingStaffNames;
@@ -18694,6 +18721,10 @@
                 if (id === "dc-dashboard") {
                     checkRevenueUploadFreshness();
                     updateMeterCheckingButtonVisibility();
+                    if (isMeterCheckingAvailableForDc(activeDC)) {
+                        loadMeterCheckingConsumerData(activeDC).catch(() => {});
+                        loadMeterCheckingStaffNames(activeDC).catch(() => {});
+                    }
                 }
                 if (id === "meter-checking") {
                     initMeterChecking();
