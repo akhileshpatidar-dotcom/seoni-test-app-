@@ -109,7 +109,8 @@
                     <button id="panchnama-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openPanchnamaToolAdminUpload()" style="display:none; background:#fff7ed; color:#9a3412; border:1.5px solid #fdba74;">🔒 ADMIN PANCHNAMA TEMPLATE</button>
                     <button id="arrange-excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openArrangeExcelToolAdminUpload()" style="display:none; background:#f0fdf4; color:#14532d; border:1.5px solid #86efac;">🔒 ADMIN ARRANGE EXCEL FILE</button>
                     <button id="image-to-excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openImageToExcelToolAdminUpload()" style="display:none; background:#fff1f2; color:#9f1239; border:1.5px solid #fda4af;">🔒 ADMIN IMAGE TO EXCEL CONVERTER</button>
-                    <button type="button" class="header-menu-item meter-checking-header-menu-item" onclick="openMeterCheckingReport()" style="display:none; background:#fefce8; color:#854d0e; border:1.5px solid #fde047;">📄 Download Report</button>
+                    <button type="button" class="header-menu-item meter-checking-header-menu-item live-progress-menu-item" onclick="openMeterCheckingLiveProgress()" style="display:none;">⏱️ Live Progress</button>
+                    <button type="button" class="header-menu-item meter-checking-header-menu-item" onclick="openMeterCheckingReport()" style="display:none; background:#ef4444; color:#ffffff; border:1.5px solid #ef4444;">📄 Download Report</button>
                     <button type="button" class="header-menu-item vr-header-menu-item" onclick="openVrSavedMapsMenu()" style="display:none;">🗺️ Saved Feeder Maps</button>
                     <button id="vr-menu-toggle-ref-btn" type="button" class="header-menu-item vr-header-menu-item" onclick="openVrReferenceInfoMenu()" style="display:none;">Show Limits &amp; CC Reference Table</button>
                 </div>
@@ -1222,7 +1223,7 @@
                     <div style="font-size:0.82rem; font-weight:950; color:#854d0e; text-transform:uppercase;">Meeter Cheking</div>
                     <div style="font-size:0.66rem; font-weight:850; color:#a16207; margin-top:3px;">IVRS No ya Meter No se consumer search karein</div>
                 </div>
-                <input type="text" id="meter-checking-search-ivrs" class="ivrs-input" placeholder="IVRS No" style="max-width:320px; margin:0 auto 8px; display:block; text-align:center;" oninput="this.value=this.value.replace(/[^0-9]/g,'')">
+                <input type="tel" id="meter-checking-search-ivrs" class="ivrs-input" inputmode="numeric" maxlength="10" placeholder="IVRS No" style="max-width:320px; margin:0 auto 8px; display:block; text-align:center;" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
                 <input type="text" id="meter-checking-search-meter" class="ivrs-input" placeholder="Meter No" style="max-width:320px; margin:0 auto 10px; display:block; text-align:center;">
                 <button id="meter-checking-search-btn" onclick="searchMeterChecking()" class="search-btn-custom" style="background:linear-gradient(135deg, #fde047 0%, #ca8a04 100%); color:#422006; display:inline-flex; align-items:center; justify-content:center; text-align:center;">Search</button>
                 <button id="meter-checking-search-more-btn" onclick="resetMeterCheckingSearch()" style="display:none; width:145px; height:34px; margin:-8px auto 0; border:none; border-radius:999px; background:#ef4444; color:#ffffff; font-size:0.68rem; font-weight:950; text-transform:uppercase; box-shadow:0 7px 14px rgba(239,68,68,0.22);">Search More</button>
@@ -1292,6 +1293,22 @@
                 </div>
                 <div id="meter-checking-report-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#fefce8; border:1.2px solid #fde047; color:#854d0e; font-size:0.66rem; font-weight:950; text-align:center;"></div>
                 <div id="meter-checking-report-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
+            </div>
+        </main>
+
+        <main id="meter-checking-live-progress-view" class="view">
+            <div class="search-panel" style="padding-top:18px;">
+                <div style="width:100%; max-width:360px; background:#fefce8; border:1.5px solid #fde047; border-radius:18px; padding:14px; text-align:center;">
+                    <div style="font-size:0.85rem; font-weight:950; color:#0f172a; text-transform:uppercase; margin-bottom:4px;">DC: <span id="meter-checking-live-dc-label"></span></div>
+                    <div style="font-size:0.95rem; font-weight:950; color:#ca8a04; text-transform:uppercase;">Meeter Cheking Live Progress</div>
+                    <div style="font-size:0.72rem; font-weight:850; color:#475569; margin-top:4px;">Aaj (Live) - Staff-wise Checked Connection</div>
+                </div>
+                <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:14px auto 0;">
+                    <button id="meter-checking-live-pdf-btn" onclick="downloadMeterCheckingLiveProgress('PDF')" style="flex:1; height:44px; border:none; border-radius:14px; background:#ef4444; color:#ffffff; font-size:0.78rem; font-weight:950;">PDF</button>
+                    <button id="meter-checking-live-excel-btn" onclick="downloadMeterCheckingLiveProgress('EXCEL')" style="flex:1; height:44px; border:none; border-radius:14px; background:#16a34a; color:#ffffff; font-size:0.78rem; font-weight:950;">EXCEL</button>
+                </div>
+                <div id="meter-checking-live-download-status" style="display:none; width:100%; max-width:360px; margin:10px auto 0; border:1.5px solid #86efac; border-radius:14px; padding:10px; background:#ecfdf5; color:#166534; font-size:0.76rem; font-weight:900; text-align:center;"></div>
+                <div id="meter-checking-live-table" style="width:100%; max-width:360px; margin:14px auto 0;"></div>
             </div>
         </main>
 

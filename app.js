@@ -2746,10 +2746,23 @@
         // data deta hai, jisse bade DC (SEONI (T) jaisे) ke liye bhi response chhota
         // aur fast rehta hai. Backend abhi purana ho to purane bhaari endpoint par
         // fallback ho jaata hai, koi feature todta nahi.
-        async function fetchUploadedPaidCategoryListWithRetry_(dcName, attempts = 2) {
+        async function fetchUploadedPaidCategoryListWithRetry_(dcName, attempts = 3) {
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 60000);
+                // BUG FIX (2026-09-10): pehle yeh timeout 60000ms tha aur
+                // warmRevenueCategoryUploadedPaidCache() ek hi jhatke me DIVISION ke
+                // saare (~20+) DC ka fetch Promise.all se ek saath chala deta tha.
+                // Apps Script (Anyone-access deployment) par itne saare simultaneous
+                // request bhejne se execution quota par contention hoti hai - bade
+                // PAID MASTER sheet wale DC (jaise CHHAPARA-1, DHUMA, GHANSORE,
+                // LAKHNADON - jinke sheet me hazaaron rows hain) ka doGet queue me
+                // fasa reh jaata tha aur 60 second ke andar poora nahi ho paata tha,
+                // jabki chhote DC turant reply de dete the. Isi wajah se dusre
+                // computer se (jahan local upload-time cache nahi hoti) in bade DC
+                // ka Paid Count hamesha 0%/blank dikhta tha - data backend me sahi
+                // tha, sirf fetch consistently timeout ho raha tha. Ab timeout badha
+                // diya (90s) aur neeche concurrency bhi limit kar di hai.
+                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 90000);
                 try {
                     const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidCategoryList&dc_name=${encodeURIComponent(dcName)}&t=${Date.now()}`, controller ? { signal: controller.signal } : {});
                     const parsed = await response.json();
@@ -2760,6 +2773,24 @@
                 if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 800));
             }
             return fetchUploadedPaidEntriesWithRetry_(dcName, attempts);
+        }
+
+        // Ek saath sabhi DC ka fetch chalane (Promise.all) ki jagah, ek chhoti si
+        // concurrency-limited "pool" - ek time par sirf `limit` (5) DC ka request
+        // Apps Script ko jaata hai, baki queue me wait karte hain. Isse Apps Script
+        // par load kam hota hai aur bade DC (CHHAPARA-1, DHUMA, GHANSORE, LAKHNADON
+        // jaise) ko apna turn milte hi poora time milta hai jawab dene ke liye,
+        // instead of 20+ requests ke saath compete karne ke.
+        async function runWithConcurrencyLimit_(items, limit, worker) {
+            let cursor = 0;
+            async function runNext() {
+                while (cursor < items.length) {
+                    const index = cursor++;
+                    await worker(items[index], index);
+                }
+            }
+            const poolSize = Math.max(1, Math.min(limit, items.length));
+            await Promise.all(Array.from({ length: poolSize }, () => runNext()));
         }
 
         // Pehle ye function har baar call hone par (panel khulte waqt + phir dropdown me
@@ -2780,7 +2811,7 @@
                 ? allDcNames
                 : allDcNames.filter((dcName) => now - (revenueCategoryCacheWarmedAt[dcName] || 0) > REVENUE_CATEGORY_CACHE_TTL_MS);
             if (!dcNames.length) return;
-            await Promise.all(dcNames.map(async (dcName) => {
+            await runWithConcurrencyLimit_(dcNames, 5, async (dcName) => {
                 const parsed = await fetchUploadedPaidCategoryListWithRetry_(dcName);
                 if (!parsed) return;
                 const rows = Array.isArray(parsed?.entries) ? parsed.entries : (Array.isArray(parsed?.data) ? parsed.data : []);
@@ -2810,7 +2841,7 @@
                 });
                 saveRevenueUploadedPaidEntriesLocalBulk(mergedRows, dcName, true);
                 revenueCategoryCacheWarmedAt[dcName] = Date.now();
-            }));
+            });
         }
 
         function buildRevenueCategoryUploadedPaidInfo(mode, filterValue) {
@@ -18146,27 +18177,39 @@
             return lines.slice(1).map((line) => (splitCsvLine(line)[0] || "").trim()).filter(Boolean);
         }
 
+        // isLikelyCsvPayload() ek comma hone ki demand karta hai (multi-column sheets ke
+        // liye theek hai), lekin "NAME OF STAFF" sheet me SIRF ek hi column hai - uske CSV
+        // export me kabhi comma aata hi nahi, isliye wo check hamesha fail ho jaata tha
+        // aur staff list kabhi load hi nahi hoti thi (yeh asli root-cause bug tha, cache
+        // ka issue nahi). Staff CSV ke liye yeh alag, comma na maangne wala, lenient check
+        // use karo.
+        function isLikelyStaffCsvPayload(rawText) {
+            const raw = String(rawText || "").trim();
+            if (!raw) return false;
+            if (/^\s*</.test(raw)) return false;
+            return raw.split(/\r?\n/).filter((line) => line.trim()).length >= 2;
+        }
+
         async function loadMeterCheckingStaffNames(dcName = activeDC, forceRefresh = false) {
             const dcKey = getMeterCheckingDcKey(dcName);
             if (!forceRefresh && meterCheckingStaffLoadedDcKey === dcKey && meterCheckingStaffNames.length) return meterCheckingStaffNames;
             const cfg = meterCheckingConfig[dcKey];
             if (!cfg || !cfg.staffCsvUrl) return [];
-            // v2 (2026-09-10): cache-key version bump - purani (test ke waqt sirf 24
-            // naam wali) cached list ko automatically invalid karne ke liye, taaki sabke
-            // browser me fresh (48 naam wali) list dobara load ho jaye, kisi ko manually
-            // kuch clear na karna pade.
-            const staffCacheKey = `seoni-meter-checking-staff-csv-v2-${dcKey}`;
+            // v3 (2026-09-10): cache-key version bump - purani (galat check ki wajah se
+            // khaali ho sakti hai) cached value ko automatically invalid karne ke liye,
+            // taaki sabke browser me fresh list dobara load ho jaye.
+            const staffCacheKey = `seoni-meter-checking-staff-csv-v3-${dcKey}`;
 
             if (!forceRefresh) {
                 try {
                     const cachedText = localStorage.getItem(staffCacheKey) || "";
-                    if (isLikelyCsvPayload(cachedText)) {
+                    if (isLikelyStaffCsvPayload(cachedText)) {
                         const cachedNames = parseMeterCheckingStaffCsv(cachedText);
                         if (cachedNames.length) {
                             meterCheckingStaffNames = cachedNames;
                             meterCheckingStaffLoadedDcKey = dcKey;
                             loadRemoteText(cfg.staffCsvUrl).then((fresh) => {
-                                if (isLikelyCsvPayload(fresh)) {
+                                if (isLikelyStaffCsvPayload(fresh)) {
                                     const freshNames = parseMeterCheckingStaffCsv(fresh);
                                     if (freshNames.length) {
                                         meterCheckingStaffNames = freshNames;
@@ -18183,7 +18226,7 @@
 
             try {
                 const rawCsv = await loadRemoteText(cfg.staffCsvUrl);
-                const names = isLikelyCsvPayload(rawCsv) ? parseMeterCheckingStaffCsv(rawCsv) : [];
+                const names = isLikelyStaffCsvPayload(rawCsv) ? parseMeterCheckingStaffCsv(rawCsv) : [];
                 if (names.length) {
                     meterCheckingStaffNames = names;
                     try { localStorage.setItem(staffCacheKey, rawCsv); } catch (_) {}
@@ -18473,7 +18516,12 @@
             const mobileIdx = idx(["MOBILENO"]);
             const tariffIdx = idx(["TARIFFCODE"]);
             const loadIdx = idx(["LOAD"]);
-            const staffIdx = idx(["STAFFNAME"]);
+            // Sheet ka actual header "NAME OF STAFF" nikla (na ki "STAFF NAME" jo
+            // .gs script naye tab par likhta hai) - kyunki yeh tab pehle se maujood
+            // tha aur apne purane header ke saath hi use ho raha hai. Dono spelling
+            // yahan accept karte hain taaki chahe header kuch bhi ho, staff column
+            // sahi se mil jaaye.
+            const staffIdx = idx(["STAFFNAME", "NAMEOFSTAFF"]);
             const phaseIdx = idx(["PHASECURRENT"]);
             const remarkIdx = idx(["REMARK"]);
             const photo1Idx = idx(["PHOTO1"]);
@@ -18594,12 +18642,22 @@
                 html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL CHECKED${staffFilter ? ` - ${escapeHtml(staffFilter)}` : ""}</div><div class="mt-2 text-center text-[13px] font-black">${filtered.length}</div></div>`;
                 tableBox.innerHTML = html;
             } else {
-                let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1fr 1fr 0.8fr;"><div>CONSUMER</div><div>STAFF</div><div>TIME</div></div>`;
-                if (!filtered.length) {
+                // Date-wise: screen par sirf Name of Staff + Checked Connection ki
+                // summary dikhate hain - poora consumer-level detail (Consumer/IVRS/
+                // Meter/Time waghera) sirf downloadMeterCheckingReport() ki file me
+                // milega, screen par nahi.
+                const byStaff = {};
+                filtered.forEach((row) => {
+                    const key = row.staffName || "Unknown";
+                    byStaff[key] = (byStaff[key] || 0) + 1;
+                });
+                const staffKeys = Object.keys(byStaff).sort((a, b) => byStaff[b] - byStaff[a]);
+                let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.6fr 1fr;"><div>NAME OF STAFF</div><div>CHECKED CONNECTION</div></div>`;
+                if (!staffKeys.length) {
                     html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is date me koi data nahi mila.</div></div>`;
                 } else {
-                    filtered.forEach((row) => {
-                        html += `<div class="summary-table-row" style="grid-template-columns: 1fr 1fr 0.8fr;"><div>${escapeHtml(row.consumerName || "-")}<br><span style="font-size:0.56rem; color:#64748b;">IVRS: ${escapeHtml(row.ivrsNo)} / Meter: ${escapeHtml(row.meterNo)}</span></div><div class="font-black">${escapeHtml(row.staffName || "-")}</div><div>${escapeHtml(row.time || "-")}</div></div>`;
+                    staffKeys.forEach((name) => {
+                        html += `<div class="summary-table-row" style="grid-template-columns: 1.6fr 1fr;"><div>${escapeHtml(name)}</div><div class="font-black">${byStaff[name]}</div></div>`;
                     });
                 }
                 html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL CHECKED${staffFilter ? ` - ${escapeHtml(staffFilter)}` : ""}</div><div class="mt-2 text-center text-[13px] font-black">${filtered.length}</div></div>`;
@@ -18666,6 +18724,113 @@
         function openMeterCheckingReport() {
             closeHeaderMenu();
             switchView("meter-checking-report");
+        }
+
+        // ===== Meeter Cheking - Live Progress (2026-09-10 addition) =====
+        // Revenue ke "Live Progress" jaisa hi - aaj (current day) me kis staff ne
+        // kitne meter check kiye, uska sirf naam+count wala live summary. Screen
+        // auto-refresh hoti rahti hai (view se bahar jaate hi refresh khud ruk
+        // jaata hai). Download me bhi sirf yahi 2-column summary jaati hai, poora
+        // consumer-level detail nahi (wo already "Download Report" me available hai).
+        let meterCheckingLiveProgressTimer = null;
+
+        function openMeterCheckingLiveProgress() {
+            closeHeaderMenu();
+            switchView("meter-checking-live-progress");
+        }
+
+        function getMeterCheckingTodaySummaryRows_(rows) {
+            const todayIso = getTodayIsoDate();
+            const todayRows = (rows || []).filter((row) => meterCheckingDateToIso(row.date) === todayIso);
+            const counts = {};
+            todayRows.forEach((row) => {
+                const name = row.staffName || "Unknown";
+                counts[name] = (counts[name] || 0) + 1;
+            });
+            const staffKeys = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+            return { todayRows, counts, staffKeys };
+        }
+
+        async function renderMeterCheckingLiveProgress() {
+            const tableBox = document.getElementById("meter-checking-live-table");
+            if (!tableBox) return;
+            const dcLabelBox = document.getElementById("meter-checking-live-dc-label");
+            if (dcLabelBox) dcLabelBox.innerText = activeDC || "-";
+            const rows = await loadMeterCheckingReportRows(activeDC, true);
+            const { todayRows, counts, staffKeys } = getMeterCheckingTodaySummaryRows_(rows);
+            let html = `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.6fr 1fr;"><div>NAME OF STAFF</div><div>CHECKED CONNECTION</div></div>`;
+            if (!staffKeys.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Aaj tak koi checking nahi hui hai.</div></div>`;
+            } else {
+                staffKeys.forEach((name) => {
+                    html += `<div class="summary-table-row" style="grid-template-columns: 1.6fr 1fr;"><div>${escapeHtml(name)}</div><div class="font-black">${counts[name]}</div></div>`;
+                });
+            }
+            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL CHECKED TODAY</div><div class="mt-2 text-center text-[13px] font-black">${todayRows.length}</div></div>`;
+            tableBox.innerHTML = html;
+        }
+
+        function startMeterCheckingLiveProgressAutoRefresh() {
+            if (meterCheckingLiveProgressTimer) clearInterval(meterCheckingLiveProgressTimer);
+            meterCheckingLiveProgressTimer = setInterval(() => {
+                const viewEl = document.getElementById("meter-checking-live-progress-view");
+                if (!viewEl || !viewEl.classList.contains("active")) {
+                    clearInterval(meterCheckingLiveProgressTimer);
+                    meterCheckingLiveProgressTimer = null;
+                    return;
+                }
+                renderMeterCheckingLiveProgress();
+            }, 30000);
+        }
+
+        function setMeterCheckingLiveDownloadState(isDownloading, message = "") {
+            const status = document.getElementById("meter-checking-live-download-status");
+            [document.getElementById("meter-checking-live-pdf-btn"), document.getElementById("meter-checking-live-excel-btn")].forEach((button) => {
+                if (!button) return;
+                button.disabled = isDownloading;
+                button.style.opacity = isDownloading ? "0.65" : "1";
+                button.style.pointerEvents = isDownloading ? "none" : "auto";
+            });
+            if (status) {
+                status.style.display = message ? "block" : "none";
+                status.textContent = message;
+            }
+        }
+
+        async function downloadMeterCheckingLiveProgress(fmt) {
+            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
+            setMeterCheckingLiveDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
+            try {
+                const rows = await loadMeterCheckingReportRows(activeDC, true);
+                const { todayRows, counts, staffKeys } = getMeterCheckingTodaySummaryRows_(rows);
+                if (!todayRows.length) { setMeterCheckingLiveDownloadState(false, "Aaj ke liye data nahi hai"); return; }
+                const headers = ["NAME OF STAFF", "CHECKED CONNECTION"];
+                const bodyRows = staffKeys.map((name) => [name, counts[name]]);
+                const todayLabel = getCurrentDateDDMMYYYY();
+                const reportTitle = `Meeter Cheking Live Progress - DC ${activeDC}`;
+                const fileName = `${reportTitle}-${todayLabel}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (fmt === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setMeterCheckingLiveDownloadState(false, "PDF library load nahi hui"); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF();
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 105, 14, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Date: ${todayLabel}`, 105, 21, { align: "center" });
+                    doc.autoTable({ startY: 27, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: [161, 98, 7] } });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                } else {
+                    const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                    const csv = [[reportTitle], [`Date: ${todayLabel}`], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                    link.download = `${fileName}.csv`;
+                    link.click();
+                }
+                setTimeout(() => setMeterCheckingLiveDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
+            } catch (error) {
+                setMeterCheckingLiveDownloadState(false, "Download nahi ho paya");
+                showToast(error?.message || "Live Progress download nahi ho payi", false);
+            }
         }
         // ===== End Meeter Cheking =====
 
@@ -18763,6 +18928,10 @@
                 if (id === "meter-checking-report") {
                     initMeterCheckingReport();
                 }
+                if (id === "meter-checking-live-progress") {
+                    renderMeterCheckingLiveProgress();
+                    startMeterCheckingLiveProgressAutoRefresh();
+                }
                 if (id === "bill-calculator") {
                     resetBillCalculator();
                 }
@@ -18801,6 +18970,7 @@
                 if (id === "revenue-message-login") headerTitle = "SEND MESSAGE";
                 if (id === "meter-checking") headerTitle = "MEETER CHEKING";
                 if (id === "meter-checking-report") headerTitle = "MEETER CHEKING REPORT";
+                if (id === "meter-checking-live-progress") headerTitle = "MEETER CHEKING LIVE PROGRESS";
                 if (id === "material-list") headerTitle = "MATERIAL LIST";
                 if (id === "material-receive") headerTitle = "MATERIAL RECEIVE";
                 if (id === "material-issue") headerTitle = "MATERIAL ISSUE";
@@ -18966,6 +19136,10 @@
                 switchView("revenue-collection");
             } else if (act === "vr-download-log-view") {
                 switchView("vr-calculation");
+            } else if (act === "meter-checking-view") {
+                switchView("dc-dashboard");
+            } else if (act === "meter-checking-report-view" || act === "meter-checking-live-progress-view") {
+                switchView("meter-checking");
             } else if (act === "mobile-update-report-view" || act === "mobile-update-wrong-list-view") {
                 switchView("mobile-update");
             } else if (act === "dc-dashboard-view" || act === "mobile-update-view" || act === "revenue-collection-view") {
