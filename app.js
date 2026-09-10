@@ -9399,6 +9399,14 @@
                     menu.classList.remove("show");
                 }
             });
+
+            const staffInput = document.getElementById("meter-checking-staff-input");
+            const staffDropdown = document.getElementById("meter-checking-staff-dropdown");
+            if (staffInput && staffDropdown) {
+                const clickedInsideInput = staffInput.contains(event.target);
+                const clickedInsideDropdown = staffDropdown.contains(event.target);
+                if (!clickedInsideInput && !clickedInsideDropdown) staffDropdown.style.display = "none";
+            }
         });
 
         function getStockBalance(item) {
@@ -18157,13 +18165,49 @@
         }
 
         function populateMeterCheckingStaffOptions(names) {
-            const datalist = document.getElementById("meter-checking-staff-datalist");
-            if (datalist) datalist.innerHTML = (names || []).map((n) => `<option value="${escapeHtml(n)}"></option>`).join("");
+            if (Array.isArray(names) && names.length) meterCheckingStaffNames = names;
+            renderMeterCheckingStaffDropdownList(meterCheckingStaffNames);
             const reportSelect = document.getElementById("meter-checking-report-staff");
             if (reportSelect) {
                 const current = reportSelect.value;
-                reportSelect.innerHTML = `<option value="">All Staff</option>` + (names || []).map((n) => `<option value="${escapeHtml(n)}" ${n === current ? "selected" : ""}>${escapeHtml(n)}</option>`).join("");
+                reportSelect.innerHTML = `<option value="">All Staff</option>` + meterCheckingStaffNames.map((n) => `<option value="${escapeHtml(n)}" ${n === current ? "selected" : ""}>${escapeHtml(n)}</option>`).join("");
             }
+        }
+
+        function renderMeterCheckingStaffDropdownList(names) {
+            const dropdown = document.getElementById("meter-checking-staff-dropdown");
+            if (!dropdown) return;
+            if (!names || !names.length) {
+                dropdown.innerHTML = `<div class="option-item" style="opacity:0.6; cursor:default;">Staff list load nahi hui / khaali hai</div>`;
+                return;
+            }
+            dropdown.innerHTML = names.map((n) => `<div class="option-item" data-staff-name="${escapeHtml(n)}" onclick="selectMeterCheckingStaff(this)">${escapeHtml(n)}</div>`).join("");
+        }
+
+        function filterMeterCheckingStaffDropdown() {
+            const input = document.getElementById("meter-checking-staff-input");
+            const query = normalizeLookupValue(input?.value || "");
+            const filtered = query ? meterCheckingStaffNames.filter((n) => normalizeLookupValue(n).includes(query)) : meterCheckingStaffNames;
+            renderMeterCheckingStaffDropdownList(filtered);
+            const dropdown = document.getElementById("meter-checking-staff-dropdown");
+            if (dropdown) dropdown.style.display = "block";
+        }
+
+        function showMeterCheckingStaffDropdown() {
+            filterMeterCheckingStaffDropdown();
+        }
+
+        function hideMeterCheckingStaffDropdown() {
+            const dropdown = document.getElementById("meter-checking-staff-dropdown");
+            if (dropdown) dropdown.style.display = "none";
+        }
+
+        function selectMeterCheckingStaff(el) {
+            const name = el?.dataset?.staffName;
+            if (!name) return;
+            const input = document.getElementById("meter-checking-staff-input");
+            if (input) input.value = name;
+            hideMeterCheckingStaffDropdown();
         }
 
         function resetMeterCheckingSearch() {
@@ -18193,6 +18237,7 @@
                 const input = document.getElementById(`meter-checking-photo${n}`);
                 if (input) input.value = "";
             });
+            hideMeterCheckingStaffDropdown();
             if (ivrsInput) ivrsInput.focus();
         }
 
