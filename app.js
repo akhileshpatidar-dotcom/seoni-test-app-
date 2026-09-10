@@ -2746,23 +2746,26 @@
         // data deta hai, jisse bade DC (SEONI (T) jaisे) ke liye bhi response chhota
         // aur fast rehta hai. Backend abhi purana ho to purane bhaari endpoint par
         // fallback ho jaata hai, koi feature todta nahi.
-        async function fetchUploadedPaidCategoryListWithRetry_(dcName, attempts = 3) {
+        async function fetchUploadedPaidCategoryListWithRetry_(dcName, attempts = 2) {
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-                // BUG FIX (2026-09-10): pehle yeh timeout 60000ms tha aur
-                // warmRevenueCategoryUploadedPaidCache() ek hi jhatke me DIVISION ke
-                // saare (~20+) DC ka fetch Promise.all se ek saath chala deta tha.
-                // Apps Script (Anyone-access deployment) par itne saare simultaneous
-                // request bhejne se execution quota par contention hoti hai - bade
-                // PAID MASTER sheet wale DC (jaise CHHAPARA-1, DHUMA, GHANSORE,
-                // LAKHNADON - jinke sheet me hazaaron rows hain) ka doGet queue me
-                // fasa reh jaata tha aur 60 second ke andar poora nahi ho paata tha,
-                // jabki chhote DC turant reply de dete the. Isi wajah se dusre
-                // computer se (jahan local upload-time cache nahi hoti) in bade DC
-                // ka Paid Count hamesha 0%/blank dikhta tha - data backend me sahi
-                // tha, sirf fetch consistently timeout ho raha tha. Ab timeout badha
-                // diya (90s) aur neeche concurrency bhi limit kar di hai.
-                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 90000);
+                // BUG FIX (2026-09-10): DIVISION-level Paid Count Summary kuchh DC
+                // (CHHAPARA-1, DHUMA, GHANSORE, LAKHNADON) ke liye 0%/blank dikhata
+                // tha - data backend me sahi tha, par warmRevenueCategoryUploadedPaid-
+                // Cache() DIVISION ke saare (~20+) DC ka fetch Promise.all se ek hi
+                // jhatke me chala deta tha, jisse Apps Script execution quota par
+                // contention hoti thi aur bade PAID MASTER sheet wale DC ka doGet
+                // queue me fasa reh jaata tha. ASLI FIX neeche runWithConcurrency-
+                // Limit_() hai (ek time par sirf 5 DC ka request jaata hai, baki
+                // queue me wait karte hain) - isse per-DC contention khatam ho
+                // jaati hai. (Yahan pehle timeout 60s->90s aur attempts 2->3 bhi
+                // badha diye the, par usse SINGLE DC (DC-level) report bhi ulta
+                // slow ho gayi thi - ek akela DC bhi ab network hiccup hone par
+                // 3x90s tak wait karta tha, pehle sirf 2x60s. Wapas 60s/2 attempts
+                // par rakha hai - single-DC case me contention hoti hi nahi,
+                // isliye 60s kaafi hai; DIVISION ka contention concurrency-limit
+                // se hi fix hota hai, timeout badhane se nahi.)
+                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 60000);
                 try {
                     const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidCategoryList&dc_name=${encodeURIComponent(dcName)}&t=${Date.now()}`, controller ? { signal: controller.signal } : {});
                     const parsed = await response.json();
