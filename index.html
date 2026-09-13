@@ -109,6 +109,7 @@
                     <button id="panchnama-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openPanchnamaToolAdminUpload()" style="display:none; background:#fff7ed; color:#9a3412; border:1.5px solid #fdba74;">🔒 ADMIN PANCHNAMA TEMPLATE</button>
                     <button id="arrange-excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openArrangeExcelToolAdminUpload()" style="display:none; background:#f0fdf4; color:#14532d; border:1.5px solid #86efac;">🔒 ADMIN ARRANGE EXCEL FILE</button>
                     <button id="image-to-excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openImageToExcelToolAdminUpload()" style="display:none; background:#fff1f2; color:#9f1239; border:1.5px solid #fda4af;">🔒 ADMIN IMAGE TO EXCEL CONVERTER</button>
+                    <button id="freeze-admin-header-menu-item" type="button" class="header-menu-item" onclick="openFreezeAdmin()" style="display:none; background:#ecfeff; color:#0e7490; border:1.5px solid #67e8f9;">🔒 ADMIN FREEZE CONTROL</button>
                     <button type="button" class="header-menu-item meter-checking-header-menu-item live-progress-menu-item" onclick="openMeterCheckingLiveProgress()" style="display:none;">⏱️ Live Progress</button>
                     <button type="button" class="header-menu-item meter-checking-header-menu-item" onclick="openMeterCheckingReport()" style="display:none; background:#ef4444; color:#ffffff; border:1.5px solid #ef4444;">📄 Download Report</button>
                     <button type="button" class="header-menu-item vr-header-menu-item" onclick="openVrSavedMapsMenu()" style="display:none;">🗺️ Saved Feeder Maps</button>
@@ -164,7 +165,7 @@
                 <button class="dashboard-btn btn-update-red" onclick="switchView('mobile-update')">Mobile No Update</button>
                 <button class="dashboard-btn btn-revenue-blue" onclick="switchView('revenue-collection')">Revenue Collection</button>
                 <div id="revenue-upload-freshness-ticker" class="ticker-wrap" style="display:none; margin-top:6px;"><span class="ticker-text" style="color:#ffffff;"></span></div>
-                <button id="meter-checking-dashboard-btn" class="dashboard-btn" style="display:none; background:#facc15; color:#713f12;" onclick="switchView('meter-checking')">Meeter Cheking</button>
+                <button id="meter-checking-dashboard-btn" class="dashboard-btn" style="display:none; background:#8b5a2b; color:#fdf6ec;" onclick="switchView('meter-checking')">Meeter Cheking</button>
                 <button class="dashboard-btn" style="background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%); color:#831843 !important;" onclick="switchView('bill-calculator')">Bijlee Bill Calculator</button>
           <button class="dashboard-btn btn-court-case" onclick="switchView('court-case')" style="display:none;">Lok Adalat Notice</button>
                 <button class="dashboard-btn btn-progress-black" onclick="askPassword('DC')">DC Daily Progress</button>
@@ -250,6 +251,19 @@
                 </label>
                 <div id="panchnama-tool-upload-filename" style="font-size:0.62rem; font-weight:800; color:#1d4ed8; text-align:center; margin-top:10px;"></div>
                 <div id="panchnama-tool-upload-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
+            </div>
+        </main>
+
+        <main id="freeze-admin-view" class="view">
+            <div class="search-panel" style="padding-top:18px;">
+                <div style="width:100%; max-width:360px; background:#ecfeff; border:1.5px solid #67e8f9; border-radius:18px; padding:16px; text-align:center; margin-bottom:16px;">
+                    <div style="font-size:0.85rem; font-weight:950; color:#0e7490;">REVENUE FREEZE CONTROL</div>
+                    <div style="font-size:0.62rem; font-weight:800; color:#0891b2; margin-top:6px; line-height:1.6;">"Freeze Now" dabane par abhi ki Non-Payee 3M/6M, Since Connection aur Top 20/50 Defaulters ki poori list (sabhi DC) hamesha ke liye snapshot ho jaayegi. Yeh list khud kabhi nahi badlegi - Revenue &gt; Daily Progress me "Revenue Freeze Report" isi se compare karke dikhayega ki ab tak kitno ne bhugtan kiya. Ek naya freeze chahiye ho to purana pehle "Unfreeze" karein.</div>
+                </div>
+                <button class="dashboard-btn" style="width:100%; max-width:360px; background:linear-gradient(135deg,#22d3ee 0%,#0891b2 100%); color:#ffffff !important;" onclick="runRevenueFreezeNow()">🧊 Freeze Now (All DC)</button>
+                <div id="freeze-admin-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
+                <div style="font-size:0.68rem; font-weight:900; color:#0e7490; text-align:center; margin-top:18px;">EXISTING FREEZES</div>
+                <div id="freeze-admin-list" style="width:100%; max-width:400px; margin:8px auto 0;"></div>
             </div>
         </main>
 
@@ -1219,48 +1233,57 @@
 
         <main id="meter-checking-view" class="view">
             <div class="search-panel" style="padding-top:18px;">
-                <div style="width:100%; max-width:320px; background:#fefce8; border:1.5px solid #fde047; border-radius:16px; padding:12px; text-align:center; margin:0 auto 12px;">
-                    <div style="font-size:0.82rem; font-weight:950; color:#854d0e; text-transform:uppercase;">Meeter Cheking</div>
-                    <div style="font-size:0.66rem; font-weight:850; color:#a16207; margin-top:3px;">IVRS No ya Meter No se consumer search karein</div>
+                <div style="width:100%; max-width:320px; background:#f5ede1; border:1.5px solid #a9744f; border-radius:16px; padding:12px; text-align:center; margin:0 auto 12px;">
+                    <div style="font-size:0.82rem; font-weight:950; color:#5c3a21; text-transform:uppercase;">Meeter Cheking</div>
+                    <div style="font-size:0.66rem; font-weight:850; color:#7a5233; margin-top:3px;">IVRS No ya Meter No se consumer search karein</div>
                 </div>
                 <input type="tel" id="meter-checking-search-ivrs" class="ivrs-input" inputmode="numeric" maxlength="10" placeholder="IVRS No" style="max-width:320px; margin:0 auto 8px; display:block; text-align:center;" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
                 <input type="text" id="meter-checking-search-meter" class="ivrs-input" placeholder="Meter No" style="max-width:320px; margin:0 auto 10px; display:block; text-align:center;">
-                <button id="meter-checking-search-btn" onclick="searchMeterChecking()" class="search-btn-custom" style="background:linear-gradient(135deg, #fde047 0%, #ca8a04 100%); color:#422006; display:inline-flex; align-items:center; justify-content:center; text-align:center;">Search</button>
+                <button id="meter-checking-search-btn" onclick="searchMeterChecking()" class="search-btn-custom" style="background:linear-gradient(135deg, #a9744f 0%, #6f4226 100%); color:#fdf6ec; display:inline-flex; align-items:center; justify-content:center; text-align:center;">Search</button>
                 <button id="meter-checking-search-more-btn" onclick="resetMeterCheckingSearch()" style="display:none; width:145px; height:34px; margin:-8px auto 0; border:none; border-radius:999px; background:#ef4444; color:#ffffff; font-size:0.68rem; font-weight:950; text-transform:uppercase; box-shadow:0 7px 14px rgba(239,68,68,0.22);">Search More</button>
                 <div id="meter-checking-result-box" style="display:none; width:100%; max-width:320px; margin:14px auto 0;"></div>
-                <div id="meter-checking-form-box" style="display:none; width:100%; max-width:320px; margin:12px auto 0; background:#ffffff; border:1.5px solid #fde047; border-radius:18px; padding:12px; box-shadow:0 10px 22px rgba(202,138,4,0.10);">
-                    <label style="display:block; text-align:center; color:#854d0e; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin-bottom:7px;">Checking Karne Wale Staff Ka Naam</label>
+                <div id="meter-checking-form-box" style="display:none; width:100%; max-width:320px; margin:12px auto 0; background:#ffffff; border:1.5px solid #a9744f; border-radius:18px; padding:12px; box-shadow:0 10px 22px rgba(111,66,38,0.12);">
+                    <label style="display:block; text-align:center; color:#dc2626; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin-bottom:7px;">Checking Karne Wale Staff Ka Naam</label>
                     <div style="position:relative;">
-                        <input type="text" id="meter-checking-staff-input" placeholder="Naam type karein ya dropdown se select karein" autocomplete="off" oninput="filterMeterCheckingStaffDropdown()" onfocus="showMeterCheckingStaffDropdown()" onclick="showMeterCheckingStaffDropdown()" style="width:100%; height:44px; border:1.5px solid #fde047; border-radius:12px; padding:0 34px 0 12px; font-size:0.8rem; font-weight:800; outline:none; box-sizing:border-box;">
-                        <svg id="meter-checking-staff-chevron" class="chevron-icon" onclick="showMeterCheckingStaffDropdown()" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); width:16px; height:16px; color:#ca8a04; pointer-events:none;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"></path></svg>
+                        <input type="text" id="meter-checking-staff-input" placeholder="Naam type karein ya dropdown se select karein" autocomplete="off" oninput="filterMeterCheckingStaffDropdown()" onfocus="showMeterCheckingStaffDropdown()" onclick="showMeterCheckingStaffDropdown()" style="width:100%; height:44px; border:1.5px solid #a9744f; border-radius:12px; padding:0 34px 0 12px; font-size:0.8rem; font-weight:800; outline:none; box-sizing:border-box;">
+                        <svg id="meter-checking-staff-chevron" class="chevron-icon" onclick="showMeterCheckingStaffDropdown()" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); width:16px; height:16px; color:#6f4226; pointer-events:none;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="3"></path></svg>
                         <div id="meter-checking-staff-spinner" style="display:none; position:absolute; right:10px; top:50%; transform:translateY(-50%); width:14px; height:14px; pointer-events:none;">
-                            <div class="app-refresh-spinning" style="width:100%; height:100%; border:2px solid #fde68a; border-top-color:#ca8a04; border-radius:50%;"></div>
+                            <div class="app-refresh-spinning" style="width:100%; height:100%; border:2px solid #d8bfa0; border-top-color:#6f4226; border-radius:50%;"></div>
                         </div>
-                        <div id="meter-checking-staff-dropdown" style="display:none; position:absolute; top:calc(100% + 4px); left:0; width:100%; max-height:230px; overflow-y:auto; background:#ffffff; border:2px solid #ca8a04; border-radius:14px; box-shadow:0 15px 30px rgba(0,0,0,0.15); z-index:50;"></div>
+                        <div id="meter-checking-staff-dropdown" style="display:none; position:absolute; top:calc(100% + 4px); left:0; width:100%; max-height:230px; overflow-y:auto; background:#ffffff; border:2px solid #6f4226; border-radius:14px; box-shadow:0 15px 30px rgba(0,0,0,0.15); z-index:50;"></div>
                     </div>
 
-                    <label style="display:block; text-align:center; color:#854d0e; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin:12px 0 7px;">Phase Current</label>
-                    <input type="number" step="any" inputmode="decimal" id="meter-checking-phase-current" placeholder="Phase Current (digit me, decimal bhi chalega)" style="width:100%; height:44px; border:1.5px solid #fde047; border-radius:12px; padding:0 12px; font-size:0.8rem; font-weight:800; outline:none; box-sizing:border-box; text-align:center;">
+                    <label style="display:block; text-align:center; color:#dc2626; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin:12px 0 7px;">Pole Number</label>
+                    <input type="text" id="meter-checking-pole-number" placeholder="Pole Number (alphanumeric)" oninput="this.value=this.value.replace(/[^a-zA-Z0-9]/g,'')" style="width:100%; height:44px; border:1.5px solid #a9744f; border-radius:12px; padding:0 12px; font-size:0.8rem; font-weight:800; outline:none; box-sizing:border-box; text-align:center; text-transform:uppercase;">
 
-                    <label style="display:block; text-align:center; color:#854d0e; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin:12px 0 7px;">Remark</label>
-                    <textarea id="meter-checking-remark" placeholder="Remark yahan likhiye" style="width:100%; min-height:80px; border:1.5px solid #fde047; border-radius:14px; padding:10px; font-size:0.82rem; font-weight:800; resize:vertical; outline:none; box-sizing:border-box;"></textarea>
+                    <label style="display:block; text-align:center; color:#dc2626; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin:12px 0 7px;">Phase/Neutral Current</label>
+                    <select id="meter-checking-current-type-dropdown" onchange="onMeterCheckingCurrentTypeChange(this.value)" style="width:100%; height:40px; margin-bottom:6px; border:1.5px solid #a9744f; border-radius:12px; padding:0 10px; font-size:0.76rem; font-weight:800; outline:none; box-sizing:border-box; background:#f7efe3; color:#5c3a21;">
+                        <option value="">-- Select Karein --</option>
+                        <option value="phase">Phase Current</option>
+                        <option value="neutral">Neutral Current</option>
+                    </select>
+                    <input type="text" inputmode="decimal" id="meter-checking-phase-current" placeholder="Phase Current (digit me, decimal bhi chalega)" oninput="this.value=this.value.replace(/[^0-9.]/g,'').replace(/(\..*)\./g,'$1')" style="width:100%; height:44px; margin-bottom:6px; border:1.5px solid #a9744f; border-radius:12px; padding:0 12px; font-size:0.8rem; font-weight:800; outline:none; box-sizing:border-box; text-align:center; display:none;">
+                    <input type="text" inputmode="decimal" id="meter-checking-neutral-current" placeholder="Neutral Current (digit me, decimal bhi chalega)" oninput="this.value=this.value.replace(/[^0-9.]/g,'').replace(/(\..*)\./g,'$1')" style="width:100%; height:44px; border:1.5px solid #a9744f; border-radius:12px; padding:0 12px; font-size:0.8rem; font-weight:800; outline:none; box-sizing:border-box; text-align:center; display:none;">
 
-                    <label style="display:block; text-align:center; color:#854d0e; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin:12px 0 7px;">Photo (Optional, Max 3)</label>
+                    <label style="display:block; text-align:center; color:#dc2626; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin:12px 0 7px;">Remark</label>
+                    <textarea id="meter-checking-remark" placeholder="Remark yahan likhiye" style="width:100%; min-height:80px; border:1.5px solid #a9744f; border-radius:14px; padding:10px; font-size:0.82rem; font-weight:800; resize:vertical; outline:none; box-sizing:border-box;"></textarea>
+
+                    <label style="display:block; text-align:center; color:#dc2626; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin:12px 0 7px;">Photo (Optional, Max 3)</label>
                     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:7px;">
                         <div style="text-align:center;">
                             <input type="file" accept="image/*" capture="environment" id="meter-checking-photo1" onchange="handleMeterCheckingPhoto(1, this)" style="display:none;">
-                            <button type="button" onclick="document.getElementById('meter-checking-photo1').click()" style="width:100%; height:40px; border:1.5px dashed #ca8a04; border-radius:10px; background:#fefce8; color:#854d0e; font-size:0.6rem; font-weight:900;">Photo 1</button>
-                            <div id="meter-checking-photo1-status" style="font-size:0.56rem; font-weight:850; color:#a16207; margin-top:3px;">Pending</div>
+                            <button type="button" onclick="document.getElementById('meter-checking-photo1').click()" style="width:100%; height:40px; border:1.5px dashed #6f4226; border-radius:10px; background:#f5ede1; color:#5c3a21; font-size:0.6rem; font-weight:900;">Photo 1</button>
+                            <div id="meter-checking-photo1-status" style="font-size:0.56rem; font-weight:850; color:#7a5233; margin-top:3px;">Pending</div>
                         </div>
                         <div style="text-align:center;">
                             <input type="file" accept="image/*" capture="environment" id="meter-checking-photo2" onchange="handleMeterCheckingPhoto(2, this)" style="display:none;">
-                            <button type="button" onclick="document.getElementById('meter-checking-photo2').click()" style="width:100%; height:40px; border:1.5px dashed #ca8a04; border-radius:10px; background:#fefce8; color:#854d0e; font-size:0.6rem; font-weight:900;">Photo 2</button>
-                            <div id="meter-checking-photo2-status" style="font-size:0.56rem; font-weight:850; color:#a16207; margin-top:3px;">Pending</div>
+                            <button type="button" onclick="document.getElementById('meter-checking-photo2').click()" style="width:100%; height:40px; border:1.5px dashed #6f4226; border-radius:10px; background:#f5ede1; color:#5c3a21; font-size:0.6rem; font-weight:900;">Photo 2</button>
+                            <div id="meter-checking-photo2-status" style="font-size:0.56rem; font-weight:850; color:#7a5233; margin-top:3px;">Pending</div>
                         </div>
                         <div style="text-align:center;">
                             <input type="file" accept="image/*" capture="environment" id="meter-checking-photo3" onchange="handleMeterCheckingPhoto(3, this)" style="display:none;">
-                            <button type="button" onclick="document.getElementById('meter-checking-photo3').click()" style="width:100%; height:40px; border:1.5px dashed #ca8a04; border-radius:10px; background:#fefce8; color:#854d0e; font-size:0.6rem; font-weight:900;">Photo 3</button>
-                            <div id="meter-checking-photo3-status" style="font-size:0.56rem; font-weight:850; color:#a16207; margin-top:3px;">Pending</div>
+                            <button type="button" onclick="document.getElementById('meter-checking-photo3').click()" style="width:100%; height:40px; border:1.5px dashed #6f4226; border-radius:10px; background:#f5ede1; color:#5c3a21; font-size:0.6rem; font-weight:900;">Photo 3</button>
+                            <div id="meter-checking-photo3-status" style="font-size:0.56rem; font-weight:850; color:#7a5233; margin-top:3px;">Pending</div>
                         </div>
                     </div>
 
@@ -1272,35 +1295,35 @@
 
         <main id="meter-checking-report-view" class="view">
             <div class="search-panel" style="padding-top:10px;">
-                <div style="width:100%; max-width:360px; background:#fefce8; border:1.2px solid #fde047; border-radius:14px; padding:9px 12px; text-align:center;">
-                    <div style="font-size:0.78rem; font-weight:950; color:#854d0e; text-transform:uppercase;">Meeter Cheking Report</div>
-                    <div style="font-size:0.58rem; font-weight:850; color:#a16207; margin-top:2px;">Date/Month wise, staff wise check kiye gaye meter ka data</div>
+                <div style="width:100%; max-width:360px; background:#f5ede1; border:1.2px solid #a9744f; border-radius:14px; padding:9px 12px; text-align:center;">
+                    <div style="font-size:0.78rem; font-weight:950; color:#5c3a21; text-transform:uppercase;">Meeter Cheking Report</div>
+                    <div style="font-size:0.58rem; font-weight:850; color:#7a5233; margin-top:2px;">Date/Month wise, staff wise check kiye gaye meter ka data</div>
                 </div>
                 <div style="display:flex; gap:8px; width:100%; max-width:360px; margin:9px auto 0;">
-                    <button id="meter-checking-report-date-mode-btn" onclick="setMeterCheckingReportMode('DAILY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#ca8a04; color:#ffffff; font-size:0.62rem; font-weight:950;">DATE WISE</button>
-                    <button id="meter-checking-report-month-mode-btn" onclick="setMeterCheckingReportMode('MONTHLY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#fef9c3; color:#854d0e; font-size:0.62rem; font-weight:950;">MONTH WISE</button>
+                    <button id="meter-checking-report-date-mode-btn" onclick="setMeterCheckingReportMode('DAILY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#6f4226; color:#ffffff; font-size:0.62rem; font-weight:950;">DATE WISE</button>
+                    <button id="meter-checking-report-month-mode-btn" onclick="setMeterCheckingReportMode('MONTHLY')" style="flex:1; height:32px; border:none; border-radius:999px; background:#ecdfc9; color:#5c3a21; font-size:0.62rem; font-weight:950;">MONTH WISE</button>
                 </div>
                 <div style="width:100%; max-width:360px; overflow:hidden; border-radius:12px; margin:8px auto 0;">
-                    <input id="meter-checking-report-date" type="date" onchange="renderMeterCheckingReport()" style="width:100%; box-sizing:border-box; height:38px; display:block; border:1.2px solid #fde047; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
-                    <input id="meter-checking-report-month" type="month" onchange="renderMeterCheckingReport()" style="width:100%; box-sizing:border-box; height:38px; display:none; border:1.2px solid #fde047; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                    <input id="meter-checking-report-date" type="date" onchange="renderMeterCheckingReport()" style="width:100%; box-sizing:border-box; height:38px; display:block; border:1.2px solid #a9744f; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
+                    <input id="meter-checking-report-month" type="month" onchange="renderMeterCheckingReport()" style="width:100%; box-sizing:border-box; height:38px; display:none; border:1.2px solid #a9744f; border-radius:12px; text-align:center; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a;">
                 </div>
-                <select id="meter-checking-report-staff" onchange="renderMeterCheckingReport()" style="width:100%; max-width:360px; height:38px; margin:8px auto 0; display:block; border:1.2px solid #fde047; border-radius:12px; padding:0 12px; font-size:0.7rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                <select id="meter-checking-report-staff" onchange="renderMeterCheckingReport()" style="width:100%; max-width:360px; height:38px; margin:8px auto 0; display:block; border:1.2px solid #a9744f; border-radius:12px; padding:0 12px; font-size:0.7rem; font-weight:900; color:#0f172a; background:#ffffff;">
                     <option value="">All Staff</option>
                 </select>
                 <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:9px auto 0;">
                     <button id="meter-checking-report-pdf-btn" onclick="downloadMeterCheckingReport('PDF')" style="flex:1; height:34px; border:none; border-radius:11px; background:#ef4444; color:#ffffff; font-size:0.66rem; font-weight:950;">PDF</button>
                     <button id="meter-checking-report-excel-btn" onclick="downloadMeterCheckingReport('EXCEL')" style="flex:1; height:34px; border:none; border-radius:11px; background:#16a34a; color:#ffffff; font-size:0.66rem; font-weight:950;">EXCEL</button>
                 </div>
-                <div id="meter-checking-report-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#fefce8; border:1.2px solid #fde047; color:#854d0e; font-size:0.66rem; font-weight:950; text-align:center;"></div>
+                <div id="meter-checking-report-download-status" style="display:none; width:100%; max-width:360px; margin:8px auto 0; border-radius:12px; padding:8px; background:#f5ede1; border:1.2px solid #a9744f; color:#5c3a21; font-size:0.66rem; font-weight:950; text-align:center;"></div>
                 <div id="meter-checking-report-table" style="width:100%; max-width:360px; margin:10px auto 0;"></div>
             </div>
         </main>
 
         <main id="meter-checking-live-progress-view" class="view">
             <div class="search-panel" style="padding-top:18px;">
-                <div style="width:100%; max-width:360px; background:#fefce8; border:1.5px solid #fde047; border-radius:18px; padding:14px; text-align:center;">
+                <div style="width:100%; max-width:360px; background:#f5ede1; border:1.5px solid #a9744f; border-radius:18px; padding:14px; text-align:center;">
                     <div style="font-size:0.85rem; font-weight:950; color:#0f172a; text-transform:uppercase; margin-bottom:4px;">DC: <span id="meter-checking-live-dc-label"></span></div>
-                    <div style="font-size:0.95rem; font-weight:950; color:#ca8a04; text-transform:uppercase;">Meeter Cheking Live Progress</div>
+                    <div style="font-size:0.95rem; font-weight:950; color:#6f4226; text-transform:uppercase;">Meeter Cheking Live Progress</div>
                     <div style="font-size:0.72rem; font-weight:850; color:#475569; margin-top:4px;">Aaj (Live) - Staff-wise Checked Connection</div>
                 </div>
                 <div style="display:flex; gap:10px; width:100%; max-width:360px; margin:14px auto 0;">
@@ -1670,18 +1693,63 @@
         </main>
 
         <main id="summary-view" class="view">
-            <div class="title-box-container"><div class="title-box flex flex-col items-center"><span class="title-text-bold" id="summary-title">PROGRESS REPORT</span></div></div>
+            <!-- USER REQUEST (2026-09-13): Pehle yahan hamesha light-green pill me
+                 hardcoded "PROGRESS REPORT" likha rehta tha - ab #summary-title
+                 (app.js ke updateProgressReportScopeTitle() se) turant "DC/DIVISION/
+                 CIRCLE PROGRESS REPORT" dikhata hai, aur pill ka look bhi zyada
+                 professional (dark slate-teal gradient, white bold text) kar diya -
+                 sirf ISI ek pill ke liye inline style hai, shared .title-box class
+                 (jo app ke doosre headers - SELECT YOUR DC, SHMS DAILY PROGRESS,
+                 etc - me bhi use hoti hai) bilkul untouched hai. -->
+            <div class="title-box-container"><div class="title-box flex flex-col items-center" style="background:linear-gradient(135deg, #0f172a 0%, #0e7490 100%); border-color:#0e7490; box-shadow:0 4px 14px rgba(14,116,144,0.3);"><span class="title-text-bold" id="summary-title" style="color:#ffffff; letter-spacing:0.3px;">PROGRESS REPORT</span></div></div>
             <div class="px-2">
-                <div class="progress-module-box">
-                    <div id="progress-mobile-btn" class="progress-module-btn active" onclick="setProgressModule('MOBILE')">Updated Mobile No</div>
-                    <div id="progress-revenue-btn" class="progress-module-btn" onclick="setProgressModule('REVENUE')">Revenue Report</div>
-          <div id="progress-lok-btn" class="progress-module-btn" onclick="setProgressModule('LOK_ADALAT')" style="display:none;">Lok Adalat Notice</div>
+                <!-- USER REQUEST (2026-09-13): Laal "Choose Report Type" dropdown (jo ek
+                     alert jaisa dikhta tha) ki jagah ab 3 professional "tiles" hain (har
+                     ek ka apna icon/colour, jaisa pehle dropdown ke options me tha) - koi
+                     bhi sync sirf tabhi shuru hoti hai jab user khud kisi tile par tap
+                     kare. Select hote hi poori tile-list chhup jaati hai, uski jagah ek
+                     chhoti "chip" (icon + naam + "Change") dikhti hai - chip par tap karne
+                     se wapas tile-list khul jaati hai. Dikhaana/chhupaana
+                     updateProgressReportPickerUI() (app.js) sambhalta hai. -->
+                <div id="progress-report-picker" class="report-picker">
+                    <div class="report-tile mobile" onclick="setProgressModule('MOBILE')">
+                        <div class="report-tile-ic">📱</div>
+                        <div class="report-tile-txt">
+                            <div class="report-tile-t1">Updated Mobile No</div>
+                            <div class="report-tile-t2">Mobile number entries ka daily record</div>
+                        </div>
+                        <div class="report-tile-chev">&rsaquo;</div>
+                    </div>
+                    <div class="report-tile revenue" onclick="setProgressModule('REVENUE')">
+                        <div class="report-tile-ic">💰</div>
+                        <div class="report-tile-txt">
+                            <div class="report-tile-t1">Live-Revenue Report</div>
+                            <div class="report-tile-t2">Staff / Category / Target / Non-Payee</div>
+                        </div>
+                        <div class="report-tile-chev">&rsaquo;</div>
+                    </div>
+                    <div class="report-tile freeze" onclick="setProgressModule('FREEZE')">
+                        <div class="report-tile-ic">🧊</div>
+                        <div class="report-tile-txt">
+                            <div class="report-tile-t1">Freeze-Revenue Report</div>
+                            <div class="report-tile-t2">Freeze snapshot vs abhi tak bhugtan</div>
+                        </div>
+                        <div class="report-tile-chev">&rsaquo;</div>
+                    </div>
+                    <div id="progress-lok-btn" onclick="setProgressModule('LOK_ADALAT')" style="display:none;"></div>
                 </div>
-                <div class="report-type-box">
+                <div id="progress-report-chip" class="report-chip" style="display:none;" onclick="showProgressReportPicker()">
+                    <div class="report-chip-l">
+                        <div id="progress-report-chip-ic" class="report-chip-ic">💰</div>
+                        <div id="progress-report-chip-lbl" class="report-chip-lbl">Live-Revenue Report</div>
+                    </div>
+                    <div class="report-chip-r">Change &rsaquo;</div>
+                </div>
+                <div id="progress-report-type-box" class="report-type-box">
                     <div id="opt-daily" class="report-opt active" onclick="setMode('DAILY')">Daily</div>
                     <div id="opt-monthly" class="report-opt" onclick="setMode('MONTHLY')">Monthly</div>
                 </div>
-                <div style="width:100%; max-width:100%; border-radius:12px; margin-bottom:16px;">
+                <div id="progress-report-date-wrap" style="width:100%; max-width:100%; border-radius:12px; margin-bottom:16px;">
                     <input type="date" id="report-date" class="h-12 border-2 border-teal-600 font-black text-teal-900" style="border-color: #0d9488; width:100%; max-width:100%; min-width:0; box-sizing:border-box; padding:0 12px; border-radius:12px; -webkit-appearance:none; appearance:none;" onchange="refreshSummary()">
                 </div>
             </div>

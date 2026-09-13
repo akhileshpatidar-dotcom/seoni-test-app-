@@ -205,6 +205,8 @@
         .btn-progress-black { background: #000000 !important; padding: 12px 18px !important; font-size: 0.75rem !important; }
         .btn-green-fix { background: linear-gradient(135deg, #22c55e 0%, #15803d 100%); }
         .btn-excel-automation { background: #16a34a !important; color: #ffffff !important; }
+        .btn-arrange-excel { background: #2563eb !important; color: #ffffff !important; }
+        .btn-image-to-excel { background: #f87171 !important; color: #ffffff !important; }
         .btn-panchnama-tool { background: #ea580c !important; color: #ffffff !important; }
         .btn-court-case { background: linear-gradient(135deg, #7c3aed 0%, #4c1d95 100%) !important; }
         .btn-stm-complaint { background: linear-gradient(135deg, #c08a57 0%, #9a6737 100%) !important; color: #ffffff !important; }
@@ -334,6 +336,32 @@
         .title-box-container { width: 100%; display: flex !important; justify-content: center !important; align-items: center !important; padding: 10px 0 20px 0; text-align: center; }
         .title-box { background-color: #dcfce7; padding: 10px 22px; border-radius: 12px; display: inline-flex; justify-content: center; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.06); border: 1px solid rgba(34, 197, 94, 0.2); }
         .title-text-bold { font-weight: 900 !important; font-size: 15px; color: #000000; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1; }
+
+        /* USER REQUEST (2026-09-13): Daily Progress ke laal "Choose Report Type"
+           dropdown ki jagah - "report tiles" (koi report select hone se pehle) aur
+           "report chip" (select hone ke baad, chhoti collapsed state). Naye,
+           standalone classes hain - kisi bhi purani shared class (.title-box,
+           .btn-unique, etc) ko yahan touch nahi kiya gaya. */
+        .report-picker { display: flex; flex-direction: column; gap: 9px; margin-bottom: 12px; }
+        .report-tile { display: flex; align-items: center; gap: 12px; background: #ffffff; border: 1px solid #e6ebf0; border-radius: 14px; padding: 12px 13px; position: relative; overflow: hidden; box-shadow: 0 1px 2px rgba(16,24,38,0.05); cursor: pointer; }
+        .report-tile::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: #94a3b8; }
+        .report-tile-ic { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; flex-shrink: 0; background: #eef2f6; color: #334155; }
+        .report-tile-txt { flex: 1; min-width: 0; }
+        .report-tile-t1 { font-weight: 700; font-size: 0.82rem; color: #101826; }
+        .report-tile-t2 { font-weight: 500; font-size: 0.66rem; color: #7d8a99; margin-top: 1px; }
+        .report-tile-chev { font-size: 0.9rem; color: #c3cbd4; }
+        .report-tile.mobile::before { background: #1d4ed8; }
+        .report-tile.mobile .report-tile-ic { background: #eaf0fe; color: #1d4ed8; }
+        .report-tile.revenue::before { background: #15803d; }
+        .report-tile.revenue .report-tile-ic { background: #e9f7ef; color: #15803d; }
+        .report-tile.freeze::before { background: #0e7490; }
+        .report-tile.freeze .report-tile-ic { background: #e3f4f7; color: #0e7490; }
+        .report-chip { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: #ffffff; border: 1px solid #e6ebf0; border-radius: 12px; padding: 9px 12px; margin-bottom: 12px; cursor: pointer; box-shadow: 0 1px 2px rgba(16,24,38,0.05); }
+        .report-chip-l { display: flex; align-items: center; gap: 9px; min-width: 0; }
+        .report-chip-ic { width: 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; flex-shrink: 0; background: #eef2f6; }
+        .report-chip-lbl { font-weight: 700; font-size: 0.76rem; color: #101826; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .report-chip-r { font-size: 0.68rem; font-weight: 700; color: #0e7490; flex-shrink: 0; }
+
         .main-card { background: #ffffff; border-radius: 24px; padding: 5px 16px 30px 16px; margin-top: 5px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04); text-align: center; width: 100%; }
         .dropdown-box { position: relative !important; width: 100%; max-width: 340px; margin: 0 auto; }
         .professional-trigger {
