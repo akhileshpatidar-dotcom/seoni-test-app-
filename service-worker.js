@@ -6,7 +6,13 @@
 // no-network me bhi app khule (blank error page na aaye) — data submit/search
 // tab bhi network hi maangega, jaisa aaj hai.
 
-const CACHE_VERSION = "seoni-app-shell-v2";
+// ITEM-10 PHASE-1 FIX (2026-09-16): yeh STAGING copy hai. Live app ka same
+// origin (akhileshpatidar-dotcom.github.io) hai, bas alag path - Cache
+// Storage origin-wide shared hota hai, isliye staging ka cache-name live se
+// alag rakhna mandatory hai (warna dono ke cached files aapas me mix ho
+// sakte hain). Yeh cache-name sirf yahi STAGING repo me hai, live
+// service-worker.js kabhi nahi badla.
+const CACHE_VERSION = "seoni-app-shell-STAGING-v1";
 
 const SHELL_FILES = [
     "./index.html",
