@@ -6,14 +6,20 @@
     <title>Seoni Circle App</title>
     <meta name="description" content="Seoni Circle App — Madhya Pradesh Electricity Department field staff ke liye revenue collection, meter reading aur stock management app.">
     <meta name="theme-color" content="#0d9488">
+    <!-- ORIGINAL AUTHORSHIP SIGNATURE (2026-09-14) - do not remove.
+         Seoni Circle App - original developer: Akhilesh Patidar (AE).
+         Source repo: github.com/akhileshpatidar-dotcom/patidar-seoni-circle-app
+         Build signature: SC-AKP-2026 -->
+    <meta name="author" content="Akhilesh Patidar (AE)">
+    <meta name="application-name" content="Seoni Circle App - Original by Akhilesh Patidar (AE) - SC-AKP-2026">
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230d9488'/%3E%3Cpath d='M55 15 L30 55 H48 L42 85 L72 42 H52 Z' fill='%23ffffff'/%3E%3C/svg%3E">
     <link rel="manifest" href="./manifest.json">
     <link rel="apple-touch-icon" href="./icon-192.png">
     <!-- ITEM-10 PHASE-1 PASS-1 (2026-09-16): CDN abhi bhi yahan hai (safety fallback ke
          liye) + production-compiled tailwind-generated.css bhi load ho raha hai, taaki
          side-by-side compare ho sake ki compiled build CDN jaisa hi visual result deta
-         hai ya nahi. Pass-2 me (verification ke baad) CDN <script> tag yahan se hata
-         diya jayega - yeh sirf STAGING copy me hai, live index.html abhi tak bilkul
+         hai ya nahi. Pass-2 me (verification ke baad) CDN wali script line yahan se
+         hata di jayegi - yeh sirf STAGING copy me hai, live index.html abhi tak bilkul
          nahi chhua gaya hai. -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="./tailwind-generated.css">
@@ -24,6 +30,8 @@
     <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
+    <!-- ORIGINAL AUTHORSHIP SIGNATURE - hidden, no layout/functional impact - do not remove -->
+    <div aria-hidden="true" style="position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap;">Seoni Circle App - Original developer: Akhilesh Patidar (AE) - github.com/akhileshpatidar-dotcom/patidar-seoni-circle-app - Build signature: SC-AKP-2026</div>
     <div id="toast-notif" role="status" aria-live="polite" aria-atomic="true"></div>
     <button id="dark-mode-toggle-btn" class="dark-mode-toggle-btn" type="button" onclick="toggleDarkMode()" aria-label="Dark mode on/off karein" title="Dark Mode">🌙</button>
     <button id="app-refresh-btn" class="app-refresh-btn" type="button" onclick="refreshAppNow()" aria-label="App refresh karein" title="App Refresh (latest version)">🔄</button>
@@ -117,6 +125,7 @@
                     <button id="arrange-excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openArrangeExcelToolAdminUpload()" style="display:none; background:#f0fdf4; color:#14532d; border:1.5px solid #86efac;">🔒 ADMIN ARRANGE EXCEL FILE</button>
                     <button id="image-to-excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openImageToExcelToolAdminUpload()" style="display:none; background:#fff1f2; color:#9f1239; border:1.5px solid #fda4af;">🔒 ADMIN IMAGE TO EXCEL CONVERTER</button>
                     <button id="freeze-admin-header-menu-item" type="button" class="header-menu-item" onclick="openFreezeAdmin()" style="display:none; background:#ecfeff; color:#0e7490; border:1.5px solid #67e8f9;">🔒 ADMIN FREEZE CONTROL</button>
+                    <button id="omvig-admin-header-menu-item" type="button" class="header-menu-item" onclick="openOmvigAdmin()" style="display:none; background:#dc2626; color:#ffffff; border:1.5px solid #dc2626; font-weight:950;">🔒 ADMIN O&amp;M/VIG UPLOAD</button>
                     <button type="button" class="header-menu-item meter-checking-header-menu-item live-progress-menu-item" onclick="openMeterCheckingLiveProgress()" style="display:none;">⏱️ Live Progress</button>
                     <button type="button" class="header-menu-item meter-checking-header-menu-item" onclick="openMeterCheckingReport()" style="display:none; background:#ef4444; color:#ffffff; border:1.5px solid #ef4444;">📄 Download Report</button>
                     <button type="button" class="header-menu-item vr-header-menu-item" onclick="openVrSavedMapsMenu()" style="display:none;">🗺️ Saved Feeder Maps</button>
@@ -203,6 +212,26 @@
                 </label>
                 <div id="excel-tool-upload-filename" style="font-size:0.62rem; font-weight:800; color:#1d4ed8; text-align:center; margin-top:10px;"></div>
                 <div id="excel-tool-upload-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
+            </div>
+        </main>
+
+        <main id="omvig-admin-view" class="view">
+            <div class="search-panel" style="padding-top:18px;">
+                <div style="width:100%; max-width:360px; background:#f1f5f9; border:1.5px solid #94a3b8; border-radius:18px; padding:16px; text-align:center; margin-bottom:16px;">
+                    <div style="font-size:0.85rem; font-weight:950; color:#0f172a;">O&amp;M/VIG MODULE ADMIN</div>
+                    <div style="font-size:0.62rem; font-weight:800; color:#334155; margin-top:6px; line-height:1.6;">Di gayi Pending list hamesha permanent baseline (freeze) mani jaati hai. Jab bhi Paid List upload hogi, sirf baseline ke baad ke payment hi "PAID" count honge - DC/Division/Circle Daily Progress me O&amp;M/VIG Report tile me turant dikhega.</div>
+                </div>
+
+                <div id="omvig-admin-status" style="width:100%; max-width:360px; margin:0 auto 14px; background:#ffffff; border:1.5px solid #cbd5e1; border-radius:16px; padding:12px;"></div>
+
+                <div style="font-size:0.68rem; font-weight:900; color:#0f172a; text-align:center; margin-top:22px;">DAILY PAID LIST UPLOAD</div>
+                <label style="display:block; width:100%; max-width:360px; margin:10px auto 0; border:2px dashed #94a3b8; border-radius:16px; padding:18px; text-align:center; cursor:pointer; background:#f8fafc;">
+                    <span style="font-size:0.72rem; font-weight:900; color:#0f172a;">Click to select Paid List Excel file</span>
+                    <input type="file" id="omvig-paid-file-input" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleOmvigPaidFileSelect(event)">
+                </label>
+                <div id="omvig-paid-file-name" style="font-size:0.62rem; font-weight:800; color:#1d4ed8; text-align:center; margin-top:10px;"></div>
+                <button id="omvig-paid-upload-btn" class="dashboard-btn" style="width:100%; max-width:360px; margin-top:12px; background:#000; color:#fff !important;" onclick="uploadOmvigPaidList()">UPLOAD PAID LIST</button>
+                <div id="omvig-paid-upload-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
             </div>
         </main>
 
@@ -959,6 +988,8 @@
                   <div class="progress-module-box">
                       <div id="progress-shms-btn" class="progress-module-btn active" onclick="setReportSource('SHMS')">SHMS</div>
                       <div id="progress-feeder-btn" class="progress-module-btn" onclick="setReportSource('FEEDER')">Feeder Reading</div>
+                      <div id="progress-stm-btn" class="progress-module-btn" onclick="setReportSource('STM')">STM Complaint</div>
+                      <div id="progress-peakload-btn" class="progress-module-btn" onclick="setReportSource('PEAKLOAD')">Daily Hourly Peak Load</div>
                   </div>
                   <div class="report-type-box">
                       <div id="shms-progress-daily-btn" class="report-opt active" onclick="setShmsProgressMode('DAILY')">Daily</div>
@@ -1740,6 +1771,14 @@
                         <div class="report-tile-txt">
                             <div class="report-tile-t1">Freeze-Revenue Report</div>
                             <div class="report-tile-t2">Freeze snapshot vs abhi tak bhugtan</div>
+                        </div>
+                        <div class="report-tile-chev">&rsaquo;</div>
+                    </div>
+                    <div class="report-tile omvig" onclick="setProgressModule('OMVIG')">
+                        <div class="report-tile-ic">🛡️</div>
+                        <div class="report-tile-txt">
+                            <div class="report-tile-t1">O&amp;M/VIG Report</div>
+                            <div class="report-tile-t2">Panchanama pending vs paid (freeze based)</div>
                         </div>
                         <div class="report-tile-chev">&rsaquo;</div>
                     </div>
