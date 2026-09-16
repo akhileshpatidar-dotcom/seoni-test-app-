@@ -6,6 +6,234 @@
             } catch (e) {}
         })();
 
+        // ============================================================================
+        // ITEM-10 PHASE-1 SAFETY PATCH (2026-09-16) — STAGING COPY ONLY.
+        // Live app.js me yeh poora block bilkul nahi hai — sirf yahi STAGING repo me.
+        //
+        // MAQSAD: staging par app khulne/report-screens dekhne/kisi bhi submit-jaisi
+        // action se PRODUCTION Google Sheets/Apps Script par ek bhi real request na
+        // jaaye (na GET na POST) — jab tak uska apna alag test-backend na ho aur
+        // explicitly mock registry me register na kiya jaaye. Neeche diya poora
+        // gate sirf browser ke 2 network primitives (fetch, XMLHttpRequest) par
+        // lagta hai — isse app.js ke baaki 235+ existing functions (submit/report/
+        // admin/auto-load sab) me EK LINE bhi badalni nahi padi, sab apna kaam
+        // waise hi karte hain, bas unki asli request kabhi network tak jaati nahi.
+        // ============================================================================
+        const STAGING_SAFE_MODE = true;
+
+        // Production Google domains — Apps Script exec URLs, published-CSV export
+        // URLs, aur Apps Script ke response-redirect wali googleusercontent.com
+        // domain (generic match — sirf "script." wali nahi, har googleusercontent.com
+        // sub-path bhi, kyunki Google kabhi is domain ke alag paths bhi
+        // Apps-Script-response ke liye use karta hai).
+        const STAGING_BLOCKED_HOST_SUBSTRINGS_ = [
+            "script.google.com",
+            "script.googleusercontent.com",
+            "googleusercontent.com",
+            "docs.google.com"
+        ];
+
+        // MOCK REGISTRY: key format "<exact backend base-URL>::<action>" un GET
+        // calls ke liye jo "?action=XYZ" query param bhejte hain (Apps Script ke
+        // sabhi doGet handlers) — module-naam se NAHI, kyunki kai modules ka action
+        // naam common hai ("getSummary" SHMS/Peak Load/Feeder/STM/Mobile Update/VR
+        // sabme hai) lekin har module ka base exec-URL unique hai. CSV/no-action
+        // wali GET requests (published-sheet CSV export, action param nahi hota)
+        // ke liye key format "<poori normalized URL, timestamp/cache-buster param
+        // hataakar>::GET" hai. Abhi yeh khaali hai — jab tak SHMS (ya koi aur
+        // module) ki entry yahan explicitly daali na jaaye, uska GET bhi block
+        // rahega (yahi "zero production requests" proof ka aadhar hai).
+        window.STAGING_MOCK_RESPONSES = window.STAGING_MOCK_RESPONSES || {};
+
+        function stagingNormalizeUrlForMockKey_(rawUrl) {
+            try {
+                const u = new URL(rawUrl, window.location.href);
+                // CORRECTION (2026-09-16, USER-REQUESTED): "gid" ko yahan se
+                // DELETE mat karo - yeh timestamp jaisa cache-buster nahi hai,
+                // balki Sheet TAB identifier hai (ek hi spreadsheet ke alag-alag
+                // gid=0 / gid=1334246662 alag data-source/tab hote hain). Isko
+                // strip karne se do alag tabs ka mock-key collide ho jaata aur
+                // galat report data serve hota. Sirf genuinely volatile params
+                // (jaise "t" = Date.now() cache-buster) yahan remove hote hain.
+                u.searchParams.delete("t");        // cache-buster (Date.now())
+                return u.origin + u.pathname + (u.search ? "?" + u.searchParams.toString() : "");
+            } catch (_) {
+                return String(rawUrl || "").split("&t=")[0];
+            }
+        }
+
+        function stagingBuildMockKey_(rawUrl) {
+            let action = "";
+            try {
+                const u = new URL(rawUrl, window.location.href);
+                action = u.searchParams.get("action") || "";
+            } catch (_) {}
+            if (action) {
+                let base = String(rawUrl).split("?")[0];
+                return `${base}::${action}`;
+            }
+            return `${stagingNormalizeUrlForMockKey_(rawUrl)}::GET`;
+        }
+
+        // Ek hi URL string do baar check hoti hai: (1) jaisi hai waisi (raw), (2)
+        // decodeURIComponent kiya hua roop — kyunki kuch fallback candidates
+        // (jaise api.allorigins.win CORS-proxy) asli docs.google.com URL ko apne
+        // "?url=<encoded>" query-param ke ANDAR chhupa dete hain. Sirf apni
+        // hostname dekhne se yeh proxy-wrapped case bilkul miss ho jaata (proxy
+        // khud google.com nahi hai) — isliye poori URL string (encoded + decoded
+        // dono) me substring-match karte hain.
+        function stagingIsProductionUrl_(rawUrl) {
+            const raw = String(rawUrl || "");
+            let decoded = raw;
+            try { decoded = decodeURIComponent(raw); } catch (_) {}
+            return STAGING_BLOCKED_HOST_SUBSTRINGS_.some((host) => raw.includes(host) || decoded.includes(host));
+        }
+
+        let stagingLastBlockToastAt_ = 0;
+        function stagingLogBlockedRequest_(method, url, via) {
+            // Poora detail hamesha console me jaata hai (Network-tab jaisi
+            // visibility chahiye to yahan milegi) — screen par toast sirf har 4
+            // second me ek baar (flood na ho).
+            console.warn(`[STAGING_SAFE_MODE] ${via} blocked: ${method} ${url}`);
+            const now = Date.now();
+            if (now - stagingLastBlockToastAt_ > 4000) {
+                stagingLastBlockToastAt_ = now;
+                try {
+                    if (typeof showToast === "function") {
+                        showToast("⚠️ TEST BACKEND NOT CONFIGURED — production request blocked (staging safe mode)", true);
+                    }
+                } catch (_) {}
+            }
+        }
+
+        // --- FETCH PATCH ---
+        // input ".js Request object" ya plain string dono ho sakta hai (fetch()
+        // dono accept karta hai) — dono se URL aur method sahi nikaalna zaroori
+        // hai, warna Request-object wali koi bhi future call gate se bach sakti hai.
+        const __stagingOrigFetch = window.fetch ? window.fetch.bind(window) : null;
+        if (__stagingOrigFetch) {
+            window.fetch = function (input, init) {
+                let url = "";
+                let method = "GET";
+                try {
+                    if (typeof input === "string") {
+                        url = input;
+                    } else if (input && typeof input === "object") {
+                        url = input.url || "";
+                        method = input.method || method;
+                    }
+                    if (init && init.method) method = init.method;
+                } catch (_) {}
+                method = String(method || "GET").toUpperCase();
+
+                if (STAGING_SAFE_MODE && stagingIsProductionUrl_(url)) {
+                    if (method !== "GET") {
+                        // Requirement: koi bhi non-GET (POST/PUT/DELETE/PATCH)
+                        // production URL par KABHI nahi jaati — koi allowlist
+                        // mechanism yahan hai hi nahi.
+                        stagingLogBlockedRequest_(method, url, "fetch");
+                        return Promise.reject(new Error("STAGING_SAFE_MODE: production write blocked"));
+                    }
+                    const mockKey = stagingBuildMockKey_(url);
+                    const mock = window.STAGING_MOCK_RESPONSES[mockKey];
+                    if (mock !== undefined) {
+                        const body = typeof mock === "string" ? mock : JSON.stringify(mock);
+                        return Promise.resolve(new Response(body, { status: 200, headers: { "Content-Type": "application/json" } }));
+                    }
+                    stagingLogBlockedRequest_(method, url, "fetch");
+                    return Promise.reject(new Error("STAGING_SAFE_MODE: TEST BACKEND NOT CONFIGURED"));
+                }
+                return __stagingOrigFetch(input, init);
+            };
+        }
+
+        // --- XMLHttpRequest PATCH ---
+        // xhrGetText() (loadRemoteText ka fallback path) raw XHR istemal karta
+        // hai, isliye sirf fetch patch karna kaafi nahi — XHR ko bhi isi tarah
+        // gate karna zaroori hai, warna GET wale fallback attempts se production
+        // tak pahunch sakti thi.
+        const __StagingOrigXHROpen = XMLHttpRequest.prototype.open;
+        const __StagingOrigXHRSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function (method, url) {
+            try {
+                this.__stagingMethod = String(method || "GET").toUpperCase();
+                this.__stagingUrl = url;
+                this.__stagingBlocked = STAGING_SAFE_MODE && stagingIsProductionUrl_(url);
+            } catch (_) {
+                this.__stagingBlocked = false;
+            }
+            return __StagingOrigXHROpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function (body) {
+            if (this.__stagingBlocked) {
+                stagingLogBlockedRequest_(this.__stagingMethod, this.__stagingUrl, "XHR");
+                const xhr = this;
+                // Asli request kabhi bheji nahi jaati. Ek microtask-jaisi delay ke
+                // baad ek REAL "error" Event dispatch karte hain — XMLHttpRequest
+                // EventTarget hai, isliye yeh dono tarah ke listener ko trigger
+                // karega: (a) xhr.onerror = fn wali property-style assignment
+                // (jaisa xhrGetText me hai), (b) xhr.addEventListener("error", fn)
+                // wali standard style bhi. Dono cases me Promise turant reject
+                // hoti hai, kabhi pending nahi rehti.
+                setTimeout(function () {
+                    try { xhr.dispatchEvent(new Event("error")); } catch (_) {}
+                }, 0);
+                return;
+            }
+            return __StagingOrigXHRSend.apply(this, arguments);
+        };
+
+        // --- localStorage / sessionStorage NAMESPACE ISOLATION ---
+        // Cache Storage jaisa hi issue: localStorage/sessionStorage bhi
+        // ORIGIN-scoped hote hain, path-scoped nahi - staging aur live same origin
+        // (akhileshpatidar-dotcom.github.io) share karte hain. Neeche wala
+        // top-level "const localStorage = ..." (classic <script>, koi module
+        // nahi) is poore app.js ke BAAD wale saare "localStorage.xxx" calls (77
+        // jagah) ko - BINA unme se kisi ko chhue - is wrapper se guzar deta hai.
+        // Har key ko "STAGING_" prefix milta hai, isliye staging kabhi live ki
+        // asli keys padh/likh/delete nahi karta, aur live par staging ka koi asar
+        // nahi padta.
+        function stagingMakeNamespacedStorage_(real, prefix) {
+            function snapshotKeys() {
+                // Object.keys(real) par nirbhar nahi - Storage interface ka
+                // sahi/spec-wala tareeka real.length + real.key(i) hai.
+                const keys = [];
+                for (let i = 0; i < real.length; i++) {
+                    const k = real.key(i);
+                    if (k !== null && k.indexOf(prefix) === 0) keys.push(k);
+                }
+                return keys;
+            }
+            return {
+                getItem: function (k) { return real.getItem(prefix + k); },
+                setItem: function (k, v) { return real.setItem(prefix + k, v); },
+                removeItem: function (k) { return real.removeItem(prefix + k); },
+                clear: function () {
+                    // SIRF STAGING_ prefix wali keys hatengi - underlying live
+                    // storage kabhi poora clear nahi hota.
+                    snapshotKeys().forEach(function (k) { real.removeItem(k); });
+                },
+                key: function (i) {
+                    const k = snapshotKeys()[i];
+                    return k === undefined ? null : k.slice(prefix.length);
+                },
+                get length() { return snapshotKeys().length; }
+            };
+        }
+        const __stagingRealLocalStorage = window.localStorage;
+        const __stagingRealSessionStorage = window.sessionStorage;
+        const localStorage = STAGING_SAFE_MODE
+            ? stagingMakeNamespacedStorage_(__stagingRealLocalStorage, "STAGING_")
+            : __stagingRealLocalStorage;
+        const sessionStorage = STAGING_SAFE_MODE
+            ? stagingMakeNamespacedStorage_(__stagingRealSessionStorage, "STAGING_")
+            : __stagingRealSessionStorage;
+        // ============================================================================
+        // END ITEM-10 PHASE-1 SAFETY PATCH — is line ke baad se poora app.js bilkul
+        // waisa hi hai jaisa live me hai (sirf IndexedDB DB-naam me 2 jagah "-STAGING"
+        // suffix, neeche unke apne constant-definition line par).
+        // ============================================================================
+
         const divisionConfigs = {
             "DIVISION SEONI": {
                 colorClass: "bg-blue-grad",
@@ -318,7 +546,7 @@
         let staffAdminCurrentAccount = null;
         const revenueUploadedPaidStorageKey = "seoni-revenue-uploaded-paid-cache-v2";
         const revenueCategoryRawPaymentStorageKey = "seoni-revenue-category-raw-payment-rows-v2";
-        const revenueCategoryRawPaymentDbName = "seoni-revenue-category-payment-db-v2";
+        const revenueCategoryRawPaymentDbName = "seoni-revenue-category-payment-db-v2" + (STAGING_SAFE_MODE ? "-STAGING" : "");
         const revenueCategoryRawPaymentStoreName = "dc-payment-rows";
         const revenuePaidUploadMetaStorageKey = "seoni-revenue-paid-upload-meta-v1";
         const feederCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT8bBAXJZhlwS_giGXBlS6rDXJ_auZfWZzNVPQaBnD09jB_m7jnrqeGGX5WP8V2jOD_WL90_KQ2pJa4/pub?output=csv";
@@ -14612,6 +14840,27 @@
         function loadRevenueCollectionViaGviz(csvUrl) {
             return new Promise((resolve, reject) => {
                 const callbackName = `revenueGvizCallback_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+                const gvizUrl = buildRevenueGvizUrl(csvUrl, callbackName);
+
+                // STAGING SAFE MODE (2026-09-16, USER-REQUESTED - CORRECTION 1):
+                // yeh function fetch()/XMLHttpRequest bilkul use nahi karta -
+                // isme ek dynamic <script src="..."> tag banakar JSONP/GViz style
+                // se docs.google.com se data mangwaya jaata hai. Upar wala
+                // fetch/XHR monkey-patch aur connect-src CSP dono isko cover
+                // nahi karte (script loading connect-src se governed nahi hai) -
+                // isliye is exact call-site par bhi, fetch/XHR ke jaisa hi,
+                // production URL explicitly check karke block karte hain, script
+                // tag banane/append karne se PEHLE hi (real network request
+                // isliye kabhi bhejti hi nahi).
+                if (typeof STAGING_SAFE_MODE !== "undefined" && STAGING_SAFE_MODE &&
+                    typeof stagingIsProductionUrl_ === "function" && stagingIsProductionUrl_(gvizUrl)) {
+                    if (typeof stagingLogBlockedRequest_ === "function") {
+                        stagingLogBlockedRequest_("SCRIPT", gvizUrl, "gviz-dynamic-script-src");
+                    }
+                    reject(new Error("TEST BACKEND NOT CONFIGURED (staging safe mode: GViz <script src> request blocked)"));
+                    return;
+                }
+
                 const script = document.createElement("script");
                 const timeout = setTimeout(() => {
                     cleanup();
@@ -14646,7 +14895,7 @@
                     reject(new Error("GViz script load failed"));
                 };
 
-                script.src = buildRevenueGvizUrl(csvUrl, callbackName);
+                script.src = gvizUrl;
                 document.head.appendChild(script);
             });
         }
@@ -22170,7 +22419,7 @@
         // zyada bada hota hai (localStorage jaisi tight limit nahi) - isliye
         // ab yeh CSV IndexedDB me (parsed rows ke roop me) cache karte hain,
         // taaki cache reliably bana rahe aur search hamesha fast (~1 sec) ho.
-        const meterCheckingConsumerDbName = "seoni-meter-checking-consumer-db-v1";
+        const meterCheckingConsumerDbName = "seoni-meter-checking-consumer-db-v1" + (STAGING_SAFE_MODE ? "-STAGING" : "");
         const meterCheckingConsumerStoreName = "consumer-csv";
 
         function openMeterCheckingConsumerDb() {
