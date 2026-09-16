@@ -7416,7 +7416,17 @@
                     // sakti thi. Ab sirf isi app ki apni cache ("seoni-app-"
                     // prefix wali, service-worker.js ke CACHE_VERSION se match)
                     // delete hoti hai.
-                    await Promise.all(keys.filter((key) => key.startsWith("seoni-app-")).map((key) => caches.delete(key)));
+                    // ITEM-10 PHASE-1 FIX (2026-09-16, STAGING COPY ONLY): "seoni-app-"
+                    // prefix live ke "seoni-app-shell-v2" AUR staging ke naye
+                    // "seoni-staging-app-shell-v1" dono ko match karta - staging par
+                    // Refresh button dabane se live ka cache bhi delete ho sakta tha
+                    // (same origin, akhileshpatidar-dotcom.github.io). Isliye YAHAN
+                    // (sirf staging copy me) prefix ko staging-specific kar diya hai -
+                    // ab yeh sirf staging ki apni cache delete karega, live ka
+                    // "seoni-app-shell-v2" kabhi touch nahi hoga. Live app.js me yeh
+                    // line "seoni-app-" hi rahegi, kyunki wahan koi doosra "seoni-app-"
+                    // prefix wala cache exist hi nahi karta.
+                    await Promise.all(keys.filter((key) => key.startsWith("seoni-staging-app-shell-")).map((key) => caches.delete(key)));
                 }
                 if ("serviceWorker" in navigator) {
                     const reg = await navigator.serviceWorker.getRegistration();
