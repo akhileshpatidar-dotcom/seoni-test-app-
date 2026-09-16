@@ -232,10 +232,28 @@
         // END ITEM-10 PHASE-1 SAFETY PATCH (CORE) — is line ke baad se app.js
         // waisa hi hai jaisa live me hai, SIVAAY in chhoti, alag se clearly-marked
         // jagahon ke: (1) IndexedDB DB-naam me 2 jagah "-STAGING" suffix, neeche
-        // unke apne constant-definition line par; (2) "ITEM-10 PHASE-1 SHMS
-        // SYNTHETIC MOCK" block, shmsSubmitScriptUrl/shmsCsvUrl declaration ke
-        // turant baad (STAGING_MOCK_RESPONSES registry me sirf SHMS ke 2 GET
-        // entries daalta hai - koi gate/logic nahi badalta).
+        // unke apne constant-definition line par; (2) "ITEM-10 PHASE-1 STOCK
+        // SYNTHETIC MOCK" block, stockMaterialsCsvUrl declaration ke turant baad;
+        // (3) "ITEM-10 PHASE-1 SHMS SYNTHETIC MOCK" block, shmsSubmitScriptUrl/
+        // shmsCsvUrl declaration ke turant baad. (2) aur (3) dono sirf
+        // STAGING_MOCK_RESPONSES registry me apne-apne module ke GET entries
+        // daalte hain - koi gate/logic nahi badalte.
+        //
+        // (4) "ITEM-10 STOCK EMPTY/ERROR/STALE FIX" - yeh teeno (2)/(3) jaisa
+        // "staging-only" nahi hai, yeh ek asli BUSINESS-LOGIC correctness fix hai
+        // (Stock module me purana/stale/demo data "current" jaisa dikhne wala bug,
+        // mock testing se hi expose hua tha). Isliye single confined block nahi -
+        // 4 jagah bikhra hai: (a) stockMaterialsStatus/stockMaterialsStale
+        // declaration, stockMaterials array ke turant baad; (b) poora
+        // loadStockMaterialsData() function replaced + naya getStockStatusBannerHtml_()
+        // helper, dono saath; (c) renderStockDashboard() ke innerHTML ke top par
+        // banner; (d) renderMaterialList()/renderLiveStock()/renderLowStock()/
+        // renderStockReport() - char render functions me banner + empty-state
+        // handling. Yeh fix abhi sirf STAGING copy me hai (mock testing ke liye
+        // zaroori tha), LIVE me nahi gaya hai - alag se approval milne ke baad hi
+        // live me jaayega. CSP/fetch-XHR-GViz gates/storage-cache isolation/Stock
+        // POST-submit logic/SHMS mock/kisi doosre module ko yeh fix bilkul nahi
+        // chhuta.
         // ============================================================================
 
         const divisionConfigs = {
@@ -385,6 +403,74 @@
             "SEONIRES": "https://docs.google.com/spreadsheets/d/12d4nBlUJ5MoamEZdtNteTSixTt9UdvbrPmjS9tBRUw8/export?format=csv&gid=0"
         };
         const stockMaterialsCsvUrl = "https://docs.google.com/spreadsheets/d/1OfrU7ZuN5LV9f_3hqORv66BVLYKFGIBBjDyeSXHwldA/export?format=csv&gid=641545139";
+
+        // ITEM-10 PHASE-1 STOCK SYNTHETIC MOCK (2026-09-16, USER-REQUESTED, 2nd
+        // module after SHMS, same rules/approach reused): sirf Stock/Material ke
+        // READ paths (Apps Script "getMasterStock" action, aur uska CSV fallback)
+        // ke liye synthetic TEST data. "stockSubmitScriptUrl" upar line 314 par
+        // aur "stockMaterialsCsvUrl" upar hi define ho chuke hain, isliye yahan
+        // safe hai. Koi safety gate (CSP/fetch/XHR/GViz/storage/cache isolation)
+        // nahi badalta - sirf STAGING_MOCK_RESPONSES me 2 naye GET entries.
+        //
+        // SCOPE: yeh Stock ka RECEIVE/ISSUE POST/submit (naya stock movement save
+        // karna) ko BILKUL touch nahi karta - upar wala fetch/XHR gate har non-GET
+        // production request ko unconditionally block karta hai, yahan koi
+        // mock/allowlist rasta hi nahi hai - safe-mode me submit hamesha blocked.
+        // Mock keys SHMS jaisi hi EXACT base-URL+action / normalized-CSV-URL+GET
+        // hain - kisi doosre module se collide nahi karte.
+        //
+        // STATE SWITCH: window.STAGING_MOCK_STOCK_STATE = "populated" (default) |
+        // "empty" | "error" - console me badlo, Stock screen dobara kholo:
+        //     window.STAGING_MOCK_STOCK_STATE = "empty";
+        // NOTE (existing app behavior, mock ne nahi banaya): agar getMasterStock
+        // khaali [] de to loadStockMaterialsData() khud hi CSV fallback try karta
+        // hai (line ~8135) - isliye "empty" state me bhi CSV mock (neeche, isi
+        // switch se juda) khaali header-only text deta hai taaki screen genuinely
+        // "koi material nahi" dikhaye, real CSV-empty-response jaisa hi. "error"
+        // state me getMasterStock hi turant reject ho jaata hai (jaisa SHMS me
+        // tha) - loadStockMaterialsData ka catch(_) ise chup-chap swallow kar leta
+        // hai (yeh EXISTING behavior hai, maine nahi likha), CSV fallback us case
+        // me code ke hisaab se try hi nahi hota.
+        window.STAGING_MOCK_STOCK_STATE = window.STAGING_MOCK_STOCK_STATE || "populated";
+
+        const STAGING_STOCK_MOCK_ROWS_POPULATED_ = [
+            { id: "TEST-001", material_name: "TEST MATERIAL - AB CABLE", unit: "Meter", opening_stock: 500, balance_stock: 420 },
+            { id: "TEST-002", material_name: "TEST MATERIAL - DISC INSULATOR", unit: "Nos", opening_stock: 80, balance_stock: 55 },
+            { id: "TEST-003", material_name: "TEST MATERIAL - LT PIN INSULATOR", unit: "Nos", opening_stock: 150, balance_stock: 110 }
+        ];
+        const STAGING_STOCK_MOCK_CSV_HEADER_ = "MATERIAL NAME,UNIT,OPENING STOCK,BALANCE STOCK";
+        const STAGING_STOCK_MOCK_CSV_TEXT_POPULATED_ =
+            `${STAGING_STOCK_MOCK_CSV_HEADER_}\n` +
+            "TEST MATERIAL - AB CABLE,Meter,500,420\n" +
+            "TEST MATERIAL - DISC INSULATOR,Nos,80,55\n" +
+            "TEST MATERIAL - LT PIN INSULATOR,Nos,150,110\n";
+
+        // Backend (stock-material-submit-script.gs doGet action=getMasterStock) jo
+        // array-of-objects deta hai, usi shape/field-names me (id, material_name,
+        // unit, opening_stock, balance_stock).
+        Object.defineProperty(window.STAGING_MOCK_RESPONSES, `${stockSubmitScriptUrl}::getMasterStock`, {
+            configurable: true,
+            enumerable: true,
+            get: function () {
+                if (window.STAGING_MOCK_STOCK_STATE === "empty") return [];
+                if (window.STAGING_MOCK_STOCK_STATE === "error") return undefined;
+                return STAGING_STOCK_MOCK_ROWS_POPULATED_;
+            }
+        });
+
+        // Master-sheet CSV export jaisa hi shape jaisa parseStockMaterialsCsv()
+        // expect karta hai: header row (MATERIAL NAME/UNIT/OPENING STOCK/BALANCE
+        // STOCK) + data rows.
+        Object.defineProperty(window.STAGING_MOCK_RESPONSES, stagingNormalizeUrlForMockKey_(stockMaterialsCsvUrl) + "::GET", {
+            configurable: true,
+            enumerable: true,
+            get: function () {
+                if (window.STAGING_MOCK_STOCK_STATE === "empty") return `${STAGING_STOCK_MOCK_CSV_HEADER_}\n`;
+                return STAGING_STOCK_MOCK_CSV_TEXT_POPULATED_;
+            }
+        });
+        // END ITEM-10 PHASE-1 STOCK SYNTHETIC MOCK
+
         const shmsCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTbq-yne90yg9Vn8eylxM3zKMfZjPLlVhca3JhsjAzMlcm6MAVl8vAA-xXVgZI_XjWQBHyjB36YO1Cz/pub?output=csv";
 
         // ITEM-10 PHASE-1 SHMS SYNTHETIC MOCK (2026-09-16, USER-REQUESTED, separate
@@ -494,6 +580,20 @@
             { id: "M004", name: "Disc Insulator", unit: "Nos", opening: 75, inward: 20, issue: 63, min: 25 },
             { id: "M005", name: "LT Pin Insulator", unit: "Nos", opening: 140, inward: 40, issue: 149, min: 35 }
         ];
+        // ITEM-10 STOCK EMPTY/ERROR/STALE FIX (2026-09-16, USER-REQUESTED, multi-
+        // round-corrected): "stockMaterials" upar wale 5 hardcoded demo rows se
+        // shuru hota hai, lekin yeh sirf ek PLACEHOLDER hai jab tak
+        // loadStockMaterialsData() ka pehla attempt complete NAHI ho jaata - us
+        // pehle attempt ke turant shuru hote hi (neeche dekhein) inhe khaali kar
+        // diya jaata hai, taaki yeh demo data kabhi "current stock" jaisa
+        // real/production data samajh kar na dikhe.
+        //
+        // "loaded"/"empty"/"error" teeno states clearly alag hain - "empty" ek
+        // VALID successful (0 rows) response hai, "error" ka matlab load hi fail
+        // hua (network/parse/staging-safe-mode-block). "uninitialized"/"loading"
+        // dono ko "koi valid data nahi mila abhi tak" maana jaata hai.
+        let stockMaterialsStatus = "uninitialized"; // "uninitialized" | "loading" | "loaded" | "empty" | "error"
+        let stockMaterialsStale = false; // true = last refresh fail hua, PURANA (loaded/empty) data dikha rahe hain
         let stockMovements = [
             { type: "RECEIVE", material: "AB Cable 3X95+1X50", qty: 180, date: "23/04/2026", note: "Main Store Challan 17" },
             { type: "ISSUE", material: "Disc Insulator", qty: 12, date: "23/04/2026", note: "11 KV line maintenance" },
@@ -8099,7 +8199,34 @@
             return normalizeDcName(found ? found[1] : fallback) || fallback;
         }
 
+        // ITEM-10 STOCK EMPTY/ERROR/STALE FIX (2026-09-16, USER-REQUESTED, multi-
+        // round-corrected - see stockMaterialsStatus/stockMaterialsStale comment
+        // upar unke declaration par): teen baar user ke independent review ne
+        // correction maangi thi - (1) empty API+CSV ko "kuch nahi hua" ki jagah
+        // explicit valid-empty maana jaaye, (2) unsaved Receive/Issue kaam kisi
+        // bhi failure-path me kabhi reset na ho, (3) pehla-hi load fail hone par
+        // ise "refresh failure" na samjha jaaye (jo shuru me "loaded" default
+        // rakhne se hota tha) - "uninitialized"/"loading" ko alag rakh kar yeh
+        // teesra bug fix hua hai.
         async function loadStockMaterialsData() {
+            const hadPreviousData = stockMaterialsStatus === "loaded" || stockMaterialsStatus === "empty";
+            const previousStockMaterials = Array.isArray(stockMaterials) ? stockMaterials.slice() : [];
+            const previousStatus = stockMaterialsStatus;
+
+            if (!hadPreviousData) {
+                // "uninitialized" (bilkul pehla call) ya pehle se "error"/"loading"
+                // tha - is attempt ko turant "loading" dikhate hain aur
+                // stockMaterials khaali kar dete hain, taaki upar wala hardcoded
+                // demo array is point ke baad KABHI "current stock" jaisa render
+                // na ho, chahe network kitna bhi slow ho.
+                stockMaterialsStatus = "loading";
+                stockMaterials = [];
+                renderStockDashboard(); // agar user pehle se Stock screen par hai to turant "loading" banner dikhe
+            }
+            // hadPreviousData === true (pehle se "loaded"/"empty") ho to status ko
+            // yahan CHHEDTE NAHI - background-refresh ke dauraan purana data/view
+            // bina flicker ke dikhta rehta hai.
+
             try {
                 const rawData = await loadRemoteJson(`${stockSubmitScriptUrl}?action=getMasterStock`);
                 const parsedMaterials = Array.isArray(rawData)
@@ -8128,21 +8255,67 @@
                     pendingIssueItems = [];
                     selectedStockReceiveItem = null;
                     selectedStockIssueItem = null;
+                    stockMaterialsStatus = "loaded";
+                    stockMaterialsStale = false;
                     renderStockDashboard();
                     return;
                 }
 
+                // API valid, 0 rows -> CSV fallback try karo
                 const csvText = await loadRemoteText(stockMaterialsCsvUrl);
                 const parsedCsvMaterials = parseStockMaterialsCsv(csvText);
-                if (parsedCsvMaterials.length) {
-                    stockMaterials = parsedCsvMaterials;
-                    pendingReceiveItems = [];
-                    pendingIssueItems = [];
-                    selectedStockReceiveItem = null;
-                    selectedStockIssueItem = null;
-                    renderStockDashboard();
+                // FIX: dono sources se 0 rows aana ab explicitly ek VALID "empty"
+                // result hai - pehle yahan sirf "if (parsedCsvMaterials.length)"
+                // tha, dono khaali hone par function chup-chap kuch nahi karta
+                // tha aur purana/demo data "current" jaisa dikhta reh jaata tha.
+                stockMaterials = parsedCsvMaterials;
+                pendingReceiveItems = [];
+                pendingIssueItems = [];
+                selectedStockReceiveItem = null;
+                selectedStockIssueItem = null;
+                stockMaterialsStatus = parsedCsvMaterials.length ? "loaded" : "empty";
+                stockMaterialsStale = false;
+                renderStockDashboard();
+            } catch (_) {
+                // FIX: yeh "empty" NAHI hai, "error" hai.
+                if (hadPreviousData) {
+                    // Refresh fail hua, pehle se valid data (loaded ya empty) tha -
+                    // purana data/status wapas, sirf stale=true. pendingReceiveItems/
+                    // pendingIssueItems/selectedStockReceiveItem/selectedStockIssueItem
+                    // ko YAHAN BILKUL NAHI CHHEDTE - network blip se staff ka
+                    // in-progress Receive/Issue kaam nahi udna chahiye.
+                    stockMaterials = previousStockMaterials;
+                    stockMaterialsStatus = previousStatus;
+                    stockMaterialsStale = true;
+                } else {
+                    // Pehla load hi fail hua (ya "loading" state se hi fail) -
+                    // kabhi koi valid data mila hi nahi. Khaali list + "error"
+                    // status - "empty" dikhana galat hota (user "material master
+                    // khaali hai" samajhta, jabki load hi fail hua). Pending/
+                    // selected yahan bhi touch nahi karte (already khaali honge).
+                    stockMaterials = [];
+                    stockMaterialsStatus = "error";
+                    stockMaterialsStale = false;
                 }
-            } catch (_) {}
+                renderStockDashboard();
+            }
+        }
+
+        // Shared status-banner helper - Stock ke paanchon read-screens (Dashboard
+        // summary, Material List, Live Stock, Low Stock, Stock Report) isi ek
+        // function ko reuse karte hain, taaki stale/error data kabhi bina warning
+        // ke na dikhe (koi bhi screen se yeh check miss na ho).
+        function getStockStatusBannerHtml_() {
+            if (stockMaterialsStatus === "loading") {
+                return `<div class="stock-summary-empty">⏳ Stock data load ho raha hai...</div>`;
+            }
+            if (stockMaterialsStatus === "error") {
+                return `<div class="stock-summary-empty" style="color:#b91c1c;">⚠ Stock data load nahi ho paya. Kripya thodi der baad refresh karein.</div>`;
+            }
+            if (stockMaterialsStale) {
+                return `<div class="stock-summary-empty" style="color:#b45309;">⚠ Stock data refresh nahi ho paya - purana (pichhla load kiya hua) data dikha rahe hain.</div>`;
+            }
+            return "";
         }
 
         function parseStockMaterialsCsv(csvText) {
@@ -13718,6 +13891,7 @@
             const todayReceiveEntries = stockMovements.filter((item) => item.type === "RECEIVE" && item.date === todayDate).slice(0, 6);
             const todayIssueEntries = stockMovements.filter((item) => item.type === "ISSUE" && item.date === todayDate).slice(0, 6);
             document.getElementById("stock-dashboard-content").innerHTML = `
+                ${getStockStatusBannerHtml_()}
                 <div class="stock-mini-summary">
                     <div class="stock-summary-box">
                         <h4>Today Received</h4>
@@ -13776,14 +13950,15 @@
 
         function renderMaterialList() {
             document.getElementById("material-list-content").innerHTML = `
+                ${getStockStatusBannerHtml_()}
                 <div class="stock-table-head"><div>Material Name</div><div>Unit</div><div>Total Stock</div></div>
-                ${stockMaterials.map((item) => `
+                ${stockMaterials.length ? stockMaterials.map((item) => `
                     <div class="stock-table-row">
                         <div>${item.name}<div class="stock-row-sub">${item.id}</div></div>
                         <div>${item.unit}</div>
                         <div>${getStockBalance(item)}</div>
                     </div>
-                `).join("")}
+                `).join("") : (stockMaterialsStatus === "empty" ? `<div class="stock-summary-empty">Koi material master data available nahi hai.</div>` : "")}
             `;
         }
 
@@ -13924,7 +14099,7 @@
         }
 
         function renderLiveStock() {
-            document.getElementById("live-stock-content").innerHTML = stockMaterials.map((item) => {
+            const rowsHtml = stockMaterials.map((item) => {
                 const status = getStockStatus(item);
                 return `
                     <div class="stock-row">
@@ -13939,26 +14114,32 @@
                     </div>
                 `;
             }).join("");
+            document.getElementById("live-stock-content").innerHTML =
+                getStockStatusBannerHtml_() +
+                (rowsHtml || (stockMaterialsStatus === "empty" ? `<div class="stock-note">Abhi koi stock item available nahi hai.</div>` : ""));
         }
 
         function renderLowStock() {
             const lowItems = stockMaterials.filter((item) => getStockBalance(item) <= item.min + 15);
-            document.getElementById("low-stock-content").innerHTML = lowItems.length ? lowItems.map((item) => {
-                const status = getStockStatus(item);
-                return `
-                    <div class="stock-row">
-                        <div>
-                            <div class="stock-row-main">${item.name}</div>
-                            <div class="stock-row-sub">Balance ${getStockBalance(item)} ${item.unit} | Minimum ${item.min}</div>
+            document.getElementById("low-stock-content").innerHTML =
+                getStockStatusBannerHtml_() +
+                (lowItems.length ? lowItems.map((item) => {
+                    const status = getStockStatus(item);
+                    return `
+                        <div class="stock-row">
+                            <div>
+                                <div class="stock-row-main">${item.name}</div>
+                                <div class="stock-row-sub">Balance ${getStockBalance(item)} ${item.unit} | Minimum ${item.min}</div>
+                            </div>
+                            <div class="stock-chip ${status.className}">${status.label}</div>
                         </div>
-                        <div class="stock-chip ${status.className}">${status.label}</div>
-                    </div>
-                `;
-            }).join("") : `<div class="stock-note">Abhi koi low stock item nahi hai.</div>`;
+                    `;
+                }).join("") : (stockMaterialsStatus === "loading" || stockMaterialsStatus === "error" ? "" : `<div class="stock-note">Abhi koi low stock item nahi hai.</div>`));
         }
 
         function renderStockReport() {
             document.getElementById("stock-report-content").innerHTML = `
+                ${getStockStatusBannerHtml_()}
                 <div class="stock-section-stack">
                     <div class="stock-banner">
                         <div>
