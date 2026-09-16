@@ -1,3 +1,11 @@
+        (function () {
+            try {
+                const sig = "Seoni Circle App - Original developer: Akhilesh Patidar (AE) - github.com/akhileshpatidar-dotcom/patidar-seoni-circle-app - Build signature: SC-AKP-2026";
+                console.log("%c" + sig, "color:#0d9488; font-weight:bold;");
+                window.__APP_SIGNATURE__ = sig;
+            } catch (e) {}
+        })();
+
         const divisionConfigs = {
             "DIVISION SEONI": {
                 colorClass: "bg-blue-grad",
@@ -74,6 +82,36 @@
         const stockSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbwdjxhm7IyGlV8RACo3zIIZogwyu8HNLsWgtFp-XkSzDac4SeN_rlKDgrxsbDj6pdfK/exec";
         const shmsSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbyoMfuaxupxeZip7DoSoTkjCIM-43Ns4EkR-t5TX0ud222TIMbj9FdlbV0l8q-B8z8/exec";
         const stmComplaintScriptUrl = "https://script.google.com/macros/s/AKfycby9ZIXl5g_690kavCweIkYfGAz2NnAEiqgJzct5xhKaBjyCF08ELpguYTbgvTV_lAN6UQ/exec";
+        // NEW MODULE (2026-09-14): O&M/VIG Report - DC/Division/Circle "Daily
+        // Progress" ka 4th tile (Mobile/Live-Revenue/Freeze-Revenue ke saath).
+        // Backend (om-vig-submit-script.gs) usi Google Sheet par bana hai jisme
+        // "Pending Consumer Details" wali tab (frozen baseline, hamesha ke liye)
+        // hai - paid list Circle-wide ek sath upload hoti hai, backend khud
+        // Panchanama_No se match karke har DC ke apne "PAID - {DC}" tab me daal
+        // deta hai (Revenue cash-list jaisa hi pattern, user ne khud request kiya).
+        const omvigSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbwiDzuW3_k50fqPcKp-FU5BiFeQc9lCywoBI5cDbXSU95GHsRvbKrQvDNYuw8-sKYOL/exec";
+        let omvigPendingCache_ = {}; // key: DC name ya "ALL" -> { rows, freeze_date }
+        let omvigPaidCache_ = {};    // key: DC name ya "ALL" -> rows[]
+        let omvigDailyReportCache_ = null; // { date, rows } - dedicated getDailyReport endpoint ka result (2026-09-15 speed fix)
+        let omvigReportCache_ = null; // { scopeKey, rowsWithStatus, freeze_date }
+        let omvigAdminStatus = null;  // { freeze_date, pending_count }
+        let omvigFreezeStatusCache_ = null; // fast { freeze_date, pending_count } - see fetchOmvigFreezeStatus_
+        // USER REQUEST (2026-09-14): Division/Circle level par drill-down dropdown
+        // filters (Division -> DC -> Paid/Unpaid) - screen par jo bhi chuna hai
+        // uska state yahan. DC level par sirf status use hota hai.
+        let omvigFilterDivision = "";
+        let omvigFilterDc = "";
+        let omvigFilterStatus = ""; // "" | "PAID" (part paid samet) | "PENDING"
+        // USER REQUEST (2026-09-14): Revenue Live Progress jaisa hi animated
+        // "%" progress-bar (renderSyncingProgress) - stale render race se bachne
+        // ke liye token pattern (Revenue ke revenueLiveProgressToken jaisa hi).
+        let omvigProgressToken = 0;
+        // USER REQUEST (2026-09-14): Revenue jaisa hi Daily/Monthly toggle - Daily
+        // FAST rahe isliye ek alag lightweight path hai (dekhein
+        // loadOmvigDailyReportData_). Default MONTHLY (purana/existing poora
+        // PAID/PENDING/PART-PAID view, koi badlav nahi) - user khud "DAILY" chun
+        // sakta hai fast view ke liye.
+        let omvigReportMode = "MONTHLY"; // "DAILY" | "MONTHLY"
         const vehicleReadingStorageKey = "seoni_vehicle_reading_state_v1";
         const vehicleReadingListStorageKey = "seoni_vehicle_reading_list_v1";
         const vehicleReadingCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQIv4JMsV1n8vy9cJ0o2UaS45-fh_c3n9u-rqwXjuCZWDNZNRaJlgUKnT4gtP3_kTtpCrQvrTcojWQo/pub?output=csv";
@@ -142,6 +180,15 @@
         ];
 
         let activeDiv = "", activeDC = "", activeGrad = "bg-teal-grad", summaryMode = "DAILY", summaryModule = "", activeViewLevel = "", currentData = null, pendingLevel = "", dcCacheRaw = {}, dcCacheRows = {}, uiListSummary = [], grandTC = 0, grandTU = 0, grandTW = 0, courtCaseRaw = "", courtCaseCacheByDc = {}, courtCaseLines = [], courtCaseRecords = [], lokDistributedRows = [], lokDistributedLoaded = false, currentCourtRecord = null, receiverGeoData = null;
+        // AUDIT ITEM #7 (2026-09-15): Freeze/O&M-VIG admin POST actions ab backend
+        // par bhi password verify karte hain (Script Property se, pehle sirf yeh
+        // frontend gate tha - koi bhi endpoint URL jaan kar seedha curl/Postman se
+        // admin action call kar sakta tha). Jo password yahan is-modal me sahi bhara
+        // gaya, wahi neeche yaad rakh kar har admin POST ke saath `admin_password`
+        // field me backend ko bhej dete hain - backend Script Property se compare
+        // karta hai (jo is frontend wali "AE123"/"admin123" se ALAG rakhni chahiye,
+        // taaki sirf public app.js padh lene se koi backend ko bypass na kar sake).
+        let freezeAdminPasswordEntered = "", omvigAdminPasswordEntered = "";
         // Progress Report (Daily Progress) ke Revenue tab me Category Wise ke saath-saath
         // Target vs Achievement aur Top 20/50 Defaulters bhi dropdown se select ho sakein -
         // teeno DC/Division/Circle scope automatically activeViewLevel se hi follow karte
@@ -201,6 +248,7 @@
         let meterCheckingPhoto2 = { base64: "", name: "" };
         let meterCheckingPhoto3 = { base64: "", name: "" };
         let meterCheckingReportRows = [], meterCheckingReportLoadedDcKey = "";
+        let meterCheckingReportStale = false; // ITEM-8 FIX (2026-09-15): true jab fresh fetch fail hokar purana cached data dikha rahe hain
         let meterCheckingReportMode = "DAILY";
         let lastRevenueProgressBoxData = null;
         let lastRevenueProgressStaffData = null;
@@ -311,12 +359,36 @@
         let feederReportRows = [];
         let feederReportLoaded = false;
         let feederReportLoadMessage = "";
+        // USER REQUEST (2026-09-14): Sub DN Chhapara ke "Daily Progress" me SHMS/
+        // Feeder Reading ki tarah ab "Daily Hourly Peak Load" ka bhi report - isi
+        // pattern (poora history ek baar load, Daily/Monthly date select karke
+        // Excel/PDF) me, existing peakLoadSubmitScriptUrl?action=getSummary endpoint
+        // (pehle se hi loadPeakLoadSubmittedRows() me istemal hota tha) se hi.
+        let peakLoadReportRows = [];
+        let peakLoadReportLoaded = false;
+        let peakLoadReportLoadMessage = "";
+        // NEW FEATURE (2026-09-14): STM Complaint report ke liye same pattern -
+        // user ne backend (.gs) ka getSummary action add karwa diya hai isliye
+        // ab yeh report bhi Peak Load ki tarah ban sakti hai.
+        let stmComplaintReportRows = [];
+        let stmComplaintReportLoaded = false;
+        let stmComplaintReportLoadMessage = "";
+        // BUG FIX (2026-09-14): substation-wise lightweight history cache - dekhein
+        // loadFeederSubstationHistory_() aur getAllFeederHistoryEntries_().
+        let feederSubstationHistoryCache_ = {};
+        // USER REQUEST (2026-09-14): jab tak substation ka halka history data load
+        // ho raha hai (loadFeederSubstationHistory_), tab tak purana/khaali cache
+        // dekh kar galat "saari dates Pending" wala red alert na dikhe - iski jagah
+        // ek neutral "Data sync ho raha hai" message dikhta hai jab tak load poora
+        // na ho jaye.
+        let feederHistorySyncingFor_ = "";
         let selectedFeederSubstation = "";
         let activeFeederOperator = null;
         let activeShmsOperator = null;
         let activeStmComplaintOperator = null;
         let shmsProgressRows = [];
         let shmsProgressLoaded = false;
+        let shmsProgressStale = false; // ITEM-8 FIX (2026-09-15): true jab fresh fetch fail hokar purana cached data dikha rahe hain
         let shmsProgressMode = "DAILY";
         let progressReportSource = "SHMS";
         let shmsPendingTrackerRows = [];
@@ -588,6 +660,44 @@
             return mobileAlreadySubmittedMap[`${dc}__${ivrs}`] || null;
         }
 
+        // SPEED FIX (2026-09-15, USER-REPORTED slowness): "Download Summary Report",
+        // "Updated List Download" aur "Wrong Mobile No List" - teeno DC-level screens
+        // (in DC select ke bina yeh error hi dete hain) bina "dc" param ke
+        // `getSummary` call karti thi, jabki backend (.gs, 2026-09-13 se) already
+        // `dc` param support karta hai (diya jaaye to sirf usi ek sheet scan hoti
+        // hai, warna sabhi ~24 sheets) - Daily Progress ke mobile tile me yeh
+        // param pehle se use ho raha tha, teeno "3-dot menu" screens me chhoot
+        // gaya tha. Fix: ek shared, per-DC 60-second TTL cache (+ in-flight
+        // dedupe) - teeno screens ab isi se data lete hain, taaki (a) har call me
+        // sirf ek DC ki chhoti sheet scan ho, aur (b) ek screen se dusri par
+        // jaane (Summary -> Wrong List -> Updated List) par 60 second ke andar
+        // dobara network fetch na ho.
+        const mobileUpdateDcSummaryCache_ = {}; // dcName -> { data, cachedAt }
+        const mobileUpdateDcSummaryFetchPromises_ = {};
+        const MOBILE_UPDATE_DC_SUMMARY_TTL_MS = 60000;
+        async function fetchMobileUpdateDcSummary_(dcName, forceRefresh = false) {
+            const dc = normalizeLookupValue(dcName || "");
+            if (!dc) return [];
+            const cached = mobileUpdateDcSummaryCache_[dc];
+            if (!forceRefresh && cached && (Date.now() - cached.cachedAt) < MOBILE_UPDATE_DC_SUMMARY_TTL_MS) {
+                return cached.data;
+            }
+            if (!forceRefresh && mobileUpdateDcSummaryFetchPromises_[dc]) {
+                return mobileUpdateDcSummaryFetchPromises_[dc];
+            }
+            mobileUpdateDcSummaryFetchPromises_[dc] = (async () => {
+                try {
+                    const cloudData = await loadRemoteJson(`${scriptURL}?action=getSummary&dc=${encodeURIComponent(dcName)}&t=${Date.now()}`);
+                    const data = Array.isArray(cloudData) ? cloudData : [];
+                    mobileUpdateDcSummaryCache_[dc] = { data, cachedAt: Date.now() };
+                    return data;
+                } finally {
+                    delete mobileUpdateDcSummaryFetchPromises_[dc];
+                }
+            })();
+            return mobileUpdateDcSummaryFetchPromises_[dc];
+        }
+
         function applyMobileAlreadySubmittedUi(entry) {
             const alreadyBox = document.getElementById("mobile-already-submitted-box");
             const entryBox = document.getElementById("mobile-entry-box");
@@ -795,7 +905,7 @@
             try {
                 if (!dcName) throw new Error("DC select nahi hai");
                 await ensureConsumerDataLoadedFor([dcName]);
-                const cloudData = await loadRemoteJson(`${scriptURL}?action=getSummary`);
+                const cloudData = await fetchMobileUpdateDcSummary_(dcName);
                 if (!isRenderValid()) { progress.stop(); return; }
                 const rows = getConsumerRows(dcName).map(mapRevenueConsumerRow).filter((row) => normalizeLookupDigits(row.ivrsNo));
                 const period = getMobileUpdateReportPeriod();
@@ -832,7 +942,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fca5a5";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadMobileUpdateReport(type) {
@@ -853,11 +963,11 @@
                     if (!window.jspdf?.jsPDF) { setMobileUpdateReportDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
-                    doc.text(periodLine, 148, 25, { align: "center" });
-                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 22, { align: "center" });
+                    doc.text(periodLine, 148, 28, { align: "center" });
+                    doc.autoTable({ startY: 34, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                     setMobileUpdateReportDownloadState(false, "PDF download ho chuki hai", true);
                     return;
@@ -993,7 +1103,7 @@
             try {
                 if (!dcName) throw new Error("DC select nahi hai");
                 await ensureConsumerDataLoadedFor([dcName]);
-                const cloudData = await loadRemoteJson(`${scriptURL}?action=getSummary`);
+                const cloudData = await fetchMobileUpdateDcSummary_(dcName);
                 if (!isRenderValid()) { progress.stop(); return; }
                 const rows = getConsumerRows(dcName).map(mapRevenueConsumerRow).filter((row) => normalizeLookupDigits(row.ivrsNo));
                 mobileUpdateWrongListAllRows = buildMobileUpdateWrongListRows(rows, dcName, cloudData);
@@ -1126,7 +1236,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fca5a5";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadMobileUpdateWrongList(type) {
@@ -1162,10 +1272,10 @@
                     if (!window.jspdf?.jsPDF) { setMobileUpdateWrongListDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
-                    doc.autoTable({ startY: 25, head: [summaryHeaders], body: summaryBodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 22, { align: "center" });
+                    doc.autoTable({ startY: 28, head: [summaryHeaders], body: summaryBodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
                     mobileUpdateWrongListSummaryRows.forEach((hqRow) => {
                         const detailRows = getMobileUpdateWrongListDetailRowsForHq(hqRow.hqName);
                         if (!detailRows.length) return;
@@ -1215,10 +1325,10 @@
                     if (!window.jspdf?.jsPDF) { setMobileUpdateWrongListDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
-                    doc.autoTable({ startY: 25, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 22, { align: "center" });
+                    doc.autoTable({ startY: 28, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                     setMobileUpdateWrongListDownloadState(false, "PDF download ho chuki hai", true);
                     return;
@@ -1360,7 +1470,7 @@
             try {
                 if (!dcName) throw new Error("DC select nahi hai");
                 await ensureConsumerDataLoadedFor([dcName]);
-                const cloudData = await loadRemoteJson(`${scriptURL}?action=getSummary`);
+                const cloudData = await fetchMobileUpdateDcSummary_(dcName);
                 if (!isRenderValid()) { progress.stop(); return; }
                 const rows = getConsumerRows(dcName).map(mapRevenueConsumerRow).filter((row) => normalizeLookupDigits(row.ivrsNo));
                 const period = getMobileUpdateListPeriod();
@@ -1396,7 +1506,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fca5a5";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadMobileUpdateList(type) {
@@ -1416,11 +1526,11 @@
                     if (!window.jspdf?.jsPDF) { setMobileUpdateListDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
-                    doc.text(periodLine, 148, 25, { align: "center" });
-                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6.5, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 22, { align: "center" });
+                    doc.text(periodLine, 148, 28, { align: "center" });
+                    doc.autoTable({ startY: 34, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6.5, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [185, 28, 28] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                     setMobileUpdateListDownloadState(false, "PDF download ho chuki hai", true);
                     return;
@@ -1518,7 +1628,34 @@
         }
 
         function verifyPassword() {
-            const pws = { STOCK: "AE123", EXCEL_TOOL_ADMIN: "AE123", PANCHNAMA_TOOL_ADMIN: "AE123", ARRANGE_EXCEL_TOOL_ADMIN: "AE123", IMAGE_TO_EXCEL_TOOL_ADMIN: "AE123", FREEZE_ADMIN: "AE123" };
+            // AUDIT ITEM #7 FOLLOW-UP FIX (2026-09-15, USER-REPORTED): FREEZE_ADMIN aur
+            // OMVIG_ADMIN pehle yahan bhi hardcoded "AE123"/"admin123" se match karte
+            // the - lekin backend ab in dono ke liye ALAG (naya, secret) Script-Property
+            // password maangta hai. Isse ek deadlock ban gaya tha: purana password bharo
+            // to yeh generic gate match ho jaata (panel khul jaata) par backend ka asli
+            // action (Upload/Freeze/Status change) "Invalid Admin Password" de deta;
+            // naya (sahi) password bharo to YEH gate hi "Invalid Password!" de deta
+            // (kyunki yeh abhi bhi purani value se compare kar raha tha) - panel kabhi
+            // khulta hi nahi. FIX: in dono ke liye ab yahan koi frontend password-check
+            // NAHI hai - panel jo bhi non-empty value type karo usी se khul jaata hai,
+            // aur wahi value backend ko `admin_password` field me jaati hai. Asli
+            // security ab poori tarah BACKEND par hai (Script Property se match) - galat
+            // password se panel to khul jaayega (jaisa pehle bhi effectively hota tha,
+            // kyunki frontend password public source me hi tha), lekin Upload Paid List/
+            // Freeze Now/Status change jaisa koi bhi real data-changing action galat
+            // password se fail hoga ("Invalid Admin Password" toast).
+            if (pendingLevel === "FREEZE_ADMIN" || pendingLevel === "OMVIG_ADMIN") {
+                const enteredPwd = document.getElementById("pwd-input").value;
+                if (!enteredPwd) { showToast("Password daliye", false); return; }
+                if (pendingLevel === "FREEZE_ADMIN") freezeAdminPasswordEntered = enteredPwd;
+                if (pendingLevel === "OMVIG_ADMIN") omvigAdminPasswordEntered = enteredPwd;
+                activeViewLevel = pendingLevel;
+                closePwdModal();
+                if (pendingLevel === "FREEZE_ADMIN") { initFreezeAdmin(); switchView("freeze-admin"); }
+                else { initOmvigAdmin(); switchView("omvig-admin"); }
+                return;
+            }
+            const pws = { STOCK: "AE123", EXCEL_TOOL_ADMIN: "AE123", PANCHNAMA_TOOL_ADMIN: "AE123", ARRANGE_EXCEL_TOOL_ADMIN: "AE123", IMAGE_TO_EXCEL_TOOL_ADMIN: "AE123" };
             if (document.getElementById("pwd-input").value === pws[pendingLevel]) {
                 activeViewLevel = pendingLevel;
                 closePwdModal();
@@ -1544,11 +1681,6 @@
                 if (pendingLevel === "IMAGE_TO_EXCEL_TOOL_ADMIN") {
                     initImageToExcelToolAdminUpload();
                     switchView("image-to-excel-tool-admin");
-                    return;
-                }
-                if (pendingLevel === "FREEZE_ADMIN") {
-                    initFreezeAdmin();
-                    switchView("freeze-admin");
                     return;
                 }
                 switchView("summary");
@@ -2082,6 +2214,24 @@
                 if (submittedKey !== "__") {
                     mobileAlreadySubmittedMap[submittedKey] = { mobile: n, date: new Date().toLocaleDateString("en-GB") };
                 }
+                // SPEED FIX (2026-09-15) ka side-effect: "Download Summary Report"/
+                // "Wrong Mobile No List"/"Updated List" ab is DC ka data 60-second
+                // cache (mobileUpdateDcSummaryCache_) se lete hain - agar yeh submit
+                // isi DC ke liye pehle se cache me ho, to yahin turant patch kar do
+                // (upar wale mobileAlreadySubmittedMap patch jaisa hi pattern), taaki
+                // turant baad in screens ko khola jaaye to bhi purana (stale) data na
+                // dikhe, cache TTL khatam hone ka wait na karna pade.
+                const patchDcKey = normalizeLookupValue(activeDC || "");
+                const patchCached = patchDcKey ? mobileUpdateDcSummaryCache_[patchDcKey] : null;
+                if (patchCached && Array.isArray(patchCached.data)) {
+                    patchCached.data.push({
+                        dc: activeDC,
+                        division: activeDiv,
+                        ivrs: currentData?.ivrs || "",
+                        correct_mobile: n,
+                        date: new Date().toLocaleDateString("en-GB")
+                    });
+                }
                 resetForm(true);
                 const searchInput = document.getElementById("search-ivrs");
                 if (searchInput) searchInput.focus();
@@ -2186,6 +2336,7 @@
             MOBILE: { icon: "📱", label: "Updated Mobile No" },
             REVENUE: { icon: "💰", label: "Live-Revenue Report" },
             FREEZE: { icon: "🧊", label: "Freeze-Revenue Report" },
+            OMVIG: { icon: "🛡️", label: "O&M/VIG Report" },
             LOK_ADALAT: { icon: "⚖️", label: "Lok Adalat Notice" }
         };
 
@@ -2251,6 +2402,16 @@
                 if (body) body.innerHTML = renderFreezeModuleSummaryHtml();
                 return;
             }
+            if (summaryModule === "OMVIG") {
+                // USER REQUEST (2026-09-14): pehle yahan ek plain spinner-only
+                // message dikhta tha - ab Revenue Live Progress jaisa hi ek-sa
+                // animated "%" progress-bar dikhta hai (loadAndRenderOmvigReport
+                // khud renderSyncingProgress se yeh UI banata hai), taaki poori
+                // app me jahan bhi data sync hota hai wahan ek jaisa hi pattern
+                // dikhe.
+                loadAndRenderOmvigReport();
+                return;
+            }
             refreshSummary();
         }
 
@@ -2267,6 +2428,7 @@
         // user khud kisi tile par tap kare.
         function resetProgressReportTypeSelection() {
             summaryModule = "";
+            omvigFilterDivision = ""; omvigFilterDc = ""; omvigFilterStatus = "";
             updateProgressReportPickerUI();
             const reportTypeBox = document.getElementById("progress-report-type-box");
             const dateWrap = document.getElementById("progress-report-date-wrap");
@@ -2898,6 +3060,32 @@
         // thi. activeViewLevel/activeDC/activeDiv ko sirf computation ke liye
         // temporarily "CIRCLE" kiya jaata hai, phir turant wapas restore ho
         // jaata hai - user jis bhi screen par ho (Admin panel), wahi bana rahega.
+        // USER REQUEST (2026-09-13): "Freeze Now" beech me ruk jaaye (koi category
+        // par 2 attempt ke bad bhi fail, tab band/network chali gayi, wagerah) to
+        // pehle poora 24-DC/9-category process (10-15+ minute) dobara se shuru
+        // karna padta tha. Ab is browser me ab tak kitni category safal hui, iska
+        // record localStorage me rakhte hain - taaki (a) dobara "Freeze Now" dabane
+        // par pehle se safal categories SKIP ho jaayein, sirf baaki bachi hui se
+        // aage badhe, aur (b) app/tab band karke dobara khole to Admin Freeze
+        // Control screen khulte hi "pichhli baar kitna % hua tha" turant dikh jaaye.
+        // NOTE: yeh backend me apne-aap chalne wala background job NAHI hai (Apps
+        // Script Web App ko is browser tab se hi request bhejni padti hai) - lekin
+        // dobara click karna ab bahut halka/fast ho jaata hai kyonki sirf bachi hui
+        // categories dobara save hoti hain, poora process nahi.
+        const FREEZE_NOW_PROGRESS_KEY = "seoniFreezeNowProgress_v1";
+        function readFreezeNowProgress() {
+            try {
+                const raw = localStorage.getItem(FREEZE_NOW_PROGRESS_KEY);
+                return raw ? JSON.parse(raw) : null;
+            } catch (_) { return null; }
+        }
+        function writeFreezeNowProgress(progress) {
+            try { localStorage.setItem(FREEZE_NOW_PROGRESS_KEY, JSON.stringify(progress)); } catch (_) {}
+        }
+        function clearFreezeNowProgress() {
+            try { localStorage.removeItem(FREEZE_NOW_PROGRESS_KEY); } catch (_) {}
+        }
+
         async function runRevenueFreezeNow() {
             if (!revenueFreezeTrackingScriptUrl || revenueFreezeTrackingScriptUrl.indexOf("PASTE_") === 0) {
                 return showToast("Freeze script URL abhi set nahi hai", false);
@@ -3015,38 +3203,86 @@
                 // save karne me 90 second se zyada lag sakta hai - isliye 4 minute (240
                 // second) ka timeout diya hai. Saath hi ab % progress bhi dikhta hai
                 // (jaise Admin Cash List upload me dikhta hai), 100% hote hi success.
+                // Resume-support: pichhli baar (isi din ka freeze_id) jitni categories
+                // safal ho chuki thi, unhe is baar skip kar dete hain.
+                const existingProgress = readFreezeNowProgress();
+                const alreadyDoneKeys = new Set(
+                    (existingProgress && existingProgress.freezeId === freezeId && !existingProgress.completed && Array.isArray(existingProgress.doneCategories))
+                        ? existingProgress.doneCategories
+                        : []
+                );
+                const doneCategoryKeysSoFar = Array.from(alreadyDoneKeys);
+                if (alreadyDoneKeys.size) {
+                    setStatus(`Pichhli baar ${alreadyDoneKeys.size}/${categories.length} category save ho chuki thi - unhe skip karke baaki bachi hui se aage badha rahe hain...`, false);
+                }
+
                 let categoriesDone = 0;
                 for (const cat of categories) {
-                    const percentNow = Math.round((categoriesDone / categories.length) * 100);
-                    setStatus(`${percentNow}% - Server par "${cat.label}" (${cat.rows.length} consumer) save ho raha hai... kripya wait kijiye`, false);
-                    const response = await fetchWithTimeout(revenueFreezeTrackingScriptUrl, {
-                        method: "POST",
-                        headers: { "Content-Type": "text/plain;charset=UTF-8" },
-                        body: JSON.stringify({ action: "saveFreezeSnapshot", freeze_id: freezeId, freeze_label: freezeLabel, freeze_date: nowIso, category: cat.key, rows: cat.rows })
-                    // PERFORMANCE FIX (2026-09-12) ke saath saath, ek genuine
-                    // SAME-DAY RE-RUN (jab purana data hatana bhi padta hai) ab
-                    // bhi thoda dheema ho sakta hai - Apps Script ka khud ka hard
-                    // execution limit 6 minute (360s) hai, isliye client timeout
-                    // usse thoda kam (5.5 minute) rakha hai taaki server ko poora
-                    // mauka mile, lekin browser hamesha ke liye atka na rahe.
-                    }, 330000);
-                    const text = await response.text();
-                    let parsed = {};
-                    try { parsed = JSON.parse(text || "{}"); } catch (_) {}
-                    // USER-REPORTED (2026-09-12): "Freeze save fail (Non Payee 6M)" jaisa
-                    // generic message dikh raha tha, jisse asli wajah pata nahi chalti thi -
-                    // ab agar backend se JSON ki jagah kuch aur (HTML error page, quota/
-                    // timeout error, redeploy-needed page) ya galat HTTP status aaye, to
-                    // uska ek chhota sa raw preview aur HTTP status bhi error message me
-                    // dikhega - taaki asli wajah pata chal sake.
-                    if (!response.ok || parsed.status === "error") {
-                        const rawSnippet = String(text || "").replace(/\s+/g, " ").trim().slice(0, 180);
-                        throw new Error(parsed.message || `Freeze save fail (${cat.label}) - HTTP ${response.status}${rawSnippet ? ": " + rawSnippet : ""}`);
+                    if (alreadyDoneKeys.has(cat.key)) {
+                        categoriesDone += 1;
+                        continue;
                     }
+                    const percentNow = Math.round((categoriesDone / categories.length) * 100);
+                    // BUG FIX (2026-09-13) - USER-REPORTED: "Freeze Now" beech me ek category
+                    // par HTTP 404 (Apps Script ka apna known "echo" content-delivery glitch,
+                    // jo pehle bhi Freeze Report/ensureRevenueFreezeActiveInfo me dekha gaya
+                    // tha - kabhi-kabhi high load par 1 baar aata hai, dobara try karne par
+                    // chala jaata hai) par fail ho jaati thi, aur poora 24-DC/9-category
+                    // process (jisme kaafi samay lagta hai) restart karna padta tha. Ab har
+                    // category ke liye 2 attempt (1.5s gap) try hote hain, isi tarah jaise
+                    // ensureRevenueFreezeActiveInfo me pehle se hai - poore process ko dobara
+                    // chalane ki zaroorat sirf tab hi padegi jab dono attempt fail ho jaayein.
+                    let categorySaved = false, lastCategoryErr = null;
+                    for (let attempt = 1; attempt <= 2 && !categorySaved; attempt++) {
+                        const retrySuffix = attempt > 1 ? ` (dobara try - attempt ${attempt})` : "";
+                        setStatus(`${percentNow}% - Server par "${cat.label}" (${cat.rows.length} consumer) save ho raha hai${retrySuffix}... kripya wait kijiye`, false);
+                        try {
+                            const response = await fetchWithTimeout(revenueFreezeTrackingScriptUrl, {
+                                method: "POST",
+                                headers: { "Content-Type": "text/plain;charset=UTF-8" },
+                                body: JSON.stringify({ action: "saveFreezeSnapshot", admin_password: freezeAdminPasswordEntered, freeze_id: freezeId, freeze_label: freezeLabel, freeze_date: nowIso, category: cat.key, rows: cat.rows })
+                            // PERFORMANCE FIX (2026-09-12) ke saath saath, ek genuine
+                            // SAME-DAY RE-RUN (jab purana data hatana bhi padta hai) ab
+                            // bhi thoda dheema ho sakta hai - Apps Script ka khud ka hard
+                            // execution limit 6 minute (360s) hai, isliye client timeout
+                            // usse thoda kam (5.5 minute) rakha hai taaki server ko poora
+                            // mauka mile, lekin browser hamesha ke liye atka na rahe.
+                            }, 330000);
+                            const text = await response.text();
+                            let parsed = {};
+                            try { parsed = JSON.parse(text || "{}"); } catch (_) {}
+                            // USER-REPORTED (2026-09-12): "Freeze save fail (Non Payee 6M)" jaisa
+                            // generic message dikh raha tha, jisse asli wajah pata nahi chalti thi -
+                            // ab agar backend se JSON ki jagah kuch aur (HTML error page, quota/
+                            // timeout error, redeploy-needed page) ya galat HTTP status aaye, to
+                            // uska ek chhota sa raw preview aur HTTP status bhi error message me
+                            // dikhega - taaki asli wajah pata chal sake.
+                            if (!response.ok || parsed.status === "error") {
+                                const rawSnippet = String(text || "").replace(/\s+/g, " ").trim().slice(0, 180);
+                                throw new Error(parsed.message || `Freeze save fail (${cat.label}) - HTTP ${response.status}${rawSnippet ? ": " + rawSnippet : ""}`);
+                            }
+                            categorySaved = true;
+                        } catch (err) {
+                            lastCategoryErr = err;
+                            if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1500));
+                        }
+                    }
+                    if (!categorySaved) throw lastCategoryErr;
                     categoriesDone += 1;
+                    doneCategoryKeysSoFar.push(cat.key);
+                    // Har category safal hone ke turant baad progress save karte hain -
+                    // taaki beech me kahin bhi ruk jaaye (agli category fail, tab band,
+                    // network), ab tak ka progress kabhi na khoye.
+                    writeFreezeNowProgress({
+                        freezeId, freezeDate: nowIso, totalCategories: categories.length,
+                        doneCategories: doneCategoryKeysSoFar,
+                        updatedAt: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+                        completed: false
+                    });
                     setStatus(`${Math.round((categoriesDone / categories.length) * 100)}% ho gaya...`, false);
                 }
 
+                clearFreezeNowProgress();
                 setStatus(`✅ 100% - Freeze SUCCESSFUL (${freezeLabel}) - Non Payee 3M: ${np3.length}, 6M: ${np6.length}, Since Connection: ${sinceConn.length}, Top 20: ${top20.length}, Top 50: ${top50.length}`, true);
                 showToast("Freeze ho gaya", true);
                 progressFreezeActiveFreeze = null;
@@ -3055,7 +3291,7 @@
                 lastRevenueProgressFreezeScopeKey = null;
                 await loadFreezeAdminList();
             } catch (error) {
-                setStatus("Freeze nahi ho paya: " + (error?.message || "error"), false);
+                setStatus("Freeze nahi ho paya: " + (error?.message || "error") + " (jo categories safal ho chuki hain wo save rahengi - 'Freeze Now' dobara dabane par wahi se aage badhega)", false);
                 showToast("Freeze nahi ho paya", false);
             } finally {
                 activeViewLevel = savedViewLevel; activeDC = savedDC; activeDiv = savedDiv;
@@ -3074,7 +3310,7 @@
                 listBox.innerHTML = `<div style="text-align:center; color:#991b1b; font-size:0.68rem;">Freeze script URL set nahi hai</div>`;
                 return;
             }
-            listBox.innerHTML = `<div style="text-align:center; color:#64748b; font-size:0.68rem;">SYNCING DATA... PLEASE WAIT</div>`;
+            listBox.innerHTML = `<div style="text-align:center; color:#64748b; font-size:0.68rem;">SYNCING DATA... PLEASE WAIT<div class="app-sync-spinner"></div></div>`;
             try {
                 const parsed = await loadRemoteJson(`${revenueFreezeTrackingScriptUrl}?action=listFreezes`);
                 const freezes = Array.isArray(parsed?.freezes) ? parsed.freezes : [];
@@ -3150,7 +3386,7 @@
                 const response = await fetchWithTimeout(revenueFreezeTrackingScriptUrl, {
                     method: "POST",
                     headers: { "Content-Type": "text/plain;charset=UTF-8" },
-                    body: JSON.stringify({ action: "setFreezeStatus", freeze_id: freezeId, status: newStatus })
+                    body: JSON.stringify({ action: "setFreezeStatus", admin_password: freezeAdminPasswordEntered, freeze_id: freezeId, status: newStatus })
                 }, 20000);
                 const text = await response.text();
                 let parsed = {};
@@ -3174,7 +3410,7 @@
                 const response = await fetchWithTimeout(revenueFreezeTrackingScriptUrl, {
                     method: "POST",
                     headers: { "Content-Type": "text/plain;charset=UTF-8" },
-                    body: JSON.stringify({ action: "setFreezeDcStatus", freeze_id: freezeId, dc_name: dcName, status: newStatus })
+                    body: JSON.stringify({ action: "setFreezeDcStatus", admin_password: freezeAdminPasswordEntered, freeze_id: freezeId, dc_name: dcName, status: newStatus })
                 }, 20000);
                 const text = await response.text();
                 let parsed = {};
@@ -3196,9 +3432,28 @@
             askPassword("FREEZE_ADMIN");
         }
 
+        function openOmvigAdmin() {
+            closeHeaderMenu();
+            askPassword("OMVIG_ADMIN");
+        }
+
         function initFreezeAdmin() {
             const statusBox = document.getElementById("freeze-admin-status");
             if (statusBox) statusBox.style.display = "none";
+            // USER REQUEST (2026-09-13): agar pichhli baar "Freeze Now" beech me hi
+            // adhoora reh gaya tha, to screen khulte hi turant dikhna chahiye ki
+            // kitna % ho chuka tha (localStorage-based resume-progress record,
+            // dekhein runRevenueFreezeNow) - taaki dobara "Freeze Now" dabane se
+            // pehle andaza ho jaye, aur dabane par wahi se aage badhega.
+            const savedProgress = readFreezeNowProgress();
+            if (statusBox && savedProgress && !savedProgress.completed && savedProgress.totalCategories && (savedProgress.doneCategories || []).length > 0) {
+                const doneCount = savedProgress.doneCategories.length;
+                const pct = Math.round((doneCount / savedProgress.totalCategories) * 100);
+                statusBox.style.display = "block";
+                statusBox.style.background = "#fff7ed";
+                statusBox.style.color = "#9a3412";
+                statusBox.innerText = `⏸ Pichhli baar ka "Freeze Now" adhoora reh gaya tha - ${pct}% (${doneCount}/${savedProgress.totalCategories} category) save ho chuki thi${savedProgress.updatedAt ? " (" + savedProgress.updatedAt + " tak)" : ""}. "Freeze Now" dobara dabane par yahi se aage badhega.`;
+            }
             loadFreezeAdminList();
         }
 
@@ -3230,11 +3485,28 @@
         async function ensureRevenueFreezeActiveInfo(forceRefresh = false) {
             if (progressFreezeActiveFreeze && !forceRefresh) return progressFreezeActiveFreeze;
             if (!revenueFreezeTrackingScriptUrl || revenueFreezeTrackingScriptUrl.indexOf("PASTE_") === 0) return null;
-            const parsed = await withAppsScriptConcurrencyGate_(revenueFreezeTrackingScriptUrl, () => loadRemoteJson(`${revenueFreezeTrackingScriptUrl}?action=listFreezes`, 45000));
-            const freezes = Array.isArray(parsed?.freezes) ? parsed.freezes : [];
-            const active = freezes.filter((f) => f.status !== "UNFROZEN").sort((a, b) => String(b.freeze_date || "").localeCompare(String(a.freeze_date || "")))[0] || null;
-            progressFreezeActiveFreeze = active;
-            return active;
+            // BUG FIX (2026-09-13, further): Console se confirm hua ki yahan kabhi-kabhi
+            // Apps Script ka "echo" content-delivery layer 404/HTML error page de deta
+            // hai (JSON ki jagah <!DOCTYPE...), jisse JSON.parse yahin throw ho jaata
+            // (ek hi attempt hone se turant poori report fail ho jaati thi, chahe yeh
+            // ek transient/one-off hiccup ho). Ab yahan bhi 2 attempts (800ms gap) -
+            // dobara koshish karne par yeh aksar chal jaata hai. Sab attempts fail hone
+            // par bhi pehle jaisa hi throw karte hain (upar wala comment dekhein - taaki
+            // galat "no freeze active" na dikhe, sahi "Try Again" wala message dikhe).
+            let lastErr = null;
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    const parsed = await withAppsScriptConcurrencyGate_(revenueFreezeTrackingScriptUrl, () => loadRemoteJson(`${revenueFreezeTrackingScriptUrl}?action=listFreezes`, 45000));
+                    const freezes = Array.isArray(parsed?.freezes) ? parsed.freezes : [];
+                    const active = freezes.filter((f) => f.status !== "UNFROZEN").sort((a, b) => String(b.freeze_date || "").localeCompare(String(a.freeze_date || "")))[0] || null;
+                    progressFreezeActiveFreeze = active;
+                    return active;
+                } catch (err) {
+                    lastErr = err;
+                    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 800));
+                }
+            }
+            throw lastErr;
         }
 
         // USER REQUEST (2026-09-12): Har DC ka freeze data backend par apni ALAG
@@ -3296,24 +3568,91 @@
             return getAllDcNames();
         }
 
-        // Current scope (DC/Division/Circle) ki har DC ka snapshot alag-alag
-        // fetch karke, dc_name wapas jod kar ek hi merged array banata hai - DC
-        // level me sirf 1 fetch, Division/Circle me kai fetch (parallel, max 5).
-        // Jo DC ki tab hi nahi hai (kabhi live nahi hui ya us category me kabhi
-        // koi consumer nahi tha), uska seedha khaali [] aata hai - error nahi.
-        // Jo DC individually UNFROZEN hai, uske rows merge me shaamil nahi hote
+        // SPEED FIX (2026-09-15, USER-REPORTED slowness): pehle Division/Circle
+        // scope ki har target DC ke liye ALAG single-DC HTTP call lagti thi (max
+        // 24, 2-concurrent gate se throttle) - backend (.gs) ab ek naya `dc_names`
+        // (comma-list) batch mode support karta hai jo kai DC EK HI call me deta
+        // hai (FREEZE INDEX/FREEZE DC STATUS bhi sirf ek baar padhta hai, 24 baar
+        // ki jagah). Poore Circle ko ek hi mega-call me maangna response-size
+        // risk hai (bade NP3/NP6/SINCE_CONNECTION categories me Apps Script
+        // "echo" layer bade response par 404 de sakta hai, jaisa O&M/VIG me pehle
+        // mil chuka tha), isliye chhote batches (FREEZE_SNAPSHOT_BATCH_SIZE DC
+        // per call) me bhejte hain - round-trips fir bhi 24 se ghatkar ~4-5 tak
+        // aa jaate hain. Kisi batch ka naya endpoint fail ho jaaye (purana
+        // backend abhi deploy hai, ya kuch aur) to sirf usi batch ki DCs ke liye
+        // purana per-DC single-call fallback chal jaata hai - report kabhi bhi
+        // khaali/galat nahi dikhegi, sirf batch-fail hone par utni hi dheemi
+        // (purani jaisi) hogi.
+        const FREEZE_SNAPSHOT_BATCH_SIZE = 6;
+        async function fetchRevenueFreezeSnapshotBatch_(freezeId, category, dcNames, attempts = 2) {
+            for (let attempt = 1; attempt <= attempts; attempt++) {
+                try {
+                    const url = `${revenueFreezeTrackingScriptUrl}?action=getFreezeSnapshot&freeze_id=${encodeURIComponent(freezeId)}&category=${encodeURIComponent(category)}&dc_names=${encodeURIComponent(dcNames.join(","))}`;
+                    const parsed = await withAppsScriptConcurrencyGate_(revenueFreezeTrackingScriptUrl, () => loadRemoteJson(url, 90000));
+                    if (parsed && parsed.status === "success" && parsed.dc_data) return parsed.dc_data;
+                } catch (_) { /* neeche fallback hoga */ }
+                if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 800));
+            }
+            return null;
+        }
+
+        // Current scope (DC/Division/Circle) ki har DC ka snapshot fetch karke,
+        // dc_name wapas jod kar ek hi merged array banata hai. Jo DC ki tab hi
+        // nahi hai (kabhi live nahi hui ya us category me kabhi koi consumer
+        // nahi tha), uska seedha khaali [] aata hai - error nahi. Jo DC
+        // individually UNFROZEN hai, uske rows merge me shaamil nahi hote
         // (Division/Circle report se wo DC hat jaata hai, baaki sab same rahta
         // hai) - dcStatusMap se pata chal jaata hai ki kaunsi DC unfrozen thi.
         async function fetchRevenueFreezeSnapshotRowsForScope(freezeId, category) {
             const targetDcs = getRevenueFreezeTargetDcs();
             const merged = [];
             const dcStatusMap = {};
-            await runWithConcurrencyLimit_(targetDcs, 5, async (dcName) => {
-                const normalizedDc = normalizeDcName(dcName);
-                const { rows, dc_status } = await fetchRevenueFreezeSnapshotRows(freezeId, category, dcName);
-                dcStatusMap[normalizedDc] = dc_status;
-                if (dc_status === "UNFROZEN") return;
-                rows.forEach((r) => merged.push({ ...r, dc_name: normalizedDc }));
+
+            // DC-level (sirf 1 target) - purana single-call path hi behtar hai,
+            // batching ka koi fayda nahi.
+            if (targetDcs.length <= 1) {
+                await runWithConcurrencyLimit_(targetDcs, 5, async (dcName) => {
+                    const normalizedDc = normalizeDcName(dcName);
+                    const { rows, dc_status } = await fetchRevenueFreezeSnapshotRows(freezeId, category, dcName);
+                    dcStatusMap[normalizedDc] = dc_status;
+                    if (dc_status === "UNFROZEN") return;
+                    rows.forEach((r) => merged.push({ ...r, dc_name: normalizedDc }));
+                });
+                return { rows: merged, dcStatusMap };
+            }
+
+            const batches = [];
+            for (let i = 0; i < targetDcs.length; i += FREEZE_SNAPSHOT_BATCH_SIZE) {
+                batches.push(targetDcs.slice(i, i + FREEZE_SNAPSHOT_BATCH_SIZE));
+            }
+            await runWithConcurrencyLimit_(batches, 3, async (batchDcs) => {
+                const dcData = await fetchRevenueFreezeSnapshotBatch_(freezeId, category, batchDcs);
+                if (dcData) {
+                    batchDcs.forEach((dcName) => {
+                        const normalizedDc = normalizeDcName(dcName);
+                        const entry = dcData[normalizedDc] || {};
+                        const rows = Array.isArray(entry.rows) ? entry.rows : [];
+                        const dcStatus = String(entry.dc_status || "").trim() || "ACTIVE";
+                        dcStatusMap[normalizedDc] = dcStatus;
+                        // Batch response se mila data DC-level single-call cache me
+                        // bhi bhar dete hain - taaki agar user isi DC ka DC-level
+                        // report bhi kholta hai (ya dobara isi scope ko re-render
+                        // karta hai), to dobara network call na lage.
+                        revenueFreezeSnapshotCache[freezeId + "|" + category + "|" + normalizedDc] = { rows, dc_status: dcStatus };
+                        if (dcStatus === "UNFROZEN") return;
+                        rows.forEach((r) => merged.push({ ...r, dc_name: normalizedDc }));
+                    });
+                } else {
+                    // Batch endpoint fail - sirf isi batch ki DCs ke liye purana
+                    // per-DC single-call fallback.
+                    await runWithConcurrencyLimit_(batchDcs, 5, async (dcName) => {
+                        const normalizedDc = normalizeDcName(dcName);
+                        const { rows, dc_status } = await fetchRevenueFreezeSnapshotRows(freezeId, category, dcName);
+                        dcStatusMap[normalizedDc] = dc_status;
+                        if (dc_status === "UNFROZEN") return;
+                        rows.forEach((r) => merged.push({ ...r, dc_name: normalizedDc }));
+                    });
+                }
             });
             return { rows: merged, dcStatusMap };
         }
@@ -3473,7 +3812,21 @@
             const rowsWithStatus = rowsWithStatusUnsorted.slice().sort((a, b) => Number(b.pending_amount || 0) - Number(a.pending_amount || 0));
             let paidCount = 0, paidAmount = 0, totalFrozenAmount = 0, pendingAmount = 0;
             rowsWithStatus.forEach((r) => {
-                if (r.isPaidNow) { paidCount += 1; paidAmount += r.paidAmountNow; }
+                // BUG FIX (2026-09-14) - USER-REPORTED: Circle/Division/DC summary
+                // aur consumer list me "PAID AMOUNT" kabhi-kabhi ekdum bada (galat)
+                // dikh raha tha (jaise ek consumer ka frozen pending sirf ~9,378
+                // tha lekin "paid" 3,00,128 dikh raha tha). ASLI WAJAH: r.paidAmountNow
+                // us consumer ki cash list me AB TAK ki SAARI payments ka total hai
+                // (koi date-filter nahi, taaki purani upload hui cash list bhi
+                // match ho - yeh 2026-09-12 ka jaanboojh kar kiya gaya fix hai),
+                // jabki AG/seasonal consumer jaisi baar-baar payment karne wali
+                // entries ke liye yeh unka POORA payment history total ban jaata
+                // hai, sirf isi freeze ke pending bill ka nahi. isPaidNow ke liye
+                // yeh sahi hai (agar total payment >= frozen pending, to PAID),
+                // lekin "kitna PAID hua" dikhane ke liye sirf itna hi sahi hai
+                // jitna is frozen bill ka tha (r.pending_amount) - baaki unka
+                // purana/anya payment history hai, is report se related nahi.
+                if (r.isPaidNow) { paidCount += 1; paidAmount += Number(r.pending_amount || 0); }
                 totalFrozenAmount += Number(r.pending_amount || 0);
                 // USER REQUEST (2026-09-13): Division/Circle summary me "abhi kitna
                 // bakaya hai" saaf dikhna chahiye - "Frozen Total Amount" wahi
@@ -3534,15 +3887,24 @@
             const progress = body ? renderSyncingProgress(body, isStillValid) : null;
             try {
                 const active = await ensureRevenueFreezeActiveInfo();
+                console.log("[FreezeReport] step1 active =", active); // DIAGNOSTIC (2026-09-13, temp)
                 if (active) {
                     const fetchCategory = getEffectiveFreezeFetchCategory(progressFreezeCategory);
+                    console.log("[FreezeReport] step2 calling fetchRevenueFreezeSnapshotRowsForScope", active.freeze_id, fetchCategory); // DIAGNOSTIC (2026-09-13, temp)
                     const { rows, dcStatusMap } = await fetchRevenueFreezeSnapshotRowsForScope(active.freeze_id, fetchCategory);
+                    console.log("[FreezeReport] step3 snapshot done, rows.length =", rows.length, "dcStatusMap =", dcStatusMap); // DIAGNOSTIC (2026-09-13, temp)
                     await warmRevenueCategoryUploadedPaidCache();
+                    console.log("[FreezeReport] step4 warmCache done"); // DIAGNOSTIC (2026-09-13, temp)
                     lastRevenueProgressFreezeResult = { active, rows, dcStatusMap };
                 } else {
                     lastRevenueProgressFreezeResult = { active: null, rows: [], dcStatusMap: {} };
                 }
-            } catch (_) {
+            } catch (err) {
+                // DIAGNOSTIC (2026-09-13): asli exception console me log karte hain -
+                // taaki pata chale generic "load nahi ho payi" message ke peechhe
+                // konsa exact JS error/exception hai (behavior me koi badlav nahi,
+                // sirf ek console.error jyada hai).
+                console.error("[FreezeReport] loadRevenueProgressFreezeData failed:", err);
                 lastRevenueProgressFreezeResult = { active: null, rows: [], error: true };
             }
             progressFreezeLoading = false;
@@ -3558,7 +3920,10 @@
             if (bodyAfter) {
                 try {
                     bodyAfter.innerHTML = renderFreezeModuleSummaryHtml();
-                } catch (_) {
+                } catch (err) {
+                    // DIAGNOSTIC (2026-09-13): render phase me exact exception log karte
+                    // hain (behavior me koi badlav nahi, sirf console.error jyada hai).
+                    console.error("[FreezeReport] renderFreezeModuleSummaryHtml (first render) failed:", err);
                     lastRevenueProgressFreezeResult = { active: null, rows: [], error: true };
                     bodyAfter.innerHTML = renderFreezeModuleSummaryHtml();
                 }
@@ -3684,9 +4049,20 @@
                 });
                 return map;
             };
+            // BUG FIX (2026-09-13) - ASLI ROOT CAUSE: yahan pehle "normalizeHqName(...)"
+            // call ho raha tha, jo kahin bhi is function ke scope me defined nahi tha
+            // (sirf buildProgressRevenueSummaryRows() ke ANDAR ek alag local const ke
+            // roop me tha) - isliye DC-level par (jab bhi yeh group-summary banti thi)
+            // seedha "ReferenceError: normalizeHqName is not defined" throw ho jaata
+            // tha, jo upar loadRevenueProgressFreezeData() ke try/catch tak jaakar
+            // generic "Freeze data load nahi ho payi" dikhata tha - DIVISION/CIRCLE
+            // par yeh line kabhi chalti hi nahi thi (wo normalizeDcName use karte hain,
+            // jo globally defined hai), isliye sirf DC hamesha fail hoti thi, Division/
+            // Circle hamesha chal jaate the. Ab yahin ek local helper define kar diya.
+            const normalizeHqNameLocal_ = (value) => String(value || "GENERAL").trim().toUpperCase() || "GENERAL";
 
             if (activeViewLevel === "DC") {
-                const map = sumByKey(normalizedRows, (r) => normalizeHqName(r.hqName) || "GENERAL");
+                const map = sumByKey(normalizedRows, (r) => normalizeHqNameLocal_(r.hqName) || "GENERAL");
                 const rows = Object.values(map).sort((a, b) => String(a.name).localeCompare(String(b.name)));
                 return { colLabel: revenueHqLabelUpper(), rows };
             }
@@ -3741,7 +4117,12 @@
                 if (!map[key]) map[key] = emptyGroup(key);
                 const g = map[key];
                 g.totalCount += 1;
-                if (r.isPaidNow) { g.paidCount += 1; g.paidAmount += Number(r.paidAmountNow || 0); }
+                // BUG FIX (2026-09-14): dekhein computeRevenueFreezeReportData() me
+                // upar wala comment - "paid amount" yahan bhi sirf is frozen bill
+                // (pending_amount) tak seemित hai, consumer ki poori purani payment
+                // history tak nahi (jo AG/seasonal consumers ke liye ekdum bada
+                // galat number dikhata tha).
+                if (r.isPaidNow) { g.paidCount += 1; g.paidAmount += Number(r.pending_amount || 0); }
                 else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
             });
 
@@ -3774,50 +4155,214 @@
             return rows;
         }
 
+        // USER REQUEST (2026-09-13): Freeze Report (NP3/NP6/Since Connection) ke
+        // screen par ab har scope (DC/Division/Circle) par ek hi richer group-wise
+        // breakdown dikhta hai: NAME (HQ ya DC), TOTAL CONSUMER, PAID (COUNT +
+        // AMOUNT-IN-LAKH), PENDING (COUNT + AMOUNT-IN-LAKH) - DC-level par HQ-wise,
+        // Division/Circle par DC-wise (bilkul pehle jaisa scope-split). Amount
+        // sirf is SUMMARY table me LAKH format me hai (jaise 50000 -> 0.50) -
+        // neeche ki consumer LIST (DC-level) aur DOWNLOAD (Excel/PDF, dono scope
+        // par) me poora/complete amount hi dikhta hai, yeh badlav sirf is on-screen
+        // summary table tak seemित hai. Ek hi shared table-renderer, taaki HQ-wise
+        // aur DC-wise dono jagah exact same look/behaviour rahe.
+        function renderFreezeGroupSummaryTableHtml(nameColLabel, summaryRows, titleText) {
+            const headCellStyle = "padding:6px 4px; font-size:0.56rem; font-weight:900; text-transform:uppercase; background:#0891b2; color:#fff; text-align:center;";
+            const bodyCellStyle = "padding:5px 4px; font-size:0.62rem; text-align:center; border-bottom:1px solid #e2e8f0;";
+            const rowsHtml = summaryRows.map((r) => {
+                const isTotal = r.type === "SUB_TOTAL" || r.type === "GRAND_TOTAL";
+                const rowBg = r.type === "GRAND_TOTAL" ? "background:#dbeafe;" : (r.type === "SUB_TOTAL" ? "background:#f1f5f9;" : "");
+                const fw = isTotal ? "font-weight:900;" : "font-weight:700;";
+                // USER REQUEST (2026-09-14): SUB_TOTAL/GRAND_TOTAL rows pehle sirf
+                // BOLD + halka background se hi alag dikhte the - ab NAME/TOTAL
+                // CONSUMER column ka TEXT COLOUR bhi alag (SUB_TOTAL = blue, GRAND_TOTAL
+                // = rose/red) taaki total rows ekdum saaf alag pehchani jaayein.
+                const totalColor = r.type === "GRAND_TOTAL" ? "#9f1239" : (r.type === "SUB_TOTAL" ? "#1d4ed8" : "#0f172a");
+                return `<tr style="${rowBg}">
+                    <td style="${bodyCellStyle} ${fw} color:${totalColor}; text-align:left;">${escapeHtml(r.name)}</td>
+                    <td style="${bodyCellStyle} ${fw} color:${totalColor};">${r.totalCount}</td>
+                    <td style="${bodyCellStyle} ${fw} color:#166534;">${r.paidCount}</td>
+                    <td style="${bodyCellStyle} ${fw} color:#166534;">${formatRevenueLakhValue(r.paidAmount)}</td>
+                    <td style="${bodyCellStyle} ${fw} color:#9f1239;">${r.pendingCount}</td>
+                    <td style="${bodyCellStyle} ${fw} color:#9f1239;">${formatRevenueLakhValue(r.pendingAmount)}</td>
+                </tr>`;
+            }).join("");
+            return `
+                <div style="font-size:0.62rem; font-weight:900; color:#9f1239; text-align:center; margin-top:10px;">${escapeHtml(titleText)}</div>
+                <div style="overflow-x:auto; margin-top:6px; border-radius:10px; border:1px solid #e2e8f0;">
+                    <table style="width:100%; border-collapse:collapse; min-width:480px;">
+                        <thead>
+                            <tr>
+                                <th rowspan="2" style="${headCellStyle}">${escapeHtml(nameColLabel)}</th>
+                                <th rowspan="2" style="${headCellStyle}">TOTAL<br>CONSUMER</th>
+                                <th colspan="2" style="${headCellStyle}">PAID</th>
+                                <th colspan="2" style="${headCellStyle}">PENDING</th>
+                            </tr>
+                            <tr>
+                                <th style="${headCellStyle}">COUNT</th>
+                                <th style="${headCellStyle}">AMT (LAKH)</th>
+                                <th style="${headCellStyle}">COUNT</th>
+                                <th style="${headCellStyle}">AMT (LAKH)</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rowsHtml}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        function renderFreezeDcWiseSummaryHtml(rowsWithStatus) {
+            return renderFreezeGroupSummaryTableHtml("DC NAME", buildFreezeDcWiseSummaryRows(rowsWithStatus), "DC WISE SUMMARY (AMOUNT IN LAKH)");
+        }
+
+        // DC-level scope ke liye HQ-wise wahi group summary (buildFreezeDcWiseSummaryRows
+        // jaisa hi structure, bas dc_name ki jagah hq_name se group hota hai - koi
+        // SUB_TOTAL/GRAND_TOTAL nahi, kyonki DC-level par divisions nahi hote).
+        function buildFreezeHqWiseSummaryRows(rowsWithStatus) {
+            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 });
+            const map = {};
+            (rowsWithStatus || []).forEach((r) => {
+                const key = String(r.hq_name || "").trim().toUpperCase() || "GENERAL";
+                if (!map[key]) map[key] = emptyGroup(key);
+                const g = map[key];
+                g.totalCount += 1;
+                // BUG FIX (2026-09-14): dekhein computeRevenueFreezeReportData() me
+                // upar wala comment - "paid amount" yahan bhi sirf is frozen bill
+                // (pending_amount) tak seemित hai, consumer ki poori purani payment
+                // history tak nahi (jo AG/seasonal consumers ke liye ekdum bada
+                // galat number dikhata tha).
+                if (r.isPaidNow) { g.paidCount += 1; g.paidAmount += Number(r.pending_amount || 0); }
+                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+            });
+            return Object.values(map).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        }
+
+        function renderFreezeHqWiseSummaryHtml(rowsWithStatus) {
+            return renderFreezeGroupSummaryTableHtml(revenueHqLabelUpper(), buildFreezeHqWiseSummaryRows(rowsWithStatus), "HQ WISE SUMMARY (AMOUNT IN LAKH)");
+        }
+
+        // USER REQUEST (2026-09-14): Freeze Report (NP3/NP6/Since Connection/Top20/50)
+        // ki har download (full list ho ya summary, Excel ho ya PDF) me ab yeh bhi
+        // saaf dikhna chahiye ki us waqt kaunse filter dropdown selection active the
+        // (taaki baad me dekhne par pata chale kis filter ke saath report nikli thi).
+        // Yeh ek chhota "Filters: ..." label banata hai jo teeno download function
+        // (list, DC-wise summary, HQ-wise summary) apne PDF title ke neeche aur
+        // CSV/Excel ke header rows me daalte hain.
+        function buildFreezeActiveFiltersLabel_() {
+            if (isFreezeCategoryDefaultersType()) {
+                const g = freezeDefaultersGovtFilter === "GOVT" ? "Govt" : (freezeDefaultersGovtFilter === "NONGOVT" ? "Non Govt" : "All (Govt + Non Govt)");
+                return `Filter: ${g}`;
+            }
+            const f = freezeNonPayeeFilterState;
+            const parts = [];
+            if (activeViewLevel !== "DC") parts.push(`DC: ${f.dc || "All"}`);
+            parts.push(`HQ: ${f.hq || "All"}`);
+            parts.push(`Village: ${f.village || "All"}`);
+            parts.push(`Category: ${f.category || "All"}`);
+            parts.push(`Slab: ${f.slab || "All"}`);
+            parts.push(`Govt: ${f.govt === "GOVT" ? "Govt" : (f.govt === "NONGOVT" ? "Non Govt" : "All")}`);
+            return `Filters: ${parts.join(" | ")}`;
+        }
+
         // Freeze Report (NP3/NP6/Since Connection) ke Division/Circle download ke
         // liye DC-wise summary Excel/PDF banata hai (list ki jagah) - downloadRevenueFreezeReport()
         // se hi (uske try/catch ke andar) call hota hai.
         function downloadRevenueFreezeDcWiseSummary(fmt, data, downloadTypeLabel) {
             const summaryRows = buildFreezeDcWiseSummaryRows(data.rowsWithStatus);
-            const headers = ["DC NAME", "TOTAL CONSUMER", "PAID COUNT", "PAID AMOUNT", "PENDING COUNT", "PENDING AMOUNT", "PAID %", "PENDING %"];
+            // USER REQUEST (2026-09-13): Division/Circle ki DC-wise summary (screen
+            // aur is download dono me) ab PAID/PENDING amount LAKH me dikhaegi (jaise
+            // 50000 -> 0.50) - poora/complete amount sirf DC-level ki consumer LIST
+            // me dikhta rahega (yahan disturb nahi kiya).
+            const headers = ["DC NAME", "TOTAL CONSUMER", "PAID COUNT", "PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %"];
             const bodyRows = summaryRows.map((r) => [
-                r.name, r.totalCount, r.paidCount, formatProgressReportAmount(r.paidAmount),
-                r.pendingCount, formatProgressReportAmount(r.pendingAmount), `${r.paidPercent}%`, `${r.pendingPercent}%`
+                r.name, r.totalCount, r.paidCount, formatRevenueLakhValue(r.paidAmount),
+                r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${r.paidPercent}%`, `${r.pendingPercent}%`
             ]);
             const rowTypeFlags = summaryRows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
             const scope = activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE";
             const reportTitle = `Freeze-Revenue Report - ${getRevenueFreezeCategoryLabel(progressFreezeCategory)} - ${scope} - Summary`;
             const freezeLine = `Freeze Date: ${data.active.freeze_label || data.active.freeze_date || ""}`;
+            const filtersLine = buildFreezeActiveFiltersLabel_();
             const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
             if (fmt === "PDF") {
                 if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF({ orientation: "landscape" });
-                doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                doc.setFontSize(9); doc.text(freezeLine, 148, 19, { align: "center" });
+                doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                doc.setFontSize(9); doc.text(freezeLine, 148, 22, { align: "center" });
+                doc.setFontSize(8); doc.setTextColor(80); doc.text(filtersLine, 148, 28, { align: "center" });
                 doc.autoTable({
-                    startY: 25, head: [headers], body: bodyRows, theme: "grid",
+                    startY: 33, head: [headers], body: bodyRows, theme: "grid",
                     styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" },
                     headStyles: { fillColor: [8, 145, 178] },
                     didParseCell: function (hookData) {
                         if (hookData.section === "body") {
                             const flag = rowTypeFlags[hookData.row.index];
-                            if (flag === 2) { hookData.cell.styles.fillColor = [219, 234, 254]; hookData.cell.styles.fontStyle = "bold"; }
-                            else if (flag === 1) { hookData.cell.styles.fontStyle = "bold"; }
+                            if (flag === 2) { hookData.cell.styles.fillColor = [219, 234, 254]; hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [159, 18, 57]; }
+                            else if (flag === 1) { hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [29, 78, 216]; }
                         }
                     }
                 });
                 savePdfDocumentForDevice(doc, `${fileName}.pdf`);
             } else {
                 const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
-                const csv = [[reportTitle], [`Scope: ${scope}`], [freezeLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                const csv = [[reportTitle], [`Scope: ${scope}`], [freezeLine], [filtersLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
                 link.download = `${fileName}.csv`;
                 link.click();
             }
             setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
+        }
+
+        // USER REQUEST (2026-09-14): DC level par bhi Division/Circle jaisa ek
+        // "Summary Download" (Excel/PDF) chahiye - yeh HQ-wise summary (screen par
+        // jo renderFreezeHqWiseSummaryHtml dikhata hai, wahi data) download karta
+        // hai. DC-level ki poori consumer LIST (downloadRevenueFreezeReport) bilkul
+        // untouched/alag button se hi milti rahegi ("Full List Download").
+        function downloadRevenueFreezeHqWiseSummary(fmt, data, downloadTypeLabel) {
+            if (!data || !data.active || !data.rowsWithStatus.length) return showToast("Download ke liye data nahi hai", false);
+            setProgressCategoryDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
+            try {
+            const summaryRows = buildFreezeHqWiseSummaryRows(data.rowsWithStatus);
+            const nameColLabel = revenueHqLabelUpper();
+            const headers = [nameColLabel, "TOTAL CONSUMER", "PAID COUNT", "PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %"];
+            const bodyRows = summaryRows.map((r) => {
+                const paidPercent = r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0";
+                const pendingPercent = r.totalCount ? ((r.pendingCount / r.totalCount) * 100).toFixed(1) : "0.0";
+                return [r.name, r.totalCount, r.paidCount, formatRevenueLakhValue(r.paidAmount), r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${paidPercent}%`, `${pendingPercent}%`];
+            });
+            const scope = `DC - ${activeDC}`;
+            const reportTitle = `Freeze-Revenue Report - ${getRevenueFreezeCategoryLabel(progressFreezeCategory)} - ${scope} - Summary`;
+            const freezeLine = `Freeze Date: ${data.active.freeze_label || data.active.freeze_date || ""}`;
+            const filtersLine = buildFreezeActiveFiltersLabel_();
+            const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
+            if (fmt === "PDF") {
+                if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF({ orientation: "landscape" });
+                doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                doc.setFontSize(9); doc.text(freezeLine, 148, 22, { align: "center" });
+                doc.setFontSize(8); doc.setTextColor(80); doc.text(filtersLine, 148, 28, { align: "center" });
+                doc.autoTable({
+                    startY: 33, head: [headers], body: bodyRows, theme: "grid",
+                    styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" },
+                    headStyles: { fillColor: [8, 145, 178] }
+                });
+                savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+            } else {
+                const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                const csv = [[reportTitle], [`Scope: ${scope}`], [freezeLine], [filtersLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                link.download = `${fileName}.csv`;
+                link.click();
+            }
+            setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
+            } catch (error) {
+                setProgressCategoryDownloadState(false, "Download nahi ho paya");
+                showToast(error?.message || "Freeze summary download nahi ho payi", false);
+            }
         }
 
         function renderRevenueNonPayeeGroupSummaryHtml(normalizedRows) {
@@ -3828,7 +4373,13 @@
                 html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Data nahi mila.</div></div>`;
             } else {
                 summary.rows.forEach((row) => {
-                    const rowClass = (row.type === "SUB_TOTAL" || row.type === "GRAND_TOTAL") ? " blue-bold" : "";
+                    // USER REQUEST (2026-09-14): SUB_TOTAL (Division total) aur GRAND_TOTAL
+                    // row pehle dono hi "blue-bold" (same colour) the - ab Freeze Report
+                    // jaisa hi alag TEXT COLOUR se alag pehchane jaate hain (app ke apne
+                    // existing subdn-bold/blue-bold classes reuse kiye - SUB_TOTAL = orange,
+                    // GRAND_TOTAL = blue, jaisa baaki reports me DIV_TOTAL/SUBDN_TOTAL ke
+                    // liye pehle se istemal hota hai).
+                    const rowClass = row.type === "GRAND_TOTAL" ? " blue-bold" : (row.type === "SUB_TOTAL" ? " subdn-bold" : "");
                     html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: 1.5fr 0.75fr 1fr;"><div>${escapeHtml(row.name)}</div><div class="font-black">${row.count}</div><div class="text-rose-700 font-black">${formatProgressReportAmount(row.pendingTotal)}</div></div>`;
                 });
             }
@@ -3837,8 +4388,15 @@
         }
 
         function renderRevenueProgressFreezeSummaryHtml() {
+            // USER REQUEST (2026-09-13): Yeh category dropdown (NP3/NP6/Since
+            // Connection/Top20/Top50) baaki filter dropdowns (DC/HQ/Village/
+            // Category/Slab/Govt - orange border, white background) se alag
+            // dikhna chahiye taaki confuse na ho ki "yeh dropdown alag/important
+            // hai" - isliye ab solid teal background + white bold text (sabhi
+            // scope - DC/Division/Circle - par, kyonki yeh ek hi shared function
+            // hai).
             const categorySelectHtml = `
-                <select onchange="setProgressFreezeCategory(this.value)" style="width:100%; height:44px; margin:8px auto 0; display:block; border:1.5px solid #0891b2; border-radius:12px; padding:0 12px; font-size:0.78rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                <select onchange="setProgressFreezeCategory(this.value)" style="width:100%; height:46px; margin:8px auto 0; display:block; border:2px solid #0e7490; border-radius:12px; padding:0 12px; font-size:0.8rem; font-weight:900; color:#ffffff; background:#0891b2; box-shadow:0 2px 6px rgba(8,145,178,0.35);">
                     <option value="" ${progressFreezeCategory === "" ? "selected" : ""} disabled style="color:#64748b; background:#f1f5f9; font-weight:900;">Choose Report Type</option>
                     <option value="NP3" ${progressFreezeCategory === "NP3" ? "selected" : ""} style="color:#1d4ed8; background:#eff6ff; font-weight:900;">Non Payee From 3 Month</option>
                     <option value="NP6" ${progressFreezeCategory === "NP6" ? "selected" : ""} style="color:#7e22ce; background:#faf5ff; font-weight:900;">Non Payee From 6 Month</option>
@@ -3853,7 +4411,7 @@
                 return `${categorySelectHtml}<div style="text-align:center; color:#64748b; font-size:0.72rem; font-weight:800; padding:20px 0;">Upar diye gaye dropdown se report type chunein.</div>`;
             }
             if (progressFreezeLoading || !lastRevenueProgressFreezeResult) {
-                return `${categorySelectHtml}<div style="text-align:center; font-size:0.72rem; font-weight:900; color:#1d4ed8; padding:20px 0;">SYNCING DATA... PLEASE WAIT</div>`;
+                return `${categorySelectHtml}<div style="text-align:center; font-size:0.72rem; font-weight:900; color:#1d4ed8; padding:20px 0;">SYNCING DATA... PLEASE WAIT<div class="app-sync-spinner"></div></div>`;
             }
             const data = computeRevenueFreezeReportData();
             if (!data || data.error) {
@@ -3942,11 +4500,28 @@
                     <div style="background:#fff1f2; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Pending Amount (abhi bakaya)</div><div style="font-size:0.85rem; font-weight:950; color:#9f1239; margin-top:2px;">${formatProgressReportAmount(t.pendingAmount)}</div></div>
                     <div style="background:#f0fdfa; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#0e7490; text-transform:uppercase;">Frozen Total Amount</div><div style="font-size:0.85rem; font-weight:950; color:#0e7490; margin-top:2px;">${formatProgressReportAmount(t.totalFrozenAmount)}</div></div>
                 </div>
-                ${!isFreezeCategoryDefaultersType() ? renderRevenueNonPayeeGroupSummaryHtml(data.rowsWithStatus.map((r) => ({ dcName: r.dc_name, hqName: r.hq_name, pendingAmount: r.pending_amount }))) : ""}
+                ${!isFreezeCategoryDefaultersType() ? (
+                    activeViewLevel === "DC"
+                        ? renderFreezeHqWiseSummaryHtml(data.rowsWithStatus)
+                        : renderFreezeDcWiseSummaryHtml(data.rowsWithStatus)
+                ) : ""}
+                ${(activeViewLevel === "DC" && !isFreezeCategoryDefaultersType()) ? `
+                <div style="font-size:0.56rem; font-weight:850; color:#64748b; text-align:center; margin-top:10px;">SUMMARY DOWNLOAD (${escapeHtml(revenueHqLabelUpper())} WISE)</div>
+                <div class="btn-export-row" style="margin-top:4px;">
+                    <button class="btn-unique btn-excel-unique" onclick="downloadRevenueFreezeHqWiseSummary('XLS', computeRevenueFreezeReportData(), 'Excel')">Summary Excel</button>
+                    <button class="btn-unique btn-pdf-unique" onclick="downloadRevenueFreezeHqWiseSummary('PDF', computeRevenueFreezeReportData(), 'PDF')">Summary PDF</button>
+                </div>
+                <div style="font-size:0.56rem; font-weight:850; color:#64748b; text-align:center; margin-top:10px;">FULL LIST DOWNLOAD</div>
+                <div class="btn-export-row" style="margin-top:4px;">
+                    <button class="btn-unique btn-excel-unique" onclick="downloadRevenueFreezeReport('XLS')">Full List Excel</button>
+                    <button class="btn-unique btn-pdf-unique" onclick="downloadRevenueFreezeReport('PDF')">Full List PDF</button>
+                </div>
+                ` : `
                 <div class="btn-export-row" style="margin-top:10px;">
                     <button class="btn-unique btn-excel-unique" onclick="downloadRevenueFreezeReport('XLS')">Freeze Report Excel</button>
                     <button class="btn-unique btn-pdf-unique" onclick="downloadRevenueFreezeReport('PDF')">Freeze Report PDF</button>
                 </div>
+                `}
                 <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>
             `;
             // USER REQUEST (2026-09-13): Division/Circle adhikari sirf SUMMARY
@@ -3980,7 +4555,10 @@
                         // badalta, sirf colour se pehchana jaata hai.
                         const statusColor = r.isPaidNow ? "#166534" : (r.paidAmountNow > 0 ? "#dc2626" : "#1e293b");
                         cells.push(`<div class="font-black" style="color:${statusColor};">${paidStatusLabel}</div>`);
-                        cells.push(`<div class="font-black">${formatProgressReportAmount(r.isPaidNow ? r.paidAmountNow : r.remainingPending)}</div>`);
+                        // BUG FIX (2026-09-14): PAID row ka AMOUNT bhi sirf is frozen
+                        // bill (r.pending_amount) tak seemित, consumer ki poori
+                        // purani payment history (r.paidAmountNow) tak nahi.
+                        cells.push(`<div class="font-black">${formatProgressReportAmount(r.isPaidNow ? Number(r.pending_amount || 0) : r.remainingPending)}</div>`);
                         return `<div class="summary-table-row" style="grid-template-columns: ${showDcColumn ? "0.8fr 1.2fr 0.8fr 1fr" : "1.4fr 0.8fr 1fr"};">${cells.join("")}</div>`;
                     };
                     const dividerRow = (label, color, bg) => `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div style="text-align:center; font-weight:900; color:${color}; background:${bg}; border-radius:8px; padding:5px; margin-top:${label.startsWith("GOVT") ? "6px" : "0"};">${label}</div></div>`;
@@ -4048,7 +4626,9 @@
                         ...(showDcColumn ? [r.dc_name || ""] : []),
                         r.ivrs_no || "", r.consumer_name || "", r.hq_name || "", r.village || "", r.mobile_no || "",
                         getFreezeRowStatusLabel(r),
-                        formatProgressReportAmount(r.isPaidNow ? r.paidAmountNow : r.remainingPending)
+                        // BUG FIX (2026-09-14): dekhein upar wale comments - PAID row ka
+                        // AMOUNT sirf is frozen bill (pending_amount) tak seemित.
+                        formatProgressReportAmount(r.isPaidNow ? Number(r.pending_amount || 0) : r.remainingPending)
                     ]);
                     paymentStateFlags.push(r.isPaidNow ? 2 : (r.paidAmountNow > 0 ? 1 : 0));
                 };
@@ -4067,16 +4647,18 @@
                 const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
                 const reportTitle = `Freeze-Revenue Report - ${getRevenueFreezeCategoryLabel(progressFreezeCategory)} - ${scope}`;
                 const freezeLine = `Freeze Date: ${data.active.freeze_label || data.active.freeze_date || ""}`;
+                const filtersLine = buildFreezeActiveFiltersLabel_();
                 const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
                 if (fmt === "PDF") {
                     if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(freezeLine, 148, 19, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(freezeLine, 148, 22, { align: "center" });
+                    doc.setFontSize(8); doc.setTextColor(80); doc.text(filtersLine, 148, 28, { align: "center" });
                     doc.autoTable({
-                        startY: 25, head: [headers], body: bodyRows, theme: "grid",
+                        startY: 33, head: [headers], body: bodyRows, theme: "grid",
                         styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" },
                         headStyles: { fillColor: [8, 145, 178] },
                         didParseCell: function (hookData) {
@@ -4099,7 +4681,7 @@
                         else if (state === 1) row[statusColIndex] = `** ${row[statusColIndex]} **`;
                     });
                     const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
-                    const csv = [[reportTitle], [`Scope: ${scope}`], [freezeLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                    const csv = [[reportTitle], [`Scope: ${scope}`], [freezeLine], [filtersLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
                     const link = document.createElement("a");
                     link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
                     link.download = `${fileName}.csv`;
@@ -4674,12 +5256,20 @@
         // 20-50 Defaulters) select hai, usi ke hisaab se sahi download function call karta
         // hai. Category Wise ke liye purani, poori tarah test-ki-hui exportRevenueCategory-
         // Summary() hi chalti hai - Target/Defaulters ke liye alag, seedhe simple export.
-        function downloadProgressRevenueReportBox(fmt) {
+        function downloadProgressRevenueReportBox(fmt, forceGroupSummary) {
             if (progressRevenueReportType === "TARGET") return downloadProgressRevenueTargetSummary(fmt);
             if (progressRevenueReportType === "DEFAULTERS") return downloadProgressRevenueDefaultersSummary(fmt);
-            if (progressRevenueReportType === "NONPAYEE_3M") return downloadProgressRevenueNonPayeeSummary(fmt, "3M");
-            if (progressRevenueReportType === "NONPAYEE_6M") return downloadProgressRevenueNonPayeeSummary(fmt, "6M");
-            if (progressRevenueReportType === "NONPAYEE_SINCE_CONNECTION") return downloadProgressRevenueNonPayeeSummary(fmt, "SINCE_CONNECTION");
+            // USER REQUEST (2026-09-14): Freeze Report jaisa hi pattern - NP3/NP6/Since
+            // Connection ke DC level par ab "Summary Download" (HQ-wise, forceGroupSummary=true
+            // wala naya button) aur "Full List Download" (bilkul pehle jaisa) dono alag
+            // milte hain. Division/Circle par (jahan screen par bhi sirf summary dikhti
+            // hai) ab download bhi summary hi deta hai - poori list nahi - taaki screen
+            // aur download consistent rahein (downloadProgressRevenueNonPayeeSummary khud
+            // is check ko andar bhi karta hai, forceGroupSummary sirf DC level ke naye
+            // Summary button ke liye explicit shortcut hai).
+            if (progressRevenueReportType === "NONPAYEE_3M") return downloadProgressRevenueNonPayeeSummary(fmt, "3M", forceGroupSummary);
+            if (progressRevenueReportType === "NONPAYEE_6M") return downloadProgressRevenueNonPayeeSummary(fmt, "6M", forceGroupSummary);
+            if (progressRevenueReportType === "NONPAYEE_SINCE_CONNECTION") return downloadProgressRevenueNonPayeeSummary(fmt, "SINCE_CONNECTION", forceGroupSummary);
             if (progressRevenueReportType === "PAIDCOUNT") return downloadProgressRevenuePaidCountSummary(fmt);
             return downloadProgressRevenueCategorySummary(fmt);
         }
@@ -4708,11 +5298,11 @@
                     if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
-                    doc.text(periodLine, 148, 25, { align: "center" });
-                    doc.autoTable({ startY: 31, head: [headers], body: rows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 22, { align: "center" });
+                    doc.text(periodLine, 148, 28, { align: "center" });
+                    doc.autoTable({ startY: 34, head: [headers], body: rows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                 } else {
                     const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
@@ -4807,11 +5397,11 @@
                     if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
-                    doc.text(periodLine, 148, 25, { align: "center" });
-                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 22, { align: "center" });
+                    doc.text(periodLine, 148, 28, { align: "center" });
+                    doc.autoTable({ startY: 34, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                 } else {
                     const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
@@ -4860,6 +5450,30 @@
             }
             html += `</div>`;
             return html;
+        }
+
+        // USER REQUEST (2026-09-13): Live Revenue Report ke "{colLabel} WISE" on-screen
+        // summary ko bhi Freeze Report jaisa hi richer table dikhana hai - NAME | TOTAL
+        // CONSUMER | PAID (COUNT + AMT-LAKH) | PENDING (COUNT + AMT-LAKH). Data wahi
+        // buildRevenueHqVillagePaidUnpaidTree() se aaya "tree" hai (paidTotal/unpaidTotal/
+        // paidAmountTotal/unpaidAmountTotal already ismein hain) - sirf Freeze wale shared
+        // renderFreezeGroupSummaryTableHtml() renderer ke expected shape (totalCount/
+        // paidCount/paidAmount/pendingCount/pendingAmount) me map karte hain. SUBDN_TOTAL
+        // (sub-division subtotal) ko halka "SUB_TOTAL" jaisa aur DIVISION SUB_TOTAL ko
+        // zyada dark "GRAND_TOTAL" jaisa dikhaya hai taaki purani jaisi hi hierarchy
+        // (sub-division halka, division dark) bani rahe. Download (Excel/PDF/CSV) is
+        // change se bilkul untouched hai - wo apna alag flat-list code path use karta hai.
+        function renderRevenueHqVillageRichSummaryTableHtml(tree, colLabel) {
+            const summaryRows = (tree || []).map((row) => ({
+                name: row.name,
+                totalCount: Number(row.paidTotal || 0) + Number(row.unpaidTotal || 0),
+                paidCount: Number(row.paidTotal || 0),
+                paidAmount: Number(row.paidAmountTotal || 0),
+                pendingCount: Number(row.unpaidTotal || 0),
+                pendingAmount: Number(row.unpaidAmountTotal || 0),
+                type: row.type === "SUB_TOTAL" ? "GRAND_TOTAL" : (row.type === "SUBDN_TOTAL" ? "SUB_TOTAL" : undefined)
+            }));
+            return renderFreezeGroupSummaryTableHtml(colLabel, summaryRows, `${colLabel} WISE SUMMARY (AMOUNT IN LAKH)`);
         }
 
         function renderRevenueTargetStaticTableHtml(tree, colLabel) {
@@ -5049,11 +5663,11 @@
                     if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
-                    doc.text(periodLine, 148, 25, { align: "center" });
-                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 22, { align: "center" });
+                    doc.text(periodLine, 148, 28, { align: "center" });
+                    doc.autoTable({ startY: 34, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                 } else {
                     const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
@@ -5211,10 +5825,23 @@
                     <div style="background:#fff1f2; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Total Pending</div><div style="font-size:0.85rem; font-weight:950; color:#9f1239; margin-top:2px;">${formatProgressReportAmount(totalPending)}</div></div>
                 </div>
                 ${renderRevenueNonPayeeGroupSummaryHtml(rows)}
+                ${activeViewLevel === "DC" ? `
+                <div style="font-size:0.56rem; font-weight:850; color:#64748b; text-align:center; margin-top:10px;">SUMMARY DOWNLOAD (${escapeHtml(revenueHqLabelUpper())} WISE)</div>
+                <div class="btn-export-row" style="margin-top:4px;">
+                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS', true)">Summary Excel</button>
+                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF', true)">Summary PDF</button>
+                </div>
+                <div style="font-size:0.56rem; font-weight:850; color:#64748b; text-align:center; margin-top:10px;">FULL LIST DOWNLOAD</div>
+                <div class="btn-export-row" style="margin-top:4px;">
+                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">Full List Excel</button>
+                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">Full List PDF</button>
+                </div>
+                ` : `
                 <div class="btn-export-row" style="margin-top:10px;">
                     <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">${escapeHtml(getProgressRevenueReportTypeLabel())} Excel</button>
                     <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">${escapeHtml(getProgressRevenueReportTypeLabel())} PDF</button>
                 </div>
+                `}
                 <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>
             `;
             // USER REQUEST (2026-09-13): Division/Circle adhikari sirf SUMMARY
@@ -5240,7 +5867,70 @@
             return html;
         }
 
-        function downloadProgressRevenueNonPayeeSummary(fmt, bucket) {
+        // USER REQUEST (2026-09-14): Freeze Report jaisa hi pattern - Non Payee 3M/6M/
+        // Since Connection ke Division/Circle level par ab (jaisa screen par bhi sirf
+        // summary dikhti hai) download bhi HQ/DC-wise SUMMARY hi deta hai, poori
+        // consumer-list nahi (pehle yahan bhi poori list download hoti thi, jo screen
+        // se inconsistent tha). DC level pehle jaisa hi (poori list) - naye "Summary
+        // Download" button ke through wahan bhi yahi summary alag se milti hai.
+        function downloadProgressRevenueNonPayeeGroupSummary(fmt, bucket) {
+            if (!lastRevenueProgressBoxData) return showToast("Report ke liye data nahi hai", false);
+            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
+            setProgressCategoryDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
+            try {
+                const { mode, filterValue } = lastRevenueProgressBoxData;
+                const { rows } = getProgressNonPayeeFilteredRows(mode || "DAILY", filterValue || "", bucket);
+                if (!rows.length) { setProgressCategoryDownloadState(false, "Download ke liye data nahi hai"); return; }
+                const summary = buildRevenueNonPayeeGroupSummary(rows);
+                const headers = [summary.colLabel, "TOTAL CONSUMER", "PENDING AMOUNT"];
+                const bodyRows = summary.rows.map((r) => [r.name, r.count, formatProgressReportAmount(r.pendingTotal)]);
+                const rowTypeFlags = summary.rows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
+                const showDcColumn = activeViewLevel !== "DC";
+                const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+                const f = progressNonPayeeFilterState;
+                const filterLine = `${showDcColumn ? `DC: ${f.dc || "All"}  |  ` : ""}HQ: ${f.hq || "All"}  |  Village: ${f.village || "All"}  |  Category: ${f.category || "All"}  |  Net Bill Slab: ${f.slab || "All"}  |  Type: ${f.govt === "GOVT" ? "Govt" : (f.govt === "NONGOVT" ? "Non Govt" : "All")}`;
+                const reportTitle = `${getRevenueNonPayeeBucketLabel(bucket)} - ${scope} - Summary`;
+                const asOfLine = `As of: ${formatRevenueDateIndian(normalizeRevenueReportDate(getCurrentDateDDMMYYYY()))}`;
+                const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
+                if (fmt === "PDF") {
+                    if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
+                    const { jsPDF } = window.jspdf;
+                    const doc = new jsPDF({ orientation: "landscape" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 22, { align: "center" });
+                    doc.text(filterLine, 148, 28, { align: "center" });
+                    doc.text(asOfLine, 148, 33, { align: "center" });
+                    doc.autoTable({
+                        startY: 39, head: [headers], body: bodyRows, theme: "grid",
+                        styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" },
+                        headStyles: { fillColor: [159, 18, 57] },
+                        didParseCell: function (hookData) {
+                            if (hookData.section === "body") {
+                                const flag = rowTypeFlags[hookData.row.index];
+                                if (flag === 2) { hookData.cell.styles.fillColor = [219, 234, 254]; hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [159, 18, 57]; }
+                                else if (flag === 1) { hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [194, 65, 12]; }
+                            }
+                        }
+                    });
+                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
+                } else {
+                    const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
+                    const csv = [[reportTitle], [`Scope: ${scope}`], [filterLine], [asOfLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
+                    const link = document.createElement("a");
+                    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+                    link.download = `${fileName}.csv`;
+                    link.click();
+                }
+                setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
+            } catch (error) {
+                setProgressCategoryDownloadState(false, "Download nahi ho paya");
+                showToast(error?.message || "Non Payee summary download nahi ho payi", false);
+            }
+        }
+
+        function downloadProgressRevenueNonPayeeSummary(fmt, bucket, forceGroupSummary) {
+            if (forceGroupSummary || activeViewLevel !== "DC") return downloadProgressRevenueNonPayeeGroupSummary(fmt, bucket);
             if (!lastRevenueProgressBoxData) return showToast("Report ke liye data nahi hai", false);
             const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
             setProgressCategoryDownloadState(true, `${downloadTypeLabel} downloading... kripya wait kijiye`);
@@ -5272,12 +5962,12 @@
                     if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 19, { align: "center" });
-                    doc.text(filterLine, 148, 25, { align: "center" });
-                    doc.text(asOfLine, 148, 30, { align: "center" });
-                    doc.autoTable({ startY: 36, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Scope: ${scope}`, 148, 22, { align: "center" });
+                    doc.text(filterLine, 148, 28, { align: "center" });
+                    doc.text(asOfLine, 148, 33, { align: "center" });
+                    doc.autoTable({ startY: 39, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                 } else {
                     const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
@@ -5357,7 +6047,7 @@
                     ${catRows || `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Category data nahi mila.</div></div>`}
                 </div>
                 <div style="font-size:0.62rem; font-weight:900; color:#1d4ed8; text-align:center; margin-top:10px;">${colLabel} WISE</div>
-                ${renderRevenueHqVillageStaticTableHtml(data.tree, colLabel)}
+                ${renderRevenueHqVillageRichSummaryTableHtml(data.tree, colLabel)}
             `;
         }
 
@@ -5505,10 +6195,12 @@
         // Isliye yahi standard text ab default label hai, aur baaki sabhi
         // call-sites (Mobile/Revenue/Freeze/SHMS/Pending List) bhi apna pehle
         // wala custom text hata kar isi ek jaisa text pass karte hain.
-        function renderSyncingProgress(cont, isStillValid, label = "SYNCING DATA... PLEASE WAIT") {
+        function renderSyncingProgress(cont, isStillValid, label = "SYNCING DATA... PLEASE WAIT", subLabel = "") {
             cont.innerHTML = `
                 <div class="text-center py-10">
                     <p class="font-black text-slate-500" style="font-size:0.85rem;">${escapeHtml(label)}</p>
+                    ${subLabel ? `<p class="font-bold text-slate-400" style="font-size:0.66rem; margin-top:3px;">${escapeHtml(subLabel)}</p>` : ""}
+                    <div class="app-sync-spinner"></div>
                     <div style="max-width:220px; margin:14px auto 0; background:#e2e8f0; border-radius:999px; height:8px; overflow:hidden;">
                         <div id="summary-sync-progress-fill" style="height:100%; width:2%; background:linear-gradient(90deg,#0d9488,#0f766e); border-radius:999px; transition:width 0.25s ease;"></div>
                     </div>
@@ -6260,8 +6952,15 @@
             return buildFeederDateKey_(dateButton?.dataset.iso || "");
         }
 
-        function getAllFeederHistoryEntries_() {
-            const sheetRows = Array.isArray(feederReportRows) ? feederReportRows : [];
+        function getAllFeederHistoryEntries_(substation) {
+            // BUG FIX (2026-09-14): jab substation-scoped lightweight cache available
+            // hai (dekhein loadFeederSubstationHistory_), usi ko priority dete hain -
+            // poori 1.5+ MB history (feederReportRows, jo slow/unstable load hoti hai)
+            // sirf tab fallback hoti hai jab wo kisi aur reason se already load ho
+            // chuki ho (jaise Report screen).
+            const substationKey = normalizeFeederSubstationKey_(substation || "");
+            const scopedRows = substationKey && feederSubstationHistoryCache_[substationKey];
+            const sheetRows = scopedRows ? scopedRows : (Array.isArray(feederReportRows) ? feederReportRows : []);
             const localRows = getRecentFeederSubmittedEntries_();
             return [...sheetRows, ...localRows];
         }
@@ -6270,7 +6969,7 @@
             const substationKey = normalizeFeederSubstationKey_(substation || "");
             const targetKey = String(selectedDateKey || "").trim();
             if (!substationKey || !targetKey) return [];
-            return getAllFeederHistoryEntries_().filter((entry) => {
+            return getAllFeederHistoryEntries_(substation).filter((entry) => {
                 const entrySubstationKey = normalizeFeederSubstationKey_(entry["33/11 KV SUBSTATION"] || entry.substation || "");
                 const entryDateKey = buildFeederDateKey_(entry["DATE(DD/MM/YYY)"] || entry["DATE(DD/MM/YYYY)"] || entry.date || "");
                 return entrySubstationKey === substationKey && entryDateKey === targetKey;
@@ -6301,7 +7000,7 @@
             if (!row || !targetKey) return "";
             const substationKey = normalizeFeederSubstationKey_(row.substation || "");
             const feederKey = String(row.feeder || "").trim().toUpperCase();
-            const matchedEntries = getAllFeederHistoryEntries_()
+            const matchedEntries = getAllFeederHistoryEntries_(row.substation)
                 .filter((entry) => {
                     const entrySubstationKey = normalizeFeederSubstationKey_(entry["33/11 KV SUBSTATION"] || entry.substation || "");
                     const entryFeederKey = String(entry["33 AND 11 KV FEEDER"] || entry.feeder || "").trim().toUpperCase();
@@ -6324,7 +7023,7 @@
             const substationKey = normalizeFeederSubstationKey_(substation);
             if (!substationKey) return [];
             const submittedDates = new Set(
-                getAllFeederHistoryEntries_()
+                getAllFeederHistoryEntries_(substation)
                     .filter((entry) => normalizeFeederSubstationKey_(entry["33/11 KV SUBSTATION"] || entry.substation || "") === substationKey)
                     .map((entry) => buildFeederDateKey_(entry["DATE(DD/MM/YYY)"] || entry["DATE(DD/MM/YYYY)"] || entry.date || ""))
                     .filter(Boolean)
@@ -6709,7 +7408,15 @@
             try {
                 if ("caches" in window) {
                     const keys = await caches.keys();
-                    await Promise.all(keys.map((key) => caches.delete(key)));
+                    // SAFETY FIX (2026-09-15, USER-REQUESTED): pehle yahan is
+                    // ORIGIN ki SAARI caches delete ho jaati thi - Cache API
+                    // origin-scoped hota hai, path-scoped nahi, isliye agar isi
+                    // domain (jaise GitHub Pages account) par koi doosra project
+                    // bhi host ho, uski cache bhi is Refresh button se saaf ho
+                    // sakti thi. Ab sirf isi app ki apni cache ("seoni-app-"
+                    // prefix wali, service-worker.js ke CACHE_VERSION se match)
+                    // delete hoti hai.
+                    await Promise.all(keys.filter((key) => key.startsWith("seoni-app-")).map((key) => caches.delete(key)));
                 }
                 if ("serviceWorker" in navigator) {
                     const reg = await navigator.serviceWorker.getRegistration();
@@ -6911,9 +7618,31 @@
             }
         }
 
+        // ITEM-9 FIX (2026-09-15, audit item "backend API versioning"): backend
+        // ab (jin scripts me redeploy ho chuka hai) har object-shaped response
+        // me "api_version" bhejta hai. Yahan hum sirf ek in-memory map me isi
+        // session ke andar har URL ka "pehli baar dekha gaya" version yaad
+        // rakhte hain - agar usi URL se BAAD me koi DIFFERENT version aaye
+        // (matlab beech session me backend redeploy ho gaya), to sirf ek
+        // console.warn karte hain. Koi data/return-value/behavior change nahi -
+        // purane backend (jinme abhi yeh field hi nahi hai) bilkul pehle jaisे
+        // hi chalte rahenge, kyoki parsed.api_version undefined hoga aur yeh
+        // block chup-chaap skip ho jayega.
+        const apiVersionSeenByUrl_ = {};
         async function loadRemoteJson(url, timeoutMs = 6000) {
             const text = await loadRemoteText(url, timeoutMs);
-            return JSON.parse(text || "null");
+            const parsed = JSON.parse(text || "null");
+            try {
+                if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.api_version != null) {
+                    const baseUrl = String(url).split("?")[0];
+                    const seen = apiVersionSeenByUrl_[baseUrl];
+                    if (seen != null && seen !== parsed.api_version) {
+                        console.warn(`[API-VERSION] ${baseUrl} ka backend version isi session me badal gaya (${seen} -> ${parsed.api_version}) - agar koi report/data ajeeb lage to app ko hard-refresh karein.`);
+                    }
+                    apiVersionSeenByUrl_[baseUrl] = parsed.api_version;
+                }
+            } catch (_) {}
+            return parsed;
         }
 
         // GLOBAL APPS SCRIPT CONCURRENCY GATE (2026-09-13): USER-REPORTED BUG - Freeze
@@ -7679,6 +8408,50 @@
             }).filter(Boolean);
         }
 
+        // BUG FIX (2026-09-14) - USER-REPORTED: Feeder Reading me ek substation
+        // (jaise Chhapara ke substation) khud karte hi saari purani dates "Entry
+        // Pending" dikha deti thi, jabki reading pehle hi submit ho chuki thi. ASLI
+        // WAJAH: `getSummary` poori feeder history (sabhi DC/substation/date, 1.5+
+        // MB JSON) ek saath deta tha - itna bada response Apps Script se laana
+        // slow/unstable tha (kabhi timeout, kabhi HTML error page JSON ki jagah -
+        // dono case me feederReportRows KHAALI reh jaata tha, isliye code ko lagta
+        // tha "kisi bhi din koi reading submit hi nahi hui"). Backend me ab `getSummary`
+        // ek optional `substation` param leta hai (additive, backward-compatible -
+        // bina param ke pehle jaisa hi poora data deta hai) - jab user ek substation
+        // chunta hai to sirf USI substation ka (bahut chhota, tez, reliable) data
+        // maangte hain, poori history nahi. Substation-wise cache rakhte hain taaki
+        // baar-baar same substation chunne par dubara fetch na ho.
+        async function loadFeederSubstationHistory_(substation, forceRefresh = false) {
+            const key = normalizeFeederSubstationKey_(substation);
+            if (!key) return [];
+            if (!forceRefresh && feederSubstationHistoryCache_[key]) return feederSubstationHistoryCache_[key];
+            let rawData = null, lastErr = null;
+            for (let attempt = 1; attempt <= 2 && rawData === null; attempt++) {
+                try {
+                    rawData = await loadRemoteJson(`${feederSubmitScriptUrl}?action=getSummary&substation=${encodeURIComponent(substation)}`, 30000);
+                } catch (err) {
+                    lastErr = err;
+                    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 1500));
+                }
+            }
+            if (rawData === null) return feederSubstationHistoryCache_[key] || [];
+            const summaryRows = Array.isArray(rawData) ? rawData : (Array.isArray(rawData?.data) ? rawData.data : []);
+            const mapped = summaryRows.map((row) => ({
+                "33/11 KV SUBSTATION": String(row["33/11 KV SUBSTATION"] || row.substation || "").trim(),
+                "33 AND 11 KV FEEDER": String(row["33 AND 11 KV FEEDER"] || row.feeder || "").trim(),
+                "METER NO": String(row["METER NO"] || row.meter_no || row.meter || "").trim(),
+                "PREVIUS READING": String(row["PREVIUS READING"] || row.previous_reading || "").trim(),
+                "CURRENT READING": String(row["CURRENT READING"] || row.current_reading || "").trim(),
+                "MF": String(row["MF"] || row.mf || "").trim(),
+                "CONSUMPTION": String(row["CONSUMPTION"] || row.consumption || "").trim(),
+                "DC NAME": String(row["DC NAME"] || row.dc_name || "").trim(),
+                "DATE(DD/MM/YYY)": String(row["DATE(DD/MM/YYY)"] || row["DATE(DD/MM/YYYY)"] || row.date || "").trim(),
+                "TIME(HH/MM)": String(row["TIME(HH/MM)"] || row["TIME(HH:MM)"] || row.time || "").trim()
+            })).filter((row) => row["33/11 KV SUBSTATION"] || row["33 AND 11 KV FEEDER"]);
+            feederSubstationHistoryCache_[key] = mapped;
+            return mapped;
+        }
+
         async function loadFeederData(forceRefresh = false) {
             if (!forceRefresh && feederDataLoaded && feederRows.length) return true;
             try {
@@ -7709,8 +8482,30 @@
         async function loadFeederReportData(forceRefresh = false) {
             if (!forceRefresh && feederReportLoaded && feederReportRows.length) return true;
             feederReportLoadMessage = "";
+            const previousFeederReportRows = Array.isArray(feederReportRows) ? feederReportRows.slice() : [];
+            // BUG FIX (2026-09-14) - USER-REPORTED: Feeder Reading me kabhi-kabhi
+            // (khaaskar Chhapara jaisi badi DC me) saari purani dates "Entry Pending"
+            // dikha deta tha, jabki reading pehle hi submit ho chuki thi. Live
+            // diagnose karne par pata chala ASLI WAJAH: yeh "getSummary" call poori
+            // feeder history (1.5+ MB JSON, sabhi DC/substation/date) ek saath laata
+            // hai - itna bada response Apps Script se laane me kabhi 6 second
+            // (loadRemoteJson ka default timeout) se zyada lag jaata tha, aur kabhi
+            // Apps Script ka wahi known "echo" glitch (jo Freeze module me bhi dekha
+            // gaya) HTML bhej deta tha JSON ki jagah - dono case me feederReportRows
+            // KHAALI reh jaata tha, isliye code ko lagta tha "kisi bhi din koi
+            // reading submit hi nahi hui" aur poori list "Pending" dikha deta tha.
+            // Ab timeout 45 second tak badhaya aur 2 attempt (2s gap) try karte hain.
+            let rawData = null, lastFeederSummaryErr = null;
+            for (let attempt = 1; attempt <= 2 && rawData === null; attempt++) {
+                try {
+                    rawData = await loadRemoteJson(`${feederSubmitScriptUrl}?action=getSummary`, 45000);
+                } catch (err) {
+                    lastFeederSummaryErr = err;
+                    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2000));
+                }
+            }
             try {
-                const rawData = await loadRemoteJson(`${feederSubmitScriptUrl}?action=getSummary`);
+                if (rawData === null) throw lastFeederSummaryErr || new Error("Feeder summary load fail");
                 if (rawData && !Array.isArray(rawData) && rawData.status === "success" && rawData.message) {
                     feederReportLoadMessage = String(rawData.message || "").trim();
                 }
@@ -7773,16 +8568,21 @@
                 if (!feederReportLoadMessage) {
                     feederReportLoadMessage = "Feeder report source se data nahi mila";
                 }
-                feederReportRows = [];
-                feederReportLoaded = false;
-                return false;
+                // RELIABILITY FIX (2026-09-15, USER-FLAGGED risk - STM report me
+                // flag hui thi, Feeder me bhi same class ka risk tha): forced
+                // refresh (jaise Download click) fail ho jaaye to pehle se
+                // successfully-loaded data khaali nahi karte - sirf tabhi khaali
+                // karte hain jab kabhi koi data mila hi na ho.
+                feederReportRows = previousFeederReportRows;
+                feederReportLoaded = previousFeederReportRows.length > 0;
+                return feederReportRows.length > 0;
             } catch (_) {
                 if (!feederReportLoadMessage) {
                     feederReportLoadMessage = "Feeder report source load nahi ho paya";
                 }
-                feederReportRows = [];
-                feederReportLoaded = false;
-                return false;
+                feederReportRows = previousFeederReportRows;
+                feederReportLoaded = previousFeederReportRows.length > 0;
+                return feederReportRows.length > 0;
             }
         }
 
@@ -7996,6 +8796,1445 @@
 
             const csvText = await loadRemoteText(peakLoadSubmittedCsvUrl);
             return parsePeakLoadSubmittedCsv(csvText);
+        }
+
+        // NEW FEATURE (2026-09-14): "Daily Hourly Peak Load" ka Daily Progress report
+        // (Feeder Reading report jaisa hi pattern) - poori submitted history (full
+        // row detail, sirf substation/date nahi) yahan alag se load hoti hai kyonki
+        // upar wala parsePeakLoadSubmittedJson() sirf substation+date extract karta
+        // hai (pending-check ke liye kaafi tha), report ke liye poori row chahiye.
+        function normalizePeakLoadReportRow_(row) {
+            if (Array.isArray(row)) {
+                return {
+                    "33/11 KV SUBSTATION": String(row[0] || "").replace(/\s+/g, " ").trim(),
+                    "11 KV FEEDER": String(row[1] || "").replace(/\s+/g, " ").trim(),
+                    "METER NO": String(row[2] || "").trim(),
+                    "DATE (DD-MM-YYYY)": String(row[3] || "").trim(),
+                    "TIME (HH:MM)": String(row[4] || "").trim(),
+                    "PEAK LOAD (A)": String(row[5] || "").trim(),
+                    "NAME OF OPERATOR": String(row[6] || "").trim()
+                };
+            }
+            return {
+                "33/11 KV SUBSTATION": String(row["33/11 KV SUBSTATION"] || row.substation || "").replace(/\s+/g, " ").trim(),
+                "11 KV FEEDER": String(row["11 KV FEEDER"] || row.feeder || "").replace(/\s+/g, " ").trim(),
+                "METER NO": String(row["METER NO"] || row.meter_no || "").trim(),
+                "DATE (DD-MM-YYYY)": String(row["DATE (DD-MM-YYYY)"] || row.date || "").trim(),
+                "TIME (HH:MM)": String(row["TIME (HH:MM)"] || row.time || "").trim(),
+                "PEAK LOAD (A)": String(row["PEAK LOAD (A)"] || row.peak_load || "").trim(),
+                "NAME OF OPERATOR": String(row["NAME OF OPERATOR"] || row.operator_name || "").trim()
+            };
+        }
+
+        async function loadPeakLoadReportData(forceRefresh = false) {
+            if (!forceRefresh && peakLoadReportLoaded && peakLoadReportRows.length) return true;
+            peakLoadReportLoadMessage = "";
+            const previousPeakLoadReportRows = Array.isArray(peakLoadReportRows) ? peakLoadReportRows.slice() : [];
+            let rawData = null, lastErr = null;
+            for (let attempt = 1; attempt <= 2 && rawData === null; attempt++) {
+                try {
+                    rawData = await loadRemoteJson(`${peakLoadSubmitScriptUrl}?action=getSummary&t=${Date.now()}`, 45000);
+                } catch (err) {
+                    lastErr = err;
+                    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2000));
+                }
+            }
+            try {
+                if (rawData === null) throw lastErr || new Error("Peak load summary load fail");
+                const summaryRows = Array.isArray(rawData)
+                    ? rawData
+                    : Array.isArray(rawData?.data)
+                        ? rawData.data
+                        : Array.isArray(rawData?.rows)
+                            ? rawData.rows
+                            : [];
+                peakLoadReportRows = summaryRows.map(normalizePeakLoadReportRow_).filter((row) => row["33/11 KV SUBSTATION"] || row["11 KV FEEDER"]);
+                if (peakLoadReportRows.length) {
+                    peakLoadReportLoaded = true;
+                    return true;
+                }
+                peakLoadReportLoadMessage = "Peak Load report source se data nahi mila";
+                // RELIABILITY FIX (2026-09-15, USER-FLAGGED risk): forced refresh
+                // (jaise Download click) empty result de to pehle se successfully-
+                // loaded data khaali nahi karte.
+                peakLoadReportRows = previousPeakLoadReportRows;
+                peakLoadReportLoaded = previousPeakLoadReportRows.length > 0;
+                return peakLoadReportRows.length > 0;
+            } catch (_) {
+                peakLoadReportLoadMessage = "Peak Load report source load nahi ho paya";
+                peakLoadReportRows = previousPeakLoadReportRows;
+                peakLoadReportLoaded = previousPeakLoadReportRows.length > 0;
+                return peakLoadReportRows.length > 0;
+            }
+        }
+
+        function getFilteredPeakLoadReportRows() {
+            const label = getFeederReportFilterLabel();
+            if (!label) return [];
+            if (shmsProgressMode === "MONTHLY") {
+                return peakLoadReportRows.filter((row) => {
+                    const dateKey = buildFeederDateKey_(row["DATE (DD-MM-YYYY)"] || "");
+                    return buildShmsMonthKeyFromDateKey_(dateKey) === label;
+                });
+            }
+            const dailyKey = buildShmsDateKey_(label);
+            return peakLoadReportRows.filter((row) => buildFeederDateKey_(row["DATE (DD-MM-YYYY)"] || "") === dailyKey);
+        }
+
+        async function renderPeakLoadReportSummary(forceRefresh = false, isStillValid = () => true) {
+            const summary = document.getElementById("shms-progress-summary");
+            if (!summary) return;
+            // SPEED FIX (2026-09-15, USER-REPORTED): pehle hamesha
+            // loadPeakLoadReportData(true) chalta tha - date/month toggle par bhi
+            // poori history dobara fetch hoti thi. Ab sirf tab-switch/first-load
+            // par force hota hai, baaki toggle sirf loaded data re-filter karta hai.
+            const needsFetch = forceRefresh || !peakLoadReportLoaded || !peakLoadReportRows.length;
+            const progress = needsFetch ? renderSyncingProgress(summary, isStillValid, "SYNCING DATA... PLEASE WAIT") : null;
+            await loadPeakLoadReportData(forceRefresh);
+            if (!isStillValid()) { if (progress) progress.stop(); return; }
+            const label = getFeederReportFilterLabel();
+            const rows = getFilteredPeakLoadReportRows();
+            if (progress) await progress.finish();
+            if (!isStillValid()) return;
+            summary.style.display = label ? "block" : "none";
+            if (!label) {
+                summary.innerHTML = "";
+                return;
+            }
+            // ITEM-8 FIX (2026-09-15): naya fetch fail hone par purana (cached)
+            // data dikhne par chhota staleness warning - sirf display text.
+            const staleNote = (rows.length && peakLoadReportLoadMessage)
+                ? `<br><span style="display:block; margin-top:6px; font-size:11px; color:#b45309;">⚠ Naya data load nahi ho saka, pehle se load data dikha rahe hain</span>`
+                : "";
+            const debugMessage = rows.length
+                ? `${label} ke liye ${rows.length} peak load entries ready hain${staleNote}`
+                : (peakLoadReportLoadMessage
+                    ? `${label} ke liye 0 peak load entries ready hain<br><span style="display:block; margin-top:6px; font-size:11px; color:#b91c1c;">${peakLoadReportLoadMessage}</span>`
+                    : `${label} ke liye 0 peak load entries ready hain`);
+            summary.innerHTML = `<div style="margin-top:14px; background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:16px; padding:14px; text-align:center; font-size:13px; font-weight:900; color:#0f172a;">${debugMessage}</div>`;
+        }
+
+        async function downloadPeakLoadReport(fmt) {
+            try {
+                // SPEED FIX (2026-09-15, USER-REPORTED): report screen par already
+                // load ho chuka data ho to Download usi ko reuse karta hai, poori
+                // history dobara fetch nahi karta.
+                if (!peakLoadReportLoaded || !peakLoadReportRows.length) {
+                    setShmsProgressStatus("Peak Load report data ready ki ja rahi hai...");
+                    await loadPeakLoadReportData(false);
+                    setShmsProgressStatus("");
+                }
+                const rows = getFilteredPeakLoadReportRows();
+                const label = getFeederReportFilterLabel();
+                if (!label) return showToast("Pehle date ya month select kijiye", false);
+
+                const headers = ["33/11 KV SUBSTATION", "11 KV FEEDER", "METER NO", "DATE (DD-MM-YYYY)", "TIME (HH:MM)", "PEAK LOAD (A)", "NAME OF OPERATOR"];
+                const bodyRows = rows.map((row) => headers.map((key) => String(row[key] ?? "")));
+                const safeLabel = label.replace(/[\\/:*?"<>|]+/g, "_");
+
+                if (fmt === "XLS") {
+                    const csvRows = [
+                        ["DAILY HOURLY PEAK LOAD REPORT"],
+                        [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`],
+                        [],
+                        headers,
+                        ...bodyRows
+                    ];
+                    const csv = csvRows.map((row) => row.map((cell) => {
+                        const value = String(cell ?? "");
+                        return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+                    }).join(",")).join("\n");
+                    await saveShmsBlob(`PEAKLOAD_${shmsProgressMode}_${safeLabel}.csv`, new Blob([csv], { type: "text/csv;charset=utf-8" }), "text/csv;charset=utf-8");
+                    return showToast(bodyRows.length ? "Excel report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye." : "Blank Excel report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+                }
+
+                if (!window.jspdf || !window.jspdf.jsPDF) {
+                    return showToast("PDF library load nahi hui", false);
+                }
+
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF("l", "mm", "a4");
+                doc.setFontSize(7);
+                doc.setTextColor(100);
+                doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                doc.setFontSize(15);
+                doc.setTextColor(0);
+                doc.text("DAILY HOURLY PEAK LOAD REPORT", 148, 16, { align: "center" });
+                doc.setFontSize(11);
+                doc.text(shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`, 148, 23, { align: "center" });
+                doc.autoTable({
+                    startY: 29,
+                    head: [headers],
+                    body: bodyRows.length ? bodyRows : [["", "", "", "", "", "", ""]],
+                    theme: "grid",
+                    headStyles: { fillColor: [17, 24, 39], halign: "center" },
+                    styles: { fontSize: 7, cellPadding: 2, halign: "center" },
+                    columnStyles: {
+                        0: { halign: "left" },
+                        1: { halign: "left" },
+                        6: { halign: "left" }
+                    }
+                });
+                const pdfBlob = doc.output("blob");
+                await saveShmsBlob(`PEAKLOAD_${shmsProgressMode}_${safeLabel}.pdf`, pdfBlob, "application/pdf");
+                showToast(bodyRows.length ? "PDF report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye." : "Blank PDF report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+            } catch (error) {
+                setShmsProgressStatus("");
+                showToast(error?.message || "Peak Load report download nahi ho paya", false);
+            }
+        }
+
+        // NEW FEATURE (2026-09-14): STM Complaint report - backend (.gs) ab
+        // ?action=getSummary support karta hai (user ne .gs update kar diya),
+        // isliye Peak Load report jaisa hi pattern yahan bhi laga diya gaya hai.
+        function normalizeStmComplaintReportRow_(row) {
+            if (Array.isArray(row)) {
+                return {
+                    "SUBSTATION": String(row[0] || "").replace(/\s+/g, " ").trim(),
+                    "OPERATOR NAME": String(row[1] || "").replace(/\s+/g, " ").trim(),
+                    "MOBILE NO": String(row[2] || "").trim(),
+                    "INFORMATION SHARED AT": String(row[3] || "").trim(),
+                    "DATE": String(row[4] || "").trim(),
+                    "TIME": String(row[5] || "").trim(),
+                    "CALLING INFO": String(row[6] || "").trim(),
+                    "COMPLAINT DETAILS": String(row[7] || "").trim(),
+                    "PHOTO LINK": String(row[8] || "").trim(),
+                    "SUBMIT DATE": String(row[9] || "").trim(),
+                    "SUBMIT TIME": String(row[10] || "").trim()
+                };
+            }
+            return {
+                "SUBSTATION": String(row["SUBSTATION"] || row.substation || "").replace(/\s+/g, " ").trim(),
+                "OPERATOR NAME": String(row["OPERATOR NAME"] || row.operator_name || "").replace(/\s+/g, " ").trim(),
+                "MOBILE NO": String(row["MOBILE NO"] || row.mobile_no || "").trim(),
+                "INFORMATION SHARED AT": String(row["INFORMATION SHARED AT"] || row.information_shared_at || "").trim(),
+                "DATE": String(row["DATE"] || row.date || "").trim(),
+                "TIME": String(row["TIME"] || row.time || "").trim(),
+                "CALLING INFO": String(row["CALLING INFO"] || row.calling_info || "").trim(),
+                "COMPLAINT DETAILS": String(row["COMPLAINT DETAILS"] || row.complaint_details || "").trim(),
+                "PHOTO LINK": String(row["PHOTO LINK"] || row.photo_link || "").trim(),
+                "SUBMIT DATE": String(row["SUBMIT DATE"] || row.submit_date || "").trim(),
+                "SUBMIT TIME": String(row["SUBMIT TIME"] || row.submit_time || "").trim()
+            };
+        }
+
+        async function loadStmComplaintReportData(forceRefresh = false) {
+            if (!forceRefresh && stmComplaintReportLoaded && stmComplaintReportRows.length) return true;
+            stmComplaintReportLoadMessage = "";
+            const previousStmComplaintReportRows = Array.isArray(stmComplaintReportRows) ? stmComplaintReportRows.slice() : [];
+            let rawData = null, lastErr = null;
+            for (let attempt = 1; attempt <= 2 && rawData === null; attempt++) {
+                try {
+                    rawData = await loadRemoteJson(`${stmComplaintScriptUrl}?action=getSummary&t=${Date.now()}`, 45000);
+                } catch (err) {
+                    lastErr = err;
+                    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2000));
+                }
+            }
+            try {
+                if (rawData === null) throw lastErr || new Error("STM complaint summary load fail");
+                const summaryRows = Array.isArray(rawData)
+                    ? rawData
+                    : Array.isArray(rawData?.data)
+                        ? rawData.data
+                        : Array.isArray(rawData?.rows)
+                            ? rawData.rows
+                            : [];
+                stmComplaintReportRows = summaryRows.map(normalizeStmComplaintReportRow_).filter((row) => row["SUBSTATION"]);
+                if (stmComplaintReportRows.length) {
+                    stmComplaintReportLoaded = true;
+                    return true;
+                }
+                stmComplaintReportLoadMessage = "STM Complaint report source se data nahi mila";
+                // RELIABILITY FIX (2026-09-15, USER-FLAGGED risk): forced refresh
+                // (jaise Download click) fail/empty ho to pehle se successfully-
+                // loaded data khaali/lost nahi hota.
+                stmComplaintReportRows = previousStmComplaintReportRows;
+                stmComplaintReportLoaded = previousStmComplaintReportRows.length > 0;
+                return stmComplaintReportRows.length > 0;
+            } catch (_) {
+                stmComplaintReportLoadMessage = "STM Complaint report source load nahi ho paya";
+                stmComplaintReportRows = previousStmComplaintReportRows;
+                stmComplaintReportLoaded = previousStmComplaintReportRows.length > 0;
+                return stmComplaintReportRows.length > 0;
+            }
+        }
+
+        function getFilteredStmComplaintReportRows() {
+            const label = getFeederReportFilterLabel();
+            if (!label) return [];
+            if (shmsProgressMode === "MONTHLY") {
+                return stmComplaintReportRows.filter((row) => {
+                    const dateKey = buildFeederDateKey_(row["DATE"] || "");
+                    return buildShmsMonthKeyFromDateKey_(dateKey) === label;
+                });
+            }
+            const dailyKey = buildShmsDateKey_(label);
+            return stmComplaintReportRows.filter((row) => buildFeederDateKey_(row["DATE"] || "") === dailyKey);
+        }
+
+        async function renderStmComplaintReportSummary(forceRefresh = false, isStillValid = () => true) {
+            const summary = document.getElementById("shms-progress-summary");
+            if (!summary) return;
+            // SPEED FIX (2026-09-15, USER-REPORTED): pehle hamesha
+            // loadStmComplaintReportData(true) chalta tha - date/month toggle par
+            // bhi poori history dobara fetch hoti thi. Ab sirf tab-switch/first-load
+            // par force hota hai, baaki toggle sirf loaded data re-filter karta hai.
+            const needsFetch = forceRefresh || !stmComplaintReportLoaded || !stmComplaintReportRows.length;
+            const progress = needsFetch ? renderSyncingProgress(summary, isStillValid, "SYNCING DATA... PLEASE WAIT") : null;
+            await loadStmComplaintReportData(forceRefresh);
+            if (!isStillValid()) { if (progress) progress.stop(); return; }
+            const label = getFeederReportFilterLabel();
+            const rows = getFilteredStmComplaintReportRows();
+            if (progress) await progress.finish();
+            if (!isStillValid()) return;
+            summary.style.display = label ? "block" : "none";
+            if (!label) {
+                summary.innerHTML = "";
+                return;
+            }
+            // ITEM-8 FIX (2026-09-15): naya fetch fail hone par purana (cached)
+            // data dikhne par chhota staleness warning - sirf display text.
+            const staleNote = (rows.length && stmComplaintReportLoadMessage)
+                ? `<br><span style="display:block; margin-top:6px; font-size:11px; color:#b45309;">⚠ Naya data load nahi ho saka, pehle se load data dikha rahe hain</span>`
+                : "";
+            const debugMessage = rows.length
+                ? `${label} ke liye ${rows.length} STM complaint entries ready hain${staleNote}`
+                : (stmComplaintReportLoadMessage
+                    ? `${label} ke liye 0 STM complaint entries ready hain<br><span style="display:block; margin-top:6px; font-size:11px; color:#b91c1c;">${stmComplaintReportLoadMessage}</span>`
+                    : `${label} ke liye 0 STM complaint entries ready hain`);
+            summary.innerHTML = `<div style="margin-top:14px; background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:16px; padding:14px; text-align:center; font-size:13px; font-weight:900; color:#0f172a;">${debugMessage}</div>`;
+        }
+
+        async function downloadStmComplaintReport(fmt) {
+            try {
+                // SPEED FIX (2026-09-15, USER-REPORTED): report screen par already
+                // load ho chuka data ho to Download usi ko reuse karta hai, poori
+                // history dobara fetch nahi karta. Ye same forced-refetch fail hone
+                // par valid on-screen data lose hone wali risk bhi kam karta hai
+                // (jo aapne khud flag ki thi).
+                if (!stmComplaintReportLoaded || !stmComplaintReportRows.length) {
+                    setShmsProgressStatus("STM Complaint report data ready ki ja rahi hai...");
+                    await loadStmComplaintReportData(false);
+                    setShmsProgressStatus("");
+                }
+                const rows = getFilteredStmComplaintReportRows();
+                const label = getFeederReportFilterLabel();
+                if (!label) return showToast("Pehle date ya month select kijiye", false);
+
+                const headers = ["SUBSTATION", "OPERATOR NAME", "MOBILE NO", "INFORMATION SHARED AT", "DATE", "TIME", "CALLING INFO", "COMPLAINT DETAILS", "PHOTO LINK", "SUBMIT DATE", "SUBMIT TIME"];
+                const bodyRows = rows.map((row) => headers.map((key) => String(row[key] ?? "")));
+                const safeLabel = label.replace(/[\\/:*?"<>|]+/g, "_");
+
+                if (fmt === "XLS") {
+                    const csvRows = [
+                        ["STM COMPLAINT REPORT"],
+                        [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`],
+                        [],
+                        headers,
+                        ...bodyRows
+                    ];
+                    const csv = csvRows.map((row) => row.map((cell) => {
+                        const value = String(cell ?? "");
+                        return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+                    }).join(",")).join("\n");
+                    await saveShmsBlob(`STM_${shmsProgressMode}_${safeLabel}.csv`, new Blob([csv], { type: "text/csv;charset=utf-8" }), "text/csv;charset=utf-8");
+                    return showToast(bodyRows.length ? "Excel report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye." : "Blank Excel report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+                }
+
+                if (!window.jspdf || !window.jspdf.jsPDF) {
+                    return showToast("PDF library load nahi hui", false);
+                }
+
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF("l", "mm", "a4");
+                doc.setFontSize(7);
+                doc.setTextColor(100);
+                doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                doc.setFontSize(15);
+                doc.setTextColor(0);
+                doc.text("STM COMPLAINT REPORT", 148, 16, { align: "center" });
+                doc.setFontSize(11);
+                doc.text(shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`, 148, 23, { align: "center" });
+                doc.autoTable({
+                    startY: 29,
+                    head: [headers],
+                    body: bodyRows.length ? bodyRows : [["", "", "", "", "", "", "", "", "", "", ""]],
+                    theme: "grid",
+                    headStyles: { fillColor: [17, 24, 39], halign: "center" },
+                    styles: { fontSize: 6.5, cellPadding: 1.5, halign: "center" },
+                    columnStyles: {
+                        0: { halign: "left" },
+                        1: { halign: "left" },
+                        7: { halign: "left" }
+                    }
+                });
+                const pdfBlob = doc.output("blob");
+                await saveShmsBlob(`STM_${shmsProgressMode}_${safeLabel}.pdf`, pdfBlob, "application/pdf");
+                showToast(bodyRows.length ? "PDF report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye." : "Blank PDF report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+            } catch (error) {
+                setShmsProgressStatus("");
+                showToast(error?.message || "STM Complaint report download nahi ho paya", false);
+            }
+        }
+
+        // =====================================================================
+        // O&M/VIG MODULE (2026-09-14) - admin (Sub DN Chhapara, password admin123)
+        // + DC/Division/Circle "Daily Progress" 4th tile report/download.
+        // =====================================================================
+        function cleanOmvigAmount_(value) {
+            const num = Number(String(value == null ? "" : value).replace(/[^\d.-]/g, ""));
+            return Number.isFinite(num) ? num : 0;
+        }
+
+        async function initOmvigAdmin() {
+            const statusBox = document.getElementById("omvig-admin-status");
+            const paidFileInput = document.getElementById("omvig-paid-file-input");
+            const paidFileNameBox = document.getElementById("omvig-paid-file-name");
+            const paidStatusBox = document.getElementById("omvig-paid-upload-status");
+            if (paidFileInput) paidFileInput.value = "";
+            if (paidFileNameBox) paidFileNameBox.innerText = "";
+            if (paidStatusBox) paidStatusBox.style.display = "none";
+            if (statusBox) statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:#1d4ed8;">Status load ho raha hai...</div>`;
+            try {
+                // USER-REPORTED SLOWNESS FIX (2026-09-14): pehle yahan poori
+                // getPendingSummary (poore Circle ki ~9500 rows) call hoti thi
+                // sirf freeze_date + count ke liye - bahut slow (1-2+ min).
+                // Ab fast, self-healing `fetchOmvigFreezeStatus_()` use karte hain
+                // (yeh khud hi auto-freeze bhi kar deta hai agar zaroorat ho).
+                const status = await fetchOmvigFreezeStatus_(true);
+                omvigAdminStatus = { freeze_date: status.freeze_date, pending_count: status.pending_count, last_upload_at: status.last_upload_at, last_upload_summary: status.last_upload_summary };
+            } catch (_) {
+                omvigAdminStatus = null;
+                if (statusBox) statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:#b91c1c;">Status load nahi ho payi - internet check kijiye</div>`;
+                return;
+            }
+            renderOmvigAdminStatus();
+        }
+
+        // USER REQUEST (2026-09-14): "Freeze" ab ek manual button nahi hai - di
+        // gayi Pending sheet hamesha hi frozen baseline maani jaati hai. Backend
+        // `setFreezeDateOnce` already guarded hai (dobara set nahi hoti), isliye
+        // yeh helper JIS BHI entry point se pehli baar call ho (admin panel ya
+        // seedha DC/Division/Circle report khol ke) - usi se silently ek hi baar
+        // freeze ho jaati hai, koi bhi manual step chahiye hi nahi.
+        async function autoFreezeOmvigBaseline_() {
+            try {
+                const response = await fetch(omvigSubmitScriptUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify({ action: "setFreezeDateOnce" })
+                });
+                const text = await response.text();
+                let parsed = {};
+                try { parsed = JSON.parse(text || "{}"); } catch (_) {}
+                if (parsed.status === "success" && parsed.freeze_date) return parsed.freeze_date;
+            } catch (_) {
+                // Chup rehte hain - agli baar phir try ho jayega (guarded, safe).
+            }
+            return "";
+        }
+
+        // USER REQUEST (2026-09-15): admin ko yahin se pata chalna chahiye
+        // "last Paid List upload kab hua tha" - agar kabhi koi upload hua hi
+        // nahi hai to ye line simply nahi dikhti (naya/khaali OMVIG META).
+        function renderOmvigLastUploadLine_() {
+            const lastUploadAt = omvigAdminStatus?.last_upload_at || "";
+            if (!lastUploadAt) return "";
+            const summary = omvigAdminStatus?.last_upload_summary || "";
+            return `<div style="text-align:center; font-size:0.68rem; font-weight:700; color:#475569; margin-top:6px; border-top:1px dashed #cbd5e1; padding-top:6px;">🕒 Last Upload: ${escapeHtml(lastUploadAt)}${summary ? `<br><span style="font-weight:600; color:#64748b;">${escapeHtml(summary)}</span>` : ""}</div>`;
+        }
+
+        function renderOmvigAdminStatus() {
+            const statusBox = document.getElementById("omvig-admin-status");
+            if (!statusBox) return;
+            const frozen = !!omvigAdminStatus?.freeze_date;
+            statusBox.innerHTML = frozen
+                ? `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#166534;">✅ Baseline Frozen - Date: ${escapeHtml(omvigAdminStatus.freeze_date)}<br><span style="font-weight:800; color:#334155;">${omvigAdminStatus.pending_count} pending cases</span></div>${renderOmvigLastUploadLine_()}`
+                : `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#9a3412;">⚠️ Baseline abhi set nahi ho payi - internet check karke panel dobara kholiye.</div>`;
+        }
+
+        function handleOmvigPaidFileSelect(event) {
+            const file = event?.target?.files?.[0];
+            const nameBox = document.getElementById("omvig-paid-file-name");
+            if (nameBox) nameBox.innerText = file ? file.name : "";
+        }
+
+        function formatOmvigCellDate_(value) {
+            if (value instanceof Date) {
+                // BUG FIX (2026-09-15, USER-REPORTED): kuch paid rows jinka asli
+                // Pay_date "date-only" tha (koi real time nahi, source system se
+                // midnight placeholder) - Excel apne andar date ko decimal number
+                // ke roop me store karta hai, aur is number me kabhi-kabhi ek
+                // bahut chhota (~10 second ka) floating-point imprecision hota
+                // hai jo Excel ki apni display me round hokar "12:00:00 AM"
+                // saaf dikhta hai, lekin jab yahan precisely (millisecond tak)
+                // padh kar IST me convert kiya jaata tha, to wo chhota sa farak
+                // MIDNIGHT ki boundary galat taraf paar kara deta tha - poori
+                // DATE hi ek din PEECHE (jaise 14-Sep ki jagah 13-Sep) ban jaati
+                // thi. Fix: date-components nikaalne se pehle NEAREST MINUTE par
+                // round kar dete hain - itna chhota (<30s) drift ab kabhi
+                // din/ghante ki boundary paar nahi karega.
+                const rounded = new Date(Math.round(value.getTime() / 60000) * 60000);
+                const y = rounded.getFullYear(), m = String(rounded.getMonth() + 1).padStart(2, "0"), d = String(rounded.getDate()).padStart(2, "0");
+                const hh = String(rounded.getHours()).padStart(2, "0"), mm = String(rounded.getMinutes()).padStart(2, "0");
+                return `${y}-${m}-${d} ${hh}:${mm}`;
+            }
+            return String(value ?? "").trim();
+        }
+
+        async function readOmvigPaidFile(file) {
+            if (!file) return [];
+            if (!window.XLSX) throw new Error("Excel reader load nahi hua. Internet check karke refresh kijiye.");
+            const buffer = await file.arrayBuffer();
+            const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+            if (!rows.length) return [];
+            const headers = (rows[0] || []).map((h) => String(h || "").trim().toLowerCase());
+            const idx = (names) => {
+                for (const n of names) {
+                    const i = headers.indexOf(n.toLowerCase());
+                    if (i > -1) return i;
+                }
+                return -1;
+            };
+            const circleIdx = idx(["Circle"]);
+            const divisionIdx = idx(["Division"]);
+            const panchanamaIdx = idx(["Panchanama_no", "Panchanama_No"]);
+            const amountIdx = idx(["amount", "Amount"]);
+            const payDateIdx = idx(["Pay_date", "Pay Date"]);
+            const payModeIdx = idx(["Pay_mode", "Pay Mode"]);
+            const txIdx = idx(["Tx_number", "Tx Number"]);
+            if (panchanamaIdx < 0 || amountIdx < 0) throw new Error("Paid list file ka format match nahi hua (Panchanama_no / amount column nahi mila)");
+
+            return rows.slice(1).map((row) => {
+                const panchanamaNo = String(row[panchanamaIdx] || "").trim();
+                if (!panchanamaNo) return null;
+                return {
+                    Circle: circleIdx > -1 ? String(row[circleIdx] || "").trim() : "",
+                    Division: divisionIdx > -1 ? String(row[divisionIdx] || "").trim() : "",
+                    Panchanama_no: panchanamaNo,
+                    amount: row[amountIdx],
+                    Pay_date: payDateIdx > -1 ? formatOmvigCellDate_(row[payDateIdx]) : "",
+                    Pay_mode: payModeIdx > -1 ? String(row[payModeIdx] || "").trim() : "",
+                    Tx_number: txIdx > -1 ? String(row[txIdx] || "").trim() : ""
+                };
+            }).filter(Boolean);
+        }
+
+        async function uploadOmvigPaidList() {
+            const fileInput = document.getElementById("omvig-paid-file-input");
+            const uploadBtn = document.getElementById("omvig-paid-upload-btn");
+            const statusBox = document.getElementById("omvig-paid-upload-status");
+            const file = fileInput?.files?.[0] || null;
+            if (!file) return showToast("Pehle Paid List file select kijiye", false);
+            setActionButtonState(uploadBtn, "processing", "Upload Paid List");
+            if (statusBox) { statusBox.style.display = "block"; statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:#1d4ed8;">File read ho rahi hai...</div>`; }
+            try {
+                const rows = await readOmvigPaidFile(file);
+                if (!rows.length) throw new Error("File me koi valid row nahi mili");
+                if (statusBox) statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:#1d4ed8;">${rows.length} rows upload ho rahi hain... kripya wait kijiye</div>`;
+                const response = await fetchWithTimeout(omvigSubmitScriptUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify({ action: "uploadPaidList", admin_password: omvigAdminPasswordEntered, rows })
+                }, 90000);
+                const text = await response.text();
+                let parsed = {};
+                try { parsed = JSON.parse(text || "{}"); } catch (_) {}
+                if (parsed.status !== "success") throw new Error(parsed.message || "Upload fail ho gaya");
+                setActionButtonState(uploadBtn, "done", "Upload Paid List");
+                showToast(parsed.message || "Paid list upload ho gayi", true);
+                if (statusBox) statusBox.innerHTML = `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#166534;">✅ ${parsed.matched} matched, ${parsed.unmatched} unmatched, ${parsed.skipped_duplicate} duplicate skip.<br><span style="font-weight:700; color:#334155;">DC tabs updated: ${(parsed.dc_tabs_updated || []).join(", ") || "-"}</span></div>`;
+                omvigPendingCache_ = {}; omvigPaidCache_ = {}; omvigReportCache_ = null; omvigFreezeStatusCache_ = null; omvigDailyReportCache_ = null;
+                if (fileInput) fileInput.value = "";
+                const nameBox = document.getElementById("omvig-paid-file-name");
+                if (nameBox) nameBox.innerText = "";
+                // USER REQUEST (2026-09-15): admin ko panel dobara khole bina
+                // hi yahin turant "last upload" line dikh jaani chahiye.
+                try {
+                    const freshStatus = await fetchOmvigFreezeStatus_(true);
+                    omvigAdminStatus = { freeze_date: freshStatus.freeze_date, pending_count: freshStatus.pending_count, last_upload_at: freshStatus.last_upload_at, last_upload_summary: freshStatus.last_upload_summary };
+                    renderOmvigAdminStatus();
+                } catch (_) {
+                    // status refresh fail ho to bhi upload khud successful ho chuka hai - chup rehte hain, agli baar panel khulne par sahi dikh jayega.
+                }
+            } catch (error) {
+                setActionButtonState(uploadBtn, "failed", "Upload Paid List");
+                showToast(error?.message || "Paid list upload nahi ho payi", false);
+                if (statusBox) statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:#b91c1c;">Upload fail: ${escapeHtml(error?.message || "")}</div>`;
+            } finally {
+                setTimeout(() => setActionButtonState(uploadBtn, "idle", "Upload Paid List"), 900);
+            }
+        }
+
+        function normalizeOmvigPendingRow_(row) {
+            return {
+                circle: String(row[0] || "").trim(),
+                division: String(row[1] || "").trim(),
+                dc_name: String(row[2] || "").trim(),
+                checked_by: String(row[3] || "").trim(),
+                inspection_date: String(row[4] || "").trim(),
+                panchanama_no: String(row[5] || "").trim(),
+                ez_no: String(row[6] || "").trim(),
+                consumer_name: String(row[7] || "").trim(),
+                consumer_no: String(row[8] || "").trim(),
+                tariff_name: String(row[9] || "").trim(),
+                case_name: String(row[10] || "").trim(),
+                balanced_amount: cleanOmvigAmount_(row[11])
+            };
+        }
+
+        function normalizeOmvigPaidRow_(row) {
+            return {
+                circle: String(row[0] || "").trim(),
+                division: String(row[1] || "").trim(),
+                panchanama_no: String(row[2] || "").trim(),
+                amount: cleanOmvigAmount_(row[3]),
+                pay_date: String(row[4] || "").trim(),
+                pay_mode: String(row[5] || "").trim(),
+                tx_number: String(row[6] || "").trim(),
+                uploaded_at: String(row[7] || "").trim(),
+                // USER REQUEST (2026-09-14): Daily (fast) mode ke liye - backend ab
+                // is 9th column me DC naam bhejta hai (PAID sheet ke naam se hi
+                // derive hota hai server-side, koi extra sheet-read nahi) - purane
+                // backend (jab tak .gs redeploy na ho) is index par khaali string
+                // dega, tab yeh empty rahega (koi crash nahi).
+                dc_name: String(row[8] || "").trim()
+            };
+        }
+
+        // USER-REPORTED SLOWNESS FIX (2026-09-14): fast, data-light check (sirf
+        // freeze_date + pending_count) - `loadOmvigReportData_` isse pehle call
+        // karta hai taaki "abhi freeze nahi hua" case me poori (~9500 row) Circle
+        // list fetch hi na karni pade (jo 1-2+ min leti hai aur pehle timeout+
+        // "data load nahi ho payi" error deti thi).
+        // BUG FIX (2026-09-14, USER-REPORTED "TRY AGAIN par bhi fetch nahi ho
+        // raha" - EXACT SAME root cause jo Freeze Report me pehle mila tha,
+        // 2026-09-13 ko din-bhar lag kar solve hua tha: ek hi Apps Script
+        // project par bahut saari concurrent request jaane par Google ka
+        // "echo" content-delivery layer kabhi-kabhi 404 de deta hai (Chrome
+        // Network tab me "script.googleusercontent.com/macros/echo...404").
+        // Uss waqt saari Freeze/Revenue calls ke liye
+        // `withAppsScriptConcurrencyGate_` (max 2 concurrent request per
+        // script-URL, baaki queue me wait karte hain) laga diya gaya tha -
+        // lekin O&M/VIG naya module hai, uski teeno fetch call
+        // (getFreezeStatus/getPendingSummary/getPaidSummary) is gate ke
+        // bina hi likhi gayi thi, isliye yahi purana bug yahan wapas aa gaya.
+        // Fix: teeno call ab bhi wahi gate use karti hain - future me koi
+        // bhi naya O&M/VIG fetch bhi isi gate se hokar jaana chahiye.
+        // BUG FIX PART 2 (2026-09-14): sirf concurrency gate se poora fix nahi
+        // hua tha - Freeze module ke asli fix (ensureRevenueFreezeActiveInfo/
+        // fetchRevenueFreezeSnapshotRows, ~line 3379/3420) me ek DOOSRA hissa
+        // bhi tha jo O&M/VIG me chhoot gaya tha: agar "echo" layer ka 404/HTML
+        // error kabhi phir bhi aa jaaye (JSON.parse fail), to sirf EK attempt
+        // hone se poora call turant fail ho jaata tha. Fix: yahan bhi wahi 2
+        // attempt + 800ms gap wala retry (`withOmvigRetry_`) laga diya - ab
+        // ek transient "echo" glitch dusri koshish me aksar chal jaata hai.
+        async function withOmvigRetry_(task, attempts = 2) {
+            let lastErr = null;
+            for (let attempt = 1; attempt <= attempts; attempt++) {
+                try {
+                    return await task();
+                } catch (err) {
+                    lastErr = err;
+                    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 800));
+                }
+            }
+            throw lastErr;
+        }
+
+        async function fetchOmvigFreezeStatus_(forceRefresh = false) {
+            if (!forceRefresh && omvigFreezeStatusCache_) return omvigFreezeStatusCache_;
+            const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(`${omvigSubmitScriptUrl}?action=getFreezeStatus&t=${Date.now()}`, 45000)));
+            let freezeDate = data?.freeze_date || "";
+            const pendingCount = Number(data?.pending_count) || 0;
+            // USER REQUEST (2026-09-14): koi bhi (admin panel ya seedha report)
+            // sabse pehle yahi fast check karta hai - agar freeze abhi tak nahi
+            // hui, yahin se silently ek hi baar auto-freeze kar dete hain, taaki
+            // report kabhi bhi "not frozen" error na de sirf isliye ki admin
+            // panel kabhi khola hi nahi gaya.
+            if (!freezeDate) {
+                freezeDate = await autoFreezeOmvigBaseline_();
+                if (freezeDate) { omvigPendingCache_ = {}; omvigReportCache_ = null; }
+            }
+            // USER REQUEST (2026-09-15): "last upload kab hua" admin panel par
+            // dikhana hai - backend isi fast endpoint se de deta hai, extra
+            // call nahi lagti.
+            const lastUploadAt = data?.last_upload_at || "";
+            const lastUploadSummary = data?.last_upload_summary || "";
+            omvigFreezeStatusCache_ = { freeze_date: freezeDate, pending_count: pendingCount, last_upload_at: lastUploadAt, last_upload_summary: lastUploadSummary };
+            return omvigFreezeStatusCache_;
+        }
+
+        // BUG FIX PART 3 (2026-09-14, USER-REPORTED - error persisted even
+        // after gate+retry, aur is baar sirf EK tab khula tha, dono retry
+        // attempts bhi 404 ho gaye Network tab me): concurrency/retry dono
+        // theek jagah lage the, lekin asli wajah kuch aur nikli - unscoped
+        // (Division/Circle) `getPendingSummary` ek hi call me ~9500+ rows ka
+        // bahut bada JSON response deta hai, aur Apps Script ka "echo"
+        // content-delivery layer itne BADE response ko reliably serve hi
+        // nahi kar pa raha (bar-bar 404, sirf transient glitch nahi) - isse
+        // koi bhi retry help nahi karta, dono attempt bhi fail ho jaate hain.
+        // Fix: Freeze module jaisa hi chunking - poora Circle/Division ka
+        // data ab EK badi call me nahi, balki har DC ki apni CHHOTI call
+        // (jo already DC-level par reliably kaam karti hai) se, max 5 ek
+        // saath (parallel), fetch + client-side merge karte hain. Koi bhi
+        // ek DC ka response ab kabhi bhi itna bada nahi hoga ki echo layer
+        // usse serve na kar paaye.
+        async function fetchOmvigPendingSingleDc_(dcName) {
+            const key = dcName;
+            if (omvigPendingCache_[key]) return omvigPendingCache_[key];
+            const url = `${omvigSubmitScriptUrl}?action=getPendingSummary&dc=${encodeURIComponent(dcName)}&t=${Date.now()}`;
+            const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, 45000)));
+            const rows = Array.isArray(data?.data) ? data.data : [];
+            const result = { rows: rows.map(normalizeOmvigPendingRow_), freeze_date: data?.freeze_date || "" };
+            omvigPendingCache_[key] = result;
+            return result;
+        }
+
+        function getAllOmvigDcNames_() {
+            return Object.keys(divisionConfigs).flatMap((divisionName) => getDivisionDcNames(divisionName));
+        }
+
+        // BUG FIX (2026-09-14, user reported: "pehle time leta tha par khul jaati
+        // thi, ab error aane laga" after re-upload): root cause - `Promise.all`
+        // fail-fast hai, poore 24-DC Circle fetch (jo already 2-2.5 minute leta
+        // hai, `withAppsScriptConcurrencyGate_` sirf 2 concurrent allow karta
+        // hai isliye) me agar EK bhi DC ka call dono retry attempts ke baad bhi
+        // fail ho (transient echo-404/network glitch, poori list itni der chalne
+        // par iska chance bhi badh jaata hai), to POORA fetch turant reject ho
+        // jaata tha - baaki 23 DC ka safal data bhi fenk diya jaata tha aur user
+        // ko seedha "data load nahi ho payi" error dikhta tha. FIX: ab har DC ka
+        // fetch alag try/catch me hai (ek DC fail ho to baaki chalte rehte hain,
+        // koi Promise.all reject nahi hota), aur sabhi batch poore hone ke baad
+        // jo bhi DC pehli baar fail hui thi unke liye EK final retry-round chalta
+        // hai (transient glitch aksar dusri baar chal jaata hai). Sirf tabhi error
+        // throw hota hai jab is final round ke baad bhi koi DC fail rahe.
+        async function fetchOmvigPendingForDcs_(dcNames) {
+            const BATCH = 5; // Freeze module jaisa hi - max 5 DC parallel
+            let freezeDateOut = "";
+            const allRows = [];
+            const failedDcs = [];
+            const fetchOneDc = async (dcName) => {
+                try {
+                    const r = await fetchOmvigPendingSingleDc_(dcName);
+                    allRows.push(...r.rows);
+                    if (!freezeDateOut && r.freeze_date) freezeDateOut = r.freeze_date;
+                } catch (e) {
+                    failedDcs.push(dcName);
+                }
+            };
+            for (let i = 0; i < dcNames.length; i += BATCH) {
+                const batch = dcNames.slice(i, i + BATCH);
+                await Promise.all(batch.map(fetchOneDc));
+            }
+            if (failedDcs.length) {
+                const retryList = failedDcs.slice();
+                failedDcs.length = 0;
+                await Promise.all(retryList.map(fetchOneDc));
+            }
+            if (failedDcs.length) {
+                throw new Error(`O&M/VIG data load nahi ho payi - DC(s): ${failedDcs.join(", ")}`);
+            }
+            return { rows: allRows, freeze_date: freezeDateOut };
+        }
+
+        // Purane call-sites (agar kahin bhi ho) ke liye backward-compatible -
+        // `dc` diya ho to single-DC, na diya ho to POORI Circle (sabhi DC
+        // chunked) - lekin `loadOmvigReportData_` ab Division ke liye seedhe
+        // `fetchOmvigPendingForDcs_(getDivisionDcNames(activeDiv))` use karta
+        // hai (poori Circle fetch karke baad me filter karne se behtar - kam
+        // DC = kam calls = fast).
+        async function fetchOmvigPending_(dc) {
+            if (dc) return fetchOmvigPendingSingleDc_(dc);
+            return fetchOmvigPendingForDcs_(getAllOmvigDcNames_());
+        }
+
+        async function fetchOmvigPaid_(dc) {
+            const key = dc || "ALL";
+            if (omvigPaidCache_[key]) return omvigPaidCache_[key];
+            const url = `${omvigSubmitScriptUrl}?action=getPaidSummary${dc ? `&dc=${encodeURIComponent(dc)}` : ""}&t=${Date.now()}`;
+            const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, dc ? 45000 : 90000)));
+            const rows = Array.isArray(data?.data) ? data.data : [];
+            const result = rows.map(normalizeOmvigPaidRow_);
+            omvigPaidCache_[key] = result;
+            return result;
+        }
+
+        function groupOmvigPaidByPanchanama_(paidRows) {
+            const map = {};
+            paidRows.forEach((p) => {
+                if (!p.panchanama_no) return;
+                if (!map[p.panchanama_no]) map[p.panchanama_no] = [];
+                map[p.panchanama_no].push(p);
+            });
+            return map;
+        }
+
+        // USER REQUEST (2026-09-14): sirf woh payments ginte hain jinki Pay_date
+        // FREEZE DATE ke BAAD ki hai (isse purani, freeze se pehle ki koi bhi
+        // payment count nahi hoti) - aur dikhaya gaya paid amount hamesha is
+        // case ke Balanced Amount tak hi seemित (capped) rehta hai, jaisa
+        // Freeze NP ke us bug-fix me tha (kabhi bhi consumer ki poori history
+        // ka number nahi dikhna chahiye).
+        // BUG FIX (2026-09-15, USER-REPORTED): "freeze DATE ke baad (>)" ka
+        // matlab STRICTLY agle din se maana gaya tha - lekin freeze aur pehli
+        // Paid List upload aksar EK HI din ho sakte hain (subah freeze, sham
+        // tak usi din ki payments upload) - us case me payDateKey aur
+        // freezeDate dono barabar the, "> " kabhi true nahi hota tha, isliye
+        // Monthly report SAB DC me 0 paid dikha raha tha chahe payments
+        // genuinely valid hon. Fix: "`>`" ko "`>=`" kar diya - freeze wale din
+        // ki bhi payments ab count hoti hain (sirf freeze se PEHLE ki purani
+        // payments hi exclude hoti hain, jo hi asli intent tha).
+        function computeOmvigReportRows_(pendingRows, paidByPanchanama, freezeDate) {
+            return pendingRows.map((r) => {
+                const paidList = paidByPanchanama[r.panchanama_no] || [];
+                let paidAmountNow = 0, paidDateNow = "";
+                paidList.forEach((p) => {
+                    const payDateKey = String(p.pay_date || "").slice(0, 10);
+                    if (freezeDate && payDateKey && payDateKey >= freezeDate) {
+                        paidAmountNow += p.amount;
+                        if (!paidDateNow || payDateKey > paidDateNow) paidDateNow = payDateKey;
+                    }
+                });
+                const balancedAmount = r.balanced_amount;
+                const remainingPending = Math.max(0, balancedAmount - paidAmountNow);
+                const isPaidNow = paidAmountNow > 0 && remainingPending <= 0;
+                return {
+                    ...r,
+                    pending_amount: balancedAmount, // buildFreezeDcWiseSummaryRows ke saath field-name reuse ke liye
+                    paidAmountNow,
+                    remainingPending,
+                    isPaidNow,
+                    paidDateNow
+                };
+            });
+        }
+
+        async function loadOmvigReportData_(forceRefresh = false) {
+            const scopeKey = `${activeViewLevel}:${activeViewLevel === "DC" ? activeDC : (activeViewLevel === "DIVISION" ? activeDiv : "CIRCLE")}`;
+            if (!forceRefresh && omvigReportCache_ && omvigReportCache_.scopeKey === scopeKey) return omvigReportCache_;
+
+            // Pehle fast freeze-status check - agar freeze hua hi nahi hai to
+            // poori (potentially ~9500 row, slow) pending/paid list fetch karne
+            // ki zaroorat nahi, seedha empty result de dete hain.
+            const freezeStatus = await fetchOmvigFreezeStatus_(forceRefresh);
+            if (!freezeStatus.freeze_date) {
+                omvigReportCache_ = { scopeKey, rowsWithStatus: [], freeze_date: "" };
+                return omvigReportCache_;
+            }
+
+            const dcParam = activeViewLevel === "DC" ? activeDC : "";
+            // BUG FIX (2026-09-14): pehle Division level bhi POORI Circle
+            // (sabhi 24 DC) fetch karke baad me client-side filter karta tha -
+            // ab seedha sirf USI Division ki DC list chunked-fetch hoti hai
+            // (kam call = kam data = fast, aur echo-404 ka risk bhi kam).
+            let pending;
+            if (activeViewLevel === "DC") {
+                pending = await fetchOmvigPendingSingleDc_(activeDC);
+            } else if (activeViewLevel === "DIVISION") {
+                pending = await fetchOmvigPendingForDcs_(getDivisionDcNames(activeDiv));
+            } else {
+                pending = await fetchOmvigPendingForDcs_(getAllOmvigDcNames_());
+            }
+            const paid = await fetchOmvigPaid_(dcParam);
+
+            const pendingRows = pending.rows;
+            const paidMap = groupOmvigPaidByPanchanama_(paid);
+            const rowsWithStatus = computeOmvigReportRows_(pendingRows, paidMap, pending.freeze_date);
+
+            omvigReportCache_ = { scopeKey, rowsWithStatus, freeze_date: pending.freeze_date };
+            return omvigReportCache_;
+        }
+
+        function renderOmvigDcListHtml_(rowsWithStatus) {
+            if (!rowsWithStatus.length) return `<div style="text-align:center; color:#9f1239; font-size:0.72rem; margin-top:10px;">Is DC ke liye koi O&M/VIG case nahi mila.</div>`;
+            const totalCount = rowsWithStatus.length;
+            const paidCount = rowsWithStatus.filter((r) => r.isPaidNow).length;
+            const partPaidCount = rowsWithStatus.filter((r) => !r.isPaidNow && r.paidAmountNow > 0).length;
+            const pendingCount = totalCount - paidCount;
+            const rowsHtml = rowsWithStatus.map((r) => {
+                const statusLabel = r.isPaidNow ? `PAID${r.paidDateNow ? ` (${r.paidDateNow})` : ""}` : (r.paidAmountNow > 0 ? `PENDING - PART PAID${r.paidDateNow ? ` (${r.paidDateNow})` : ""}` : "PENDING");
+                const statusColor = r.isPaidNow ? "#166534" : (r.paidAmountNow > 0 ? "#dc2626" : "#1e293b");
+                return `<div class="summary-table-row" style="grid-template-columns: 2fr 1.3fr 1fr; text-align:left;">
+                    <div>${escapeHtml(r.consumer_name)}<br><span style="font-size:0.58rem; color:#64748b;">${escapeHtml(r.panchanama_no)} | ${escapeHtml(r.case_name)}</span></div>
+                    <div style="font-weight:900; color:${statusColor};">${statusLabel}</div>
+                    <div class="font-black">${formatProgressReportAmount(r.isPaidNow ? r.balanced_amount : r.remainingPending)}</div>
+                </div>`;
+            }).join("");
+            return `
+                <div style="text-align:center; font-size:0.7rem; font-weight:900; color:#0f172a; margin-top:6px;">Total: ${totalCount} | Paid: ${paidCount} | Part Paid: ${partPaidCount} | Pending: ${pendingCount}</div>
+                <div class="summary-wrapper" style="margin-top:6px;"><div class="summary-table-header" style="grid-template-columns: 2fr 1.3fr 1fr;"><div>CASE</div><div>STATUS</div><div>AMOUNT</div></div>${rowsHtml}</div>`;
+        }
+
+        // USER REQUEST (2026-09-14): status filter - "Paid" dropdown me PART PAID
+        // wale bhi shamil (isPaidNow ya koi bhi payment aaya ho), "Pending" me
+        // sirf woh jinme abhi tak kuch bhi paid nahi hua.
+        function filterOmvigRowsByStatus_(rows, status) {
+            if (status === "PAID") return rows.filter((r) => r.isPaidNow || r.paidAmountNow > 0);
+            if (status === "PENDING") return rows.filter((r) => !r.isPaidNow && !(r.paidAmountNow > 0));
+            return rows;
+        }
+
+        // DC level ke liye ek hi row ka summary (Freeze NP ke DC-wise summary
+        // jaisa hi shape/table, bas is scope me hamesha ek hi row hogi).
+        function buildOmvigSingleDcSummaryRow_(rowsWithStatus, dcName) {
+            const g = { name: dcName || "-", totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 };
+            rowsWithStatus.forEach((r) => {
+                g.totalCount += 1;
+                if (r.isPaidNow) { g.paidCount += 1; g.paidAmount += Number(r.pending_amount || 0); }
+                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+            });
+            return g;
+        }
+
+        // USER REQUEST (2026-09-14): Paid/Unpaid dropdown chunne par SUMMARY
+        // row bhi usi status tak simat jaani chahiye (jaise poori app me
+        // filter lagate hi screen filter hoti hai) - total/dusra column ab
+        // 0 rahega, sirf jo status choose kiya wahi count/amount dikhega,
+        // niche ki list se exactly match karega.
+        function buildOmvigStatusSummaryRow_(filteredRows, dcName, status) {
+            const g = { name: dcName || "-", totalCount: filteredRows.length, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 };
+            filteredRows.forEach((r) => {
+                if (status === "PAID") { g.paidCount += 1; g.paidAmount += Number(r.isPaidNow ? r.pending_amount : r.paidAmountNow) || 0; }
+                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+            });
+            return g;
+        }
+
+        // USER REQUEST (2026-09-14): Circle level par sirf Division chuni ho
+        // (DC abhi nahi) to summary bhi sirf USI Division ki DC-wise table
+        // dikhaye, sabhi 24 DC ki nahi - Division-level jaisa hi DC-list
+        // (bina sub-total/grand-total ke).
+        function buildOmvigDivisionDcSummaryRows_(rowsWithStatus, divisionName) {
+            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 });
+            const map = {};
+            rowsWithStatus.forEach((r) => {
+                const key = normalizeDcName(r.dc_name) || "-";
+                if (!map[key]) map[key] = emptyGroup(key);
+                const g = map[key];
+                g.totalCount += 1;
+                if (r.isPaidNow) { g.paidCount += 1; g.paidAmount += Number(r.pending_amount || 0); }
+                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+            });
+            return getDivisionDcNames(divisionName).map((dcName) => map[normalizeDcName(dcName)] || emptyGroup(normalizeDcName(dcName)));
+        }
+
+        function omvigFilterSelectHtml_(id, placeholder, options, selectedValue) {
+            const optionsHtml = options.map((opt) => `<option value="${escapeHtml(opt.value)}" ${selectedValue === opt.value ? "selected" : ""}>${escapeHtml(opt.label)}</option>`).join("");
+            return `<select id="${id}" onchange="onOmvigFilterChange()" style="width:100%; max-width:360px; height:40px; margin:10px auto 0; display:block; border:1.5px solid #94a3b8; border-radius:10px; padding:0 10px; font-size:0.72rem; font-weight:900; color:#0f172a; background:#ffffff;">
+                <option value="">${escapeHtml(placeholder)}</option>
+                ${optionsHtml}
+            </select>`;
+        }
+
+        const OMVIG_STATUS_OPTIONS_ = [{ value: "PAID", label: "PAID (incl. Part Paid)" }, { value: "PENDING", label: "PENDING" }];
+
+        // USER REQUEST (2026-09-14 + fix): DC level par ab poori list seedhe
+        // nahi dikhti - sirf is DC ka ek-row SUMMARY. Paid/Unpaid dropdown
+        // chunte hi SUMMARY bhi usi status tak simat jaati hai (poori app ke
+        // pattern jaisa - filter lagte hi screen filter ho jaani chahiye) aur
+        // niche filtered list bhi dikhti hai (DC level par yeh dropdown hi
+        // list dikhane ke liye hai, isliye yahan list intentionally rehti hai
+        // - sirf Circle/Division level par list on-screen nahi aani chahiye,
+        // per user's latest request).
+        function renderOmvigDcLevelHtml_(rowsWithStatus) {
+            const statusSelectHtml = omvigFilterSelectHtml_("omvig-dc-status-select", "-- Select Paid/Unpaid to View List --", OMVIG_STATUS_OPTIONS_, omvigFilterStatus);
+            let summaryHtml, listHtml = "";
+            if (omvigFilterStatus) {
+                const filteredRows = filterOmvigRowsByStatus_(rowsWithStatus, omvigFilterStatus);
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, activeDC, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`);
+                listHtml = renderOmvigDcListHtml_(filteredRows);
+            } else {
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigSingleDcSummaryRow_(rowsWithStatus, activeDC)], "DC SUMMARY (AMOUNT IN LAKH)");
+            }
+            return summaryHtml + statusSelectHtml + listHtml;
+        }
+
+        // USER REQUEST (2026-09-14 + fix): Division level - DC dropdown
+        // chunne se pehle poori Division ki DC-wise summary. DC chunte hi
+        // summary bhi sirf USI DC tak simat jaati hai; Paid/Unpaid chunte hi
+        // summary aur bhi aage usi status tak simat jaati hai - har filter
+        // step par screen filter hoti hai. USER REQUEST (2026-09-14, follow-up):
+        // Division level par status select karne par case-LIST on-screen
+        // NAHI khulni chahiye - sirf summary hi filtered dikhe (list sirf
+        // download me milegi).
+        function renderOmvigDivisionLevelHtml_(rowsWithStatus) {
+            const dcOptions = getDivisionDcNames(activeDiv).map((n) => ({ value: n, label: n }));
+            const dcSelectHtml = omvigFilterSelectHtml_("omvig-division-dc-select", "-- Select DC --", dcOptions, omvigFilterDc);
+            let summaryHtml, statusSelectHtml = "";
+            if (!omvigFilterDc) {
+                summaryHtml = renderFreezeDcWiseSummaryHtml(rowsWithStatus);
+            } else {
+                const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
+                statusSelectHtml = omvigFilterSelectHtml_("omvig-division-status-select", "-- Select Paid/Unpaid --", OMVIG_STATUS_OPTIONS_, omvigFilterStatus);
+                if (!omvigFilterStatus) {
+                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigSingleDcSummaryRow_(dcRows, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)");
+                } else {
+                    const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
+                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`);
+                }
+            }
+            return summaryHtml + dcSelectHtml + statusSelectHtml;
+        }
+
+        // USER REQUEST (2026-09-14 + fix): Circle level - Division dropdown
+        // chunne se pehle poori Circle ki DC-wise summary (sabhi division).
+        // Division chunte hi summary sirf USI Division ki DC-wise table tak
+        // simat jaati hai (sabhi 24 DC nahi); DC chunte hi single-DC row tak;
+        // status chunte hi usi status tak - har step par screen filter hoti
+        // hai. USER REQUEST (2026-09-14, follow-up): Circle level par bhi
+        // status select karne par case-LIST on-screen NAHI khulni chahiye -
+        // sirf summary hi filtered dikhe (list sirf download me milegi).
+        function renderOmvigCircleLevelHtml_(rowsWithStatus) {
+            const divOptions = Object.keys(divisionConfigs).map((n) => ({ value: n, label: n.replace(/^DIVISION\s+/i, "") }));
+            const divSelectHtml = omvigFilterSelectHtml_("omvig-circle-division-select", "-- Select Division --", divOptions, omvigFilterDivision);
+            let summaryHtml, dcSelectHtml = "", statusSelectHtml = "";
+            if (!omvigFilterDivision) {
+                summaryHtml = renderFreezeDcWiseSummaryHtml(rowsWithStatus);
+            } else {
+                const dcOptions = getDivisionDcNames(omvigFilterDivision).map((n) => ({ value: n, label: n }));
+                dcSelectHtml = omvigFilterSelectHtml_("omvig-circle-dc-select", "-- Select DC --", dcOptions, omvigFilterDc);
+                if (!omvigFilterDc) {
+                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", buildOmvigDivisionDcSummaryRows_(rowsWithStatus, omvigFilterDivision), "DC-WISE SUMMARY (AMOUNT IN LAKH)");
+                } else {
+                    const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
+                    statusSelectHtml = omvigFilterSelectHtml_("omvig-circle-status-select", "-- Select Paid/Unpaid --", OMVIG_STATUS_OPTIONS_, omvigFilterStatus);
+                    if (!omvigFilterStatus) {
+                        summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigSingleDcSummaryRow_(dcRows, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)");
+                    } else {
+                        const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
+                        summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`);
+                    }
+                }
+            }
+            return summaryHtml + divSelectHtml + dcSelectHtml + statusSelectHtml;
+        }
+
+        // Dropdown badalte hi sirf state update karke poora report block dobara
+        // render karte hain - data pehle se hi cache me hai (omvigReportCache_),
+        // isliye yeh turant hota hai, koi naya network call nahi.
+        function onOmvigFilterChange() {
+            if (activeViewLevel === "CIRCLE") {
+                const newDiv = document.getElementById("omvig-circle-division-select")?.value || "";
+                if (newDiv !== omvigFilterDivision) {
+                    omvigFilterDivision = newDiv; omvigFilterDc = ""; omvigFilterStatus = "";
+                } else {
+                    const newDc = document.getElementById("omvig-circle-dc-select")?.value || "";
+                    if (newDc !== omvigFilterDc) { omvigFilterDc = newDc; omvigFilterStatus = ""; }
+                    else { omvigFilterStatus = document.getElementById("omvig-circle-status-select")?.value || ""; }
+                }
+            } else if (activeViewLevel === "DIVISION") {
+                const newDc = document.getElementById("omvig-division-dc-select")?.value || "";
+                if (newDc !== omvigFilterDc) { omvigFilterDc = newDc; omvigFilterStatus = ""; }
+                else { omvigFilterStatus = document.getElementById("omvig-division-status-select")?.value || ""; }
+            } else if (activeViewLevel === "DC") {
+                omvigFilterStatus = document.getElementById("omvig-dc-status-select")?.value || "";
+            }
+            loadAndRenderOmvigReport(false);
+        }
+
+        function renderOmvigReportHtml_(data) {
+            const freezeLine = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:4px;">Freeze Date: ${escapeHtml(data.freeze_date)}</div>`;
+            let bodyHtml;
+            if (activeViewLevel === "DC") {
+                bodyHtml = renderOmvigDcLevelHtml_(data.rowsWithStatus);
+            } else if (activeViewLevel === "DIVISION") {
+                bodyHtml = renderOmvigDivisionLevelHtml_(data.rowsWithStatus);
+            } else {
+                bodyHtml = renderOmvigCircleLevelHtml_(data.rowsWithStatus);
+            }
+            // USER REQUEST (2026-09-14): DC level par pehle jaisa hi ek Excel +
+            // ek PDF (poori DC ki list). Division/Circle par ab Excel (summary+
+            // list combined, pehle jaisa) ke saath PDF 2 ALAG button me baant
+            // diya - "Summary PDF" (sirf totals+DC-wise table) aur "List PDF"
+            // (sirf poori raw list) - taaki sirf summary chahiye ho to poori
+            // list wali badi PDF na download karni pade.
+            const downloadButtons = activeViewLevel === "DC"
+                ? `<div style="display:flex; gap:8px; margin-top:12px;">
+                     <button class="btn-unique" style="flex:1; background:#16a34a; color:#fff;" onclick="downloadOmvigReport('XLS')">⬇️ Excel</button>
+                     <button class="btn-unique" style="flex:1; background:#dc2626; color:#fff;" onclick="downloadOmvigReport('PDF')">⬇️ PDF</button>
+                   </div>`
+                : `<div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+                     <button class="btn-unique" style="flex:1; min-width:100px; background:#16a34a; color:#fff;" onclick="downloadOmvigReport('XLS')">⬇️ Excel</button>
+                     <button class="btn-unique" style="flex:1; min-width:100px; background:#0891b2; color:#fff;" onclick="downloadOmvigReport('PDF_SUMMARY')">📊 Summary PDF</button>
+                     <button class="btn-unique" style="flex:1; min-width:100px; background:#dc2626; color:#fff;" onclick="downloadOmvigReport('PDF_LIST')">📋 List PDF</button>
+                   </div>`;
+            return freezeLine + bodyHtml + downloadButtons;
+        }
+
+        // USER REQUEST (2026-09-14): "Daily/Monthly" toggle - Revenue jaisa hi,
+        // top par hamesha dikhta hai (loading/error/success sabhi state me) taaki
+        // user kabhi bhi switch kar sake.
+        function renderOmvigModeToggleHtml_() {
+            const dailyActive = omvigReportMode === "DAILY";
+            const btnStyle = (active) => `flex:1; height:38px; border-radius:10px; border:2px solid #0d9488; font-size:0.72rem; font-weight:900; ${active ? "background:#0d9488; color:#fff;" : "background:#fff; color:#0d9488;"}`;
+            return `<div style="display:flex; gap:8px; margin-bottom:10px;">
+                <button type="button" onclick="setOmvigReportMode('DAILY')" style="${btnStyle(dailyActive)}">⚡ DAILY (Fast)</button>
+                <button type="button" onclick="setOmvigReportMode('MONTHLY')" style="${btnStyle(!dailyActive)}">MONTHLY (Full)</button>
+            </div>`;
+        }
+
+        function setOmvigReportMode(mode) {
+            if (omvigReportMode === mode) return;
+            omvigReportMode = mode;
+            loadAndRenderOmvigReport(false);
+        }
+
+        async function loadAndRenderOmvigReport(forceRefresh = false) {
+            const body = document.getElementById("summary-content");
+            if (!body) return;
+            const myToken = ++omvigProgressToken;
+            const toggleHtml = renderOmvigModeToggleHtml_();
+            if (omvigReportMode === "DAILY") {
+                const progress = renderSyncingProgress(body, () => myToken === omvigProgressToken, "SYNCING DATA... PLEASE WAIT");
+                try {
+                    const data = await loadOmvigDailyReportData_(forceRefresh);
+                    if (myToken !== omvigProgressToken) { progress.stop(); return; }
+                    const html = toggleHtml + renderOmvigDailyReportHtml_(data);
+                    await progress.finish();
+                    if (myToken !== omvigProgressToken) return;
+                    body.innerHTML = html;
+                } catch (error) {
+                    progress.stop();
+                    if (myToken !== omvigProgressToken) return;
+                    body.innerHTML = toggleHtml + `<div style="text-align:center; color:#991b1b; font-size:0.72rem; margin-top:10px;">Daily data load nahi ho payi</div><button class="btn-unique" style="width:100%; margin-top:8px; background:#0891b2; color:#fff;" onclick="loadAndRenderOmvigReport(true)">Try Again</button>`;
+                }
+                return;
+            }
+            // MONTHLY (purana/existing poora PAID/PENDING/PART-PAID view, koi badlav nahi)
+            // USER REQUEST (2026-09-14): pehle yahan hamesha "Division/Circle me..."
+            // dono likha rehta tha (chahe user Circle dekh raha ho ya Division) -
+            // confusing tha. Ab jis level ki report abhi khul rahi hai SIRF uska
+            // hi naam dikhta hai, aur wait-note (English) ab ek alag niche wali
+            // row me hai (renderSyncingProgress ka naya subLabel param), "SYNCING
+            // DATA... PLEASE WAIT" wali upar wali line ab hamesha clean rehti hai.
+            const levelLabel = activeViewLevel === "DIVISION" ? "Division" : (activeViewLevel === "CIRCLE" ? "Circle" : "DC");
+            const subLabel = activeViewLevel === "DC" ? "" : `(${levelLabel} level may take 1-2 minutes)`;
+            const progress = renderSyncingProgress(body, () => myToken === omvigProgressToken, "SYNCING DATA... PLEASE WAIT", subLabel);
+            try {
+                const data = await loadOmvigReportData_(forceRefresh);
+                if (myToken !== omvigProgressToken) { progress.stop(); return; }
+                if (!data.freeze_date) {
+                    progress.stop();
+                    if (myToken !== omvigProgressToken) return;
+                    body.innerHTML = toggleHtml + `<div style="text-align:center; color:#9f1239; font-size:0.72rem; margin-top:10px;">Abhi tak O&M/VIG freeze nahi hua hai. Sub DN Chhapara ke Admin panel se "🔒 ADMIN O&M/VIG UPLOAD" me Freeze Date set karein.</div>`;
+                    return;
+                }
+                const html = toggleHtml + renderOmvigReportHtml_(data);
+                await progress.finish();
+                if (myToken !== omvigProgressToken) return;
+                body.innerHTML = html;
+            } catch (error) {
+                progress.stop();
+                if (myToken !== omvigProgressToken) return;
+                body.innerHTML = toggleHtml + `<div style="text-align:center; color:#991b1b; font-size:0.72rem; margin-top:10px;">O&M/VIG data load nahi ho payi (network slow ho sakta hai, khaaskar Division/Circle me)</div><button class="btn-unique" style="width:100%; margin-top:8px; background:#0891b2; color:#fff;" onclick="loadAndRenderOmvigReport(true)">Try Again</button>`;
+            }
+        }
+
+        // SPEED FIX (2026-09-15, USER-REPORTED slowness): pehle yahan
+        // `fetchOmvigLatestDayPaidRows_()` (chhoti, fast) ke baad har active DC
+        // ke liye ALAG `fetchOmvigPendingForDcs_()` call hoti thi taaki consumer
+        // naam/DC enrichment ho sake - lekin server par `getPendingSummary`
+        // `dc` diye jaane par bhi POORI ~9500-row baseline sheet padhta tha
+        // (filter sirf JS me values-read ke BAAD lagta hai), isliye Circle-level
+        // Daily me 20-24 active DC hone par baseline 20-24 baar poori read hoti
+        // thi (2-concurrent gate ke through queue), 1-2+ minute lag jaate the.
+        // FIX: ab ek dedicated `getDailyReport` backend endpoint hai jo paid-
+        // sheets + pending-baseline dono SIRF EK-EK BAAR padhta hai aur
+        // enrichment (consumer naam, DC) server par hi kar deta hai - client ko
+        // sirf ek hi chhoti call lagti hai, active-DC-count se ab call-count ka
+        // koi lena-dena nahi, isliye Circle/Division Daily bhi ab seconds me
+        // load hona chahiye.
+        async function fetchOmvigDailyReport_(forceRefresh = false) {
+            if (forceRefresh) omvigDailyReportCache_ = null;
+            if (omvigDailyReportCache_) return omvigDailyReportCache_;
+            const url = `${omvigSubmitScriptUrl}?action=getDailyReport&t=${Date.now()}`;
+            const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, 45000)));
+            const rows = Array.isArray(data?.rows) ? data.rows.map((r) => ({
+                dc_name: String(r.dc_name || "").trim(),
+                consumer_name: String(r.consumer_name || "").trim(),
+                panchanama_no: String(r.panchanama_no || "").trim(),
+                amount: Number(r.amount) || 0,
+                pay_mode: String(r.pay_mode || "").trim()
+            })) : [];
+            omvigDailyReportCache_ = { date: data?.date || "", rows };
+            return omvigDailyReportCache_;
+        }
+
+        function scopeOmvigDailyRowsToView_(rows) {
+            if (activeViewLevel === "DC" && activeDC) {
+                const dcNorm = normalizeDcName(activeDC);
+                return rows.filter((r) => normalizeDcName(r.dc_name) === dcNorm);
+            }
+            if (activeViewLevel === "DIVISION" && activeDiv) {
+                const dcSet = new Set(getDivisionDcNames(activeDiv).map((n) => normalizeDcName(n)));
+                return rows.filter((r) => dcSet.has(normalizeDcName(r.dc_name)));
+            }
+            return rows;
+        }
+
+        async function loadOmvigDailyReportData_(forceRefresh = false) {
+            // enrichment (consumer naam, DC fallback) ab backend (`getDailyReport`)
+            // hi kar ke deta hai - yahan sirf view-level (DC/Division/Circle)
+            // scoping baaki hai, jo purani tarah in-memory/free hai.
+            const { date, rows } = await fetchOmvigDailyReport_(forceRefresh);
+            const scoped = scopeOmvigDailyRowsToView_(rows);
+            return { date, rows: scoped };
+        }
+
+        function renderOmvigDailyReportHtml_(data) {
+            if (!data.date) {
+                return `<div style="text-align:center; color:#64748b; font-size:0.72rem; padding:20px 0;">Abhi tak koi Paid List upload nahi hui hai.</div>`;
+            }
+            const totalAmount = data.rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+            let html = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-bottom:8px;">Latest Paid Upload - Date: ${escapeHtml(data.date)}</div>`;
+            html += `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.4fr 0.9fr 0.8fr;"><div>Consumer / DC</div><div>Panchanama No</div><div>Amount</div></div>`;
+            if (!data.rows.length) {
+                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is date ke liye is scope me koi settlement nahi mila.</div></div>`;
+            } else {
+                data.rows.forEach((r) => {
+                    html += `<div class="summary-table-row" style="grid-template-columns: 1.4fr 0.9fr 0.8fr;"><div>${escapeHtml(r.consumer_name || "-")}<br><span style="font-size:0.58rem; color:#64748b;">${escapeHtml(r.dc_name)}${r.pay_mode ? " | " + escapeHtml(r.pay_mode) : ""}</span></div><div class="font-black">${escapeHtml(r.panchanama_no)}</div><div class="text-emerald-700 font-black">${formatProgressReportAmount(r.amount)}</div></div>`;
+                });
+            }
+            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL SETTLEMENTS: ${data.rows.length} | AMOUNT: ${formatProgressReportAmount(totalAmount)}</div></div>`;
+            return html;
+        }
+
+        // USER REQUEST (2026-09-14): on-screen dropdown filter (Division/DC/
+        // Paid-Unpaid) jo abhi chuna hua hai, download (Excel/PDF, sabhi
+        // format) ko bhi wahi scope dikhna chahiye - pehle download hamesha
+        // poora unscoped Circle/Division data bhej deta tha, on-screen filter
+        // se bilkul bekhabar. `scopedRows` = Division+DC tak scope (status
+        // filter se pehle - DC-wise Paid/Pending breakdown table isi se
+        // banti hai), `finalRows` = status filter bhi laga hua (list +
+        // top stats box isi se banti hai) - bilkul on-screen render jaisa.
+        function getOmvigDownloadScopedRows_(rowsWithStatus) {
+            let rows = rowsWithStatus;
+            if (activeViewLevel === "CIRCLE" && omvigFilterDivision) {
+                const dcSet = new Set(getDivisionDcNames(omvigFilterDivision).map((n) => normalizeDcName(n)));
+                rows = rows.filter((r) => dcSet.has(normalizeDcName(r.dc_name)));
+            }
+            if ((activeViewLevel === "CIRCLE" || activeViewLevel === "DIVISION") && omvigFilterDc) {
+                rows = rows.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
+            }
+            return rows;
+        }
+
+        function getOmvigDownloadSummaryRows_(scopedRows, finalRows) {
+            const dcInScope = activeViewLevel === "DC" ? activeDC : omvigFilterDc;
+            let rows;
+            if (dcInScope) {
+                rows = omvigFilterStatus
+                    ? [buildOmvigStatusSummaryRow_(finalRows, dcInScope, omvigFilterStatus)]
+                    : [buildOmvigSingleDcSummaryRow_(scopedRows, dcInScope)];
+            } else if (activeViewLevel === "CIRCLE" && omvigFilterDivision) {
+                rows = buildOmvigDivisionDcSummaryRows_(scopedRows, omvigFilterDivision);
+            } else {
+                rows = buildFreezeDcWiseSummaryRows(scopedRows);
+            }
+            return rows.map((r) => ({
+                ...r,
+                paidPercent: r.paidPercent !== undefined ? r.paidPercent : (r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0"),
+                pendingPercent: r.pendingPercent !== undefined ? r.pendingPercent : (r.totalCount ? ((r.pendingCount / r.totalCount) * 100).toFixed(1) : "0.0")
+            }));
+        }
+
+        async function downloadOmvigReport(fmt) {
+            try {
+                const data = await loadOmvigReportData_();
+                if (!data.freeze_date) return showToast("Pehle Freeze Date set karein", false);
+                const scopedRows = getOmvigDownloadScopedRows_(data.rowsWithStatus);
+                const rowsWithStatus = omvigFilterStatus ? filterOmvigRowsByStatus_(scopedRows, omvigFilterStatus) : scopedRows;
+                const totalCount = rowsWithStatus.length;
+                const paidCount = rowsWithStatus.filter((r) => r.isPaidNow).length;
+                const pendingCount = totalCount - paidCount;
+                const paidPercent = totalCount ? ((paidCount / totalCount) * 100).toFixed(1) : "0.0";
+                const pendingPercent = totalCount ? ((pendingCount / totalCount) * 100).toFixed(1) : "0.0";
+                let scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+                // USER REQUEST (2026-09-14): download ka title/filename bhi
+                // batana chahiye ki kaunsa filter laga hua hai (jab laga ho).
+                const scopeExtras = [];
+                if (activeViewLevel === "CIRCLE" && omvigFilterDivision) scopeExtras.push(omvigFilterDivision.replace(/^DIVISION\s+/i, ""));
+                if ((activeViewLevel === "CIRCLE" || activeViewLevel === "DIVISION") && omvigFilterDc) scopeExtras.push(omvigFilterDc);
+                if (omvigFilterStatus) scopeExtras.push(omvigFilterStatus);
+                if (scopeExtras.length) scope += ` - ${scopeExtras.join(" - ")}`;
+                const reportTitle = `O&M-VIG Report - ${scope}`;
+                const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
+
+                const listHeaders = ["CIRCLE", "DIVISION", "DC", "CHECKED BY", "INSPECTION DATE", "PANCHANAMA NO", "EZ NO", "CONSUMER NAME", "CONSUMER NO", "TARIFF NAME", "CASE NAME", "BALANCED AMOUNT", "STATUS", "PAID AMT", "PAID DATE"];
+                const statusColIndex = 12; // 0-based, matches listHeaders order above
+                // USER REQUEST (2026-09-14): Freeze NP jaisa hi - PAID row GREEN
+                // (PDF), PART PAID row RED (PDF); CSV plain text hai (colour
+                // support nahi), isliye wahan "++ PAID ++"/"** PART PAID **"
+                // marker se alag pehchana jaata hai. `paymentStateFlags` sirf
+                // colour/marker ke liye hai, row ka position/order isse bilkul
+                // nahi badalta.
+                const paymentStateFlags = rowsWithStatus.map((r) => (r.isPaidNow ? 2 : (r.paidAmountNow > 0 ? 1 : 0)));
+                const listBodyRows = rowsWithStatus.map((r) => [
+                    r.circle, r.division, r.dc_name, r.checked_by, r.inspection_date, r.panchanama_no, r.ez_no,
+                    r.consumer_name, r.consumer_no, r.tariff_name, r.case_name, r.balanced_amount,
+                    r.isPaidNow ? "PAID" : (r.paidAmountNow > 0 ? "PART PAID" : "PENDING"),
+                    r.isPaidNow ? r.balanced_amount : r.paidAmountNow, r.paidDateNow || ""
+                ]);
+
+                if (fmt === "XLS") {
+                    // BUG FIX (2026-09-14): user ne download me ek column ka data
+                    // left-right shift hote dekha - root cause: kuch pending-sheet
+                    // cell (Consumer Name/Case Name jaise text field) me embedded
+                    // \r ya \n ho sakta hai (Sheets me multi-line cell), jo purana
+                    // csvSafe (sirf `,`/`"`/`\n` quote karta tha, `\r` nahi) hamesha
+                    // sahi se escape nahi karta tha - kuch CSV viewer bare `\r` ko
+                    // row-break maan lete hain, jisse agli row ka data pichli row
+                    // ke galat column me chala jaata dikhta hai. Fix: `\r` bhi
+                    // quote-trigger me shamil kiya, AUR extra safety ke liye har
+                    // cell ke andar ka koi bhi line-break pehle hi single space se
+                    // replace kar dete hain (data kho nahi raha, sirf ek line me
+                    // aa raha hai) - taaki kisi bhi CSV viewer me row/column shift
+                    // ki gunjaish hi na rahe.
+                    const csvSafe = (value) => {
+                        const text = String(value ?? "").replace(/\r\n|\r|\n/g, " ");
+                        return /[",]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+                    };
+                    const markedListBodyRows = listBodyRows.map((row, i) => {
+                        const copy = row.slice();
+                        const state = paymentStateFlags[i];
+                        if (state === 2) copy[statusColIndex] = `++ ${copy[statusColIndex]} ++`;
+                        else if (state === 1) copy[statusColIndex] = `** ${copy[statusColIndex]} **`;
+                        return copy;
+                    });
+                    const rows = [[reportTitle], [`Freeze Date: ${data.freeze_date}`], [],
+                        ["TOTAL CASES", "PAID COUNT", "PAID %", "PENDING COUNT", "PENDING %"],
+                        [totalCount, paidCount, `${paidPercent}%`, pendingCount, `${pendingPercent}%`], []];
+                    if (activeViewLevel !== "DC") {
+                        const summaryRows = getOmvigDownloadSummaryRows_(scopedRows, rowsWithStatus);
+                        rows.push(["DC NAME", "TOTAL", "PAID COUNT", "PAID AMT", "PENDING COUNT", "PENDING AMT", "PAID %", "PENDING %"]);
+                        summaryRows.forEach((r) => rows.push([r.name, r.totalCount, r.paidCount, r.paidAmount, r.pendingCount, r.pendingAmount, `${r.paidPercent}%`, `${r.pendingPercent}%`]));
+                        rows.push([]);
+                    }
+                    rows.push(listHeaders, ...markedListBodyRows);
+                    const csv = rows.map((row) => row.map(csvSafe).join(",")).join("\n");
+                    await saveShmsBlob(`${fileName}.csv`, new Blob([csv], { type: "text/csv;charset=utf-8" }), "text/csv;charset=utf-8");
+                    return showToast("Excel report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+                }
+
+                if (!window.jspdf?.jsPDF) return showToast("PDF library load nahi hui", false);
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF("l", "mm", "a4");
+                // USER REQUEST (2026-09-14, professional-alignment fix): text/ID
+                // columns (naam, panchanama no, consumer no, tariff/case name)
+                // left-align, paise wale columns right-align, baaki (circle/
+                // division/dc/date/status codes) center - taaki har column me
+                // value hamesha ek hi jagah se shuru ho (pehle CONSUMER NO jaisa
+                // column hamesha CENTER tha, isliye alag-alag length ki values
+                // "idhar-udhar" dikhti thi).
+                const LEFT_ALIGN_COLS_ = [3, 5, 6, 7, 8, 9, 10];
+                const RIGHT_ALIGN_COLS_ = [11, 13];
+                const omvigColumnStyles_ = {};
+                LEFT_ALIGN_COLS_.forEach((i) => { omvigColumnStyles_[i] = { halign: "left" }; });
+                RIGHT_ALIGN_COLS_.forEach((i) => { omvigColumnStyles_[i] = { halign: "right" }; });
+                const drawFullListTable = (startY) => {
+                    doc.autoTable({
+                        startY,
+                        head: [listHeaders],
+                        body: listBodyRows.length ? listBodyRows : [listHeaders.map(() => "")],
+                        theme: "grid", headStyles: { fillColor: [17, 24, 39], halign: "center" },
+                        styles: { fontSize: 5.5, cellPadding: 1.2, halign: "center", valign: "middle", overflow: "linebreak" },
+                        columnStyles: omvigColumnStyles_,
+                        // USER REQUEST (2026-09-14): Pending sheet ke text columns
+                        // (CHECKED BY / CONSUMER NAME / CASE NAME / TARIFF NAME etc.)
+                        // me Devanagari/Hindi text ho sakta hai - jsPDF khud usko
+                        // render nahi kar paata, isliye Meter Checking report me pehle
+                        // se bana Canvas-image fix (`meterCheckingCellHasDevanagari_`/
+                        // `drawMeterCheckingHindiCell_`) yahan bhi reuse kiya hai, ab
+                        // koi bhi column ho (remark-column-specific nahi, har body
+                        // cell check hoti hai) - Hindi cell ke upar ek chhoti sahi
+                        // Devanagari image chipka di jaati hai, English/number cell
+                        // bilkul normal PDF text hi rehte hain.
+                        // USER REQUEST (2026-09-14): STATUS column me bhi Freeze NP
+                        // jaisa hi colour - PAID = green, PART PAID = red.
+                        didParseCell: (cellData) => {
+                            if (cellData.section === "body" && cellData.column.index === statusColIndex) {
+                                const state = paymentStateFlags[cellData.row.index];
+                                if (state === 2) { cellData.cell.styles.textColor = [22, 101, 52]; cellData.cell.styles.fontStyle = "bold"; }
+                                else if (state === 1) { cellData.cell.styles.textColor = [220, 38, 38]; cellData.cell.styles.fontStyle = "bold"; }
+                            }
+                        },
+                        // USER REQUEST (2026-09-14, alignment fix): Hindi image ab
+                        // column ke apne halign (left/center) ke hisab se banti hai,
+                        // taaki plain text values ke saath ek hi jagah se align ho -
+                        // pehle hamesha canvas ke left se banti thi, isliye center
+                        // wale columns me values "idhar-udhar" dikhti thi.
+                        didDrawCell: (cellData) => {
+                            if (cellData.section === "body" && meterCheckingCellHasDevanagari_(cellData.cell.raw)) {
+                                const align = LEFT_ALIGN_COLS_.includes(cellData.column.index) ? "left" : "center";
+                                drawMeterCheckingHindiCell_(doc, cellData, align);
+                            }
+                        }
+                    });
+                };
+
+                // USER REQUEST (2026-09-14): Division/Circle level par "PDF_LIST"
+                // ek chhota, seedha PDF hai - sirf poori list, koi summary table
+                // nahi (jab sirf list chahiye ho to poori summary ka bojh na ho).
+                if (fmt === "PDF_LIST") {
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(`${reportTitle} - Full List`, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.setTextColor(80); doc.text(`Freeze Date: ${data.freeze_date}`, 148, 21, { align: "center" });
+                    drawFullListTable(26);
+                    const pdfBlob = doc.output("blob");
+                    await saveShmsBlob(`${fileName}.pdf`, pdfBlob, "application/pdf");
+                    return showToast("PDF report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+                }
+
+                doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                doc.setFontSize(15); doc.setTextColor(0); doc.text(reportTitle, 148, 16, { align: "center" });
+                doc.setFontSize(10); doc.text(`Freeze Date: ${data.freeze_date}`, 148, 23, { align: "center" });
+
+                doc.autoTable({
+                    startY: 29,
+                    head: [["TOTAL CASES", "PAID COUNT", "PAID %", "PENDING COUNT", "PENDING %"]],
+                    body: [[totalCount, paidCount, `${paidPercent}%`, pendingCount, `${pendingPercent}%`]],
+                    theme: "grid", headStyles: { fillColor: [17, 24, 39], halign: "center" }, styles: { fontSize: 9, halign: "center" }
+                });
+
+                if (activeViewLevel !== "DC") {
+                    const summaryRows = getOmvigDownloadSummaryRows_(scopedRows, rowsWithStatus);
+                    const rowTypeFlags = summaryRows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
+                    doc.autoTable({
+                        startY: doc.lastAutoTable.finalY + 6,
+                        head: [["DC NAME", "TOTAL", "PAID COUNT", "PAID AMT", "PENDING COUNT", "PENDING AMT", "PAID %", "PENDING %"]],
+                        body: summaryRows.map((r) => [r.name, r.totalCount, r.paidCount, r.paidAmount, r.pendingCount, r.pendingAmount, `${r.paidPercent}%`, `${r.pendingPercent}%`]),
+                        theme: "grid", headStyles: { fillColor: [8, 145, 178], halign: "center" }, styles: { fontSize: 7, cellPadding: 1.5, halign: "center" },
+                        didParseCell: function (hookData) {
+                            if (hookData.section === "body") {
+                                const flag = rowTypeFlags[hookData.row.index];
+                                if (flag === 2) { hookData.cell.styles.fillColor = [219, 234, 254]; hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [159, 18, 57]; }
+                                else if (flag === 1) { hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [29, 78, 216]; }
+                            }
+                        }
+                    });
+                }
+
+                // USER REQUEST (2026-09-14): "PDF_SUMMARY" (Division/Circle) yahin
+                // ruk jaata hai - poori list wala page nahi jodte. Sirf "PDF" (DC
+                // level, jahan koi alag summary-only option hai hi nahi) aur na
+                // hone par bhi poori list jodte hain.
+                if (fmt !== "PDF_SUMMARY") {
+                    doc.addPage("a4", "l");
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(`${reportTitle} - Full List`, 148, 15, { align: "center" });
+                    drawFullListTable(20);
+                }
+
+                const pdfBlob = doc.output("blob");
+                await saveShmsBlob(`${fileName}.pdf`, pdfBlob, "application/pdf");
+                showToast("PDF report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+            } catch (error) {
+                showToast(error?.message || "O&M/VIG report download nahi ho paya", false);
+            }
         }
 
         async function getPeakLoadMissingDateKeys(substation, selectedDateIso) {
@@ -9048,10 +11287,24 @@
 
         async function loadShmsProgressData(forceRefresh = false) {
             if (!forceRefresh && shmsProgressLoaded && shmsProgressRows.length) return true;
+            loadRecentShmsSubmittedEntries_();
+            const previousShmsProgressRows = Array.isArray(shmsProgressRows) ? shmsProgressRows.slice() : [];
+            // SPEED/RELIABILITY FIX (2026-09-15, USER-REPORTED): pehle yahan bare
+            // fetch().json() tha - koi timeout na hone ki wajah se weak network par
+            // yeh request hamesha ke liye "latak" sakti thi (Feeder/STM/PeakLoad
+            // jaisi 45s-timeout + 2-retry safety yahan nahi thi). Ab wahi proven
+            // loadRemoteJson(...,45000) + 2-attempt pattern reuse kiya hai.
+            let data = null, lastShmsProgressErr = null;
+            for (let attempt = 1; attempt <= 2 && data === null; attempt++) {
+                try {
+                    data = await loadRemoteJson(`${shmsSubmitScriptUrl}?action=getSummary&t=${Date.now()}`, 45000);
+                } catch (err) {
+                    lastShmsProgressErr = err;
+                    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2000));
+                }
+            }
             try {
-                loadRecentShmsSubmittedEntries_();
-                const response = await fetch(`${shmsSubmitScriptUrl}?action=getSummary&t=${Date.now()}`);
-                const data = await response.json();
+                if (data === null) throw lastShmsProgressErr || new Error("SHMS summary load fail");
                 const summaryRows = Array.isArray(data)
                     ? data
                     : Array.isArray(data?.data)
@@ -9087,11 +11340,25 @@
                 shmsProgressRows = mergeShmsProgressRows_(shmsProgressRows, getRecentShmsSubmittedRows_());
                 shmsPendingTrackerRows = shmsProgressRows.slice();
                 shmsProgressLoaded = true;
+                shmsProgressStale = false; // ITEM-8 FIX (2026-09-15): fresh fetch safal
                 return true;
             } catch (_) {
+                // RELIABILITY FIX (2026-09-15, USER-FLAGGED risk): pehle fetch fail
+                // hone par pichla successfully-loaded data bhi khaali kar diya jaata
+                // tha (screen par pehle se sahi dikh raha data bhi gayab ho jaata
+                // tha). Ab agar pehle se koi valid data tha, use hi wapas rakhte
+                // hain - sirf tab khaali karte hain jab kabhi koi data mila hi na ho.
+                if (previousShmsProgressRows.length) {
+                    shmsProgressRows = previousShmsProgressRows;
+                    shmsPendingTrackerRows = shmsProgressRows.slice();
+                    shmsProgressLoaded = true;
+                    shmsProgressStale = true; // ITEM-8 FIX (2026-09-15): purana cached data dikha rahe hain
+                    return true;
+                }
                 shmsProgressRows = [];
                 shmsPendingTrackerRows = [];
                 shmsProgressLoaded = false;
+                shmsProgressStale = false;
                 return false;
             }
         }
@@ -9621,8 +11888,11 @@
                 return;
             }
             setShmsProgressStatus("");
+            // setReportSource() neeche khud renderShmsProgressSummary(true) call
+            // karta hai (tab-switch/dashboard-open par fresh fetch ke liye) - pehle
+            // yahan ek redundant extra call bhi hota tha (double network hit ka
+            // risk), ab hata diya (2026-09-15).
             setReportSource(progressReportSource);
-            renderShmsProgressSummary();
         }
 
         function setShmsProgressStatus(message) {
@@ -9687,17 +11957,45 @@
             });
         }
 
-        async function renderShmsProgressSummary() {
+        // STALE-RENDER PROTECTION (2026-09-15, USER-REPORTED): pehle report
+        // source (SHMS/FEEDER/STM/PEAKLOAD) fast switch karne par, purani tab ki
+        // in-flight fetch complete hoke naye tab ke render ko overwrite kar sakti
+        // thi (koi render-token check nahi tha). Ab Revenue/O&M-VIG jaisa hi
+        // proven token pattern - sirf sabse aakhri render call hi DOM likhta hai.
+        let shmsProgressSummaryRenderToken = 0;
+
+        async function renderShmsProgressSummary(forceRefresh = false) {
             const summary = document.getElementById("shms-progress-summary");
             if (!summary) return;
+            const myShmsProgressToken = ++shmsProgressSummaryRenderToken;
+            const isShmsProgressRenderValid = () => myShmsProgressToken === shmsProgressSummaryRenderToken;
             if (progressReportSource === "FEEDER") {
-                await renderFeederReportSummary();
+                await renderFeederReportSummary(forceRefresh, isShmsProgressRenderValid);
+                return;
+            }
+            // NEW FEATURE (2026-09-14): "Daily Hourly Peak Load" ka Daily Progress -
+            // SHMS/Feeder Reading jaisa hi pattern (2 se badhakar ab 4 option).
+            if (progressReportSource === "PEAKLOAD") {
+                await renderPeakLoadReportSummary(forceRefresh, isShmsProgressRenderValid);
+                return;
+            }
+            // FIXED (2026-09-14): STM Complaint backend (.gs) me ab getSummary
+            // action mil gaya hai (user ne bhej diya), isliye Peak Load jaisa hi
+            // report ab yahan bhi ban sakti hai.
+            if (progressReportSource === "STM") {
+                await renderStmComplaintReportSummary(forceRefresh, isShmsProgressRenderValid);
                 return;
             }
             const filtered = getFilteredShmsProgressRows();
+            if (!isShmsProgressRenderValid()) return;
             const label = getShmsProgressFilterLabel();
             summary.style.display = label ? "block" : "none";
-            summary.innerText = label ? `${label} ke liye ${filtered.length} entries ready hain` : "";
+            // ITEM-8 FIX (2026-09-15): naya fetch fail hone par purana (cached)
+            // data dikhne par chhota staleness note - sirf display text.
+            const staleSuffix = (filtered.length && shmsProgressStale)
+                ? " (⚠ naya data load nahi ho saka, pehle se load data dikha rahe hain)"
+                : "";
+            summary.innerText = label ? `${label} ke liye ${filtered.length} entries ready hain${staleSuffix}` : "";
         }
 
         async function saveShmsBlob(fileName, blob, mimeType) {
@@ -9764,14 +12062,30 @@
         }
 
         function setReportSource(source) {
-            progressReportSource = source === "FEEDER" ? "FEEDER" : "SHMS";
+            // USER REQUEST (2026-09-14): pehle sirf SHMS/FEEDER 2 option the, ab
+            // STM Complaint aur Daily Hourly Peak Load bhi (Sub DN Chhapara ke
+            // menu ke sabhi 4 module) isi Daily Progress toggle me add kiye.
+            const validSources = ["SHMS", "FEEDER", "STM", "PEAKLOAD"];
+            progressReportSource = validSources.includes(source) ? source : "SHMS";
             document.getElementById("progress-shms-btn")?.classList.toggle("active", progressReportSource === "SHMS");
             document.getElementById("progress-feeder-btn")?.classList.toggle("active", progressReportSource === "FEEDER");
+            document.getElementById("progress-stm-btn")?.classList.toggle("active", progressReportSource === "STM");
+            document.getElementById("progress-peakload-btn")?.classList.toggle("active", progressReportSource === "PEAKLOAD");
             const titleNode = document.querySelector("#shms-progress-view .title-text-bold");
             if (titleNode) {
-                titleNode.innerText = progressReportSource === "FEEDER" ? "FEEDER READING REPORT" : "SHMS DAILY PROGRESS";
+                const titleMap = {
+                    FEEDER: "FEEDER READING REPORT",
+                    STM: "STM COMPLAINT REPORT",
+                    PEAKLOAD: "DAILY HOURLY PEAK LOAD REPORT"
+                };
+                titleNode.innerText = titleMap[progressReportSource] || "SHMS DAILY PROGRESS";
             }
-            renderShmsProgressSummary();
+            // Tab (SHMS/Feeder/STM/PeakLoad) switch karna ek explicit "fresh data
+            // do" signal hai - isliye yahi ek jagah hai jahan force refresh hota
+            // hai. Date/Month toggle (setShmsProgressMode) aur date-input change
+            // isi renderShmsProgressSummary() ko bina force ke call karte hain,
+            // taaki loaded data reuse ho (SPEED FIX, 2026-09-15, USER-REPORTED).
+            renderShmsProgressSummary(true);
         }
 
         function getFeederReportFilterLabel() {
@@ -9784,12 +12098,36 @@
             return formatShmsDateDisplay(raw);
         }
 
+        function getFeederReportRowKey_(row) {
+            return [
+                normalizeFeederSubstationKey_(row["33/11 KV SUBSTATION"] || row.substation || ""),
+                String(row["33 AND 11 KV FEEDER"] || row.feeder || "").trim().toUpperCase(),
+                buildFeederDateKey_(row["DATE(DD/MM/YYY)"] || row.date || ""),
+                String(row["TIME(HH/MM)"] || row.time || "").trim(),
+                String(row["DC NAME"] || row.dc_name || "").trim().toUpperCase()
+            ].join("|");
+        }
+
         function getFilteredFeederReportRows() {
             const label = getFeederReportFilterLabel();
             if (!label) return [];
             const sheetRows = Array.isArray(feederReportRows) ? feederReportRows : [];
             const localRows = getRecentFeederSubmittedEntries_();
-            const allRows = [...sheetRows, ...localRows];
+            // DUPLICATE FIX (2026-09-15, USER-REPORTED risk): pehle sheetRows aur
+            // localRows seedhe jod diye jaate the - agar abhi-submit hui entry
+            // server sheet me bhi aa chuki ho (getSummary poori history laata hai)
+            // to wahi row count/download me DO baar aa jaati thi. Ab SHMS jaisa hi
+            // composite-key dedupe: server (sheetRows) row ko priority milti hai,
+            // sirf wahi localRows add hoti hain jinki key sheetRows me abhi tak
+            // nahi hai.
+            const seenFeederRowKeys = new Set(sheetRows.map(getFeederReportRowKey_));
+            const dedupedLocalRows = localRows.filter((row) => {
+                const key = getFeederReportRowKey_(row);
+                if (!key || seenFeederRowKeys.has(key)) return false;
+                seenFeederRowKeys.add(key);
+                return true;
+            });
+            const allRows = [...sheetRows, ...dedupedLocalRows];
             if (shmsProgressMode === "MONTHLY") {
                 return allRows.filter((row) => {
                     const dateKey = buildFeederDateKey_(row["DATE(DD/MM/YYY)"] || row.date || "");
@@ -9801,20 +12139,38 @@
             return allRows.filter((row) => buildFeederDateKey_(row["DATE(DD/MM/YYY)"] || row.date || "") === dailyKey);
         }
 
-        async function renderFeederReportSummary() {
+        async function renderFeederReportSummary(forceRefresh = false, isStillValid = () => true) {
             const summary = document.getElementById("shms-progress-summary");
             if (!summary) return;
             loadRecentFeederSubmittedEntries_();
-            await loadFeederReportData(true);
+            // SPEED FIX (2026-09-15, USER-REPORTED): pehle yahan hamesha
+            // loadFeederReportData(true) chalta tha - matlab date/month toggle ya
+            // dobara isi tab par aane par bhi poori feeder history dobara fetch
+            // hoti thi. Ab sirf tab force hota hai jab tab abhi-abhi select hui ho
+            // (setReportSource se) ya data pehle load hi nahi hua - date/month
+            // toggle sirf existing loaded data ko re-filter karta hai.
+            const needsFetch = forceRefresh || !feederReportLoaded || !feederReportRows.length;
+            const progress = needsFetch ? renderSyncingProgress(summary, isStillValid, "SYNCING DATA... PLEASE WAIT") : null;
+            await loadFeederReportData(forceRefresh);
+            if (!isStillValid()) { if (progress) progress.stop(); return; }
             const label = getFeederReportFilterLabel();
             const rows = getFilteredFeederReportRows();
+            if (progress) await progress.finish();
+            if (!isStillValid()) return;
             summary.style.display = label ? "block" : "none";
             if (!label) {
                 summary.innerHTML = "";
                 return;
             }
+            // ITEM-8 FIX (2026-09-15): agar naya fetch fail hua tha aur purana
+            // (cached) data dikha rahe hain, to user ko ek chhota staleness
+            // warning bhi dikhao - sirf display text, koi fetch/cache logic
+            // change nahi.
+            const staleNote = (rows.length && feederReportLoadMessage)
+                ? `<br><span style="display:block; margin-top:6px; font-size:11px; color:#b45309;">⚠ Naya data load nahi ho saka, pehle se load data dikha rahe hain</span>`
+                : "";
             const debugMessage = rows.length
-                ? `${label} ke liye ${rows.length} feeder entries ready hain`
+                ? `${label} ke liye ${rows.length} feeder entries ready hain${staleNote}`
                 : (feederReportLoadMessage
                     ? `${label} ke liye 0 feeder entries ready hain<br><span style="display:block; margin-top:6px; font-size:11px; color:#b91c1c;">${feederReportLoadMessage}</span>`
                     : `${label} ke liye 0 feeder entries ready hain`);
@@ -9824,11 +12180,17 @@
         async function downloadFeederReport(fmt) {
             try {
                 loadRecentFeederSubmittedEntries_();
-                await loadFeederReportData(true);
-                setShmsProgressStatus("Feeder report data ready ki ja rahi hai...");
+                // SPEED FIX (2026-09-15, USER-REPORTED): pehle Download hamesha
+                // poori feeder history dobara fetch karta tha, chahe report screen
+                // par abhi-abhi wahi data load ho chuka ho. Ab agar already loaded
+                // hai to seedha usi cached data se download banta hai.
+                if (!feederReportLoaded || !feederReportRows.length) {
+                    setShmsProgressStatus("Feeder report data ready ki ja rahi hai...");
+                    await loadFeederReportData(false);
+                    setShmsProgressStatus("");
+                }
                 const rows = getFilteredFeederReportRows();
                 const label = getFeederReportFilterLabel();
-                setShmsProgressStatus("");
                 if (!label) return showToast("Pehle date ya month select kijiye", false);
 
                 const headers = [
@@ -9902,6 +12264,12 @@
         async function downloadShmsProgress(fmt) {
             if (progressReportSource === "FEEDER") {
                 return downloadFeederReport(fmt);
+            }
+            if (progressReportSource === "PEAKLOAD") {
+                return downloadPeakLoadReport(fmt);
+            }
+            if (progressReportSource === "STM") {
+                return downloadStmComplaintReport(fmt);
             }
             try {
                 setShmsProgressStatus("SYNCING DATA... PLEASE WAIT");
@@ -10400,11 +12768,17 @@
                 setFeederStatus("", false);
             });
 
-            loadFeederReportData(true).then(() => {
-                if (selectedFeederSubstation) {
+            // BUG FIX (2026-09-14): pehle yahan poori feeder history (loadFeederReportData,
+            // 1.5+ MB) load hoti thi sirf isliye ki agar substation pehle se selected ho to
+            // uska pending-alert turant sahi dikhe - ab sirf USI (pehle se selected)
+            // substation ka halka data maangte hain.
+            if (selectedFeederSubstation) {
+                feederHistorySyncingFor_ = normalizeFeederSubstationKey_(selectedFeederSubstation);
+                loadFeederSubstationHistory_(selectedFeederSubstation, true).then(() => {
+                    feederHistorySyncingFor_ = "";
                     renderFeederRows();
-                }
-            });
+                });
+            }
         }
 
         function selectFeederSubstation(substation) {
@@ -10415,8 +12789,18 @@
             }
             toggleFeederDropdown("substation", false);
             toggleFeederDatePicker(false);
+            // BUG FIX (2026-09-14): substation chunte hi ab sirf USI substation ka halka
+            // data maangte hain (poori 1.5+ MB history nahi) - dekhein
+            // loadFeederSubstationHistory_. Jab tak yeh load ho raha hai, purana/khaali
+            // cache dekh kar galat "saari dates Pending" alert dikhne se rokne ke liye
+            // feederHistorySyncingFor_ set karte hain (renderFeederRows isse "Data sync
+            // ho raha hai" dikhata hai).
+            feederHistorySyncingFor_ = normalizeFeederSubstationKey_(substation);
             renderFeederRows();
-            loadFeederReportData(true).then(() => renderFeederRows());
+            loadFeederSubstationHistory_(substation, true).then(() => {
+                feederHistorySyncingFor_ = "";
+                renderFeederRows();
+            });
         }
 
         function setFeederStatus(message = "", show = true, type = "alert") {
@@ -10552,12 +12936,20 @@
             const blockingPendingKeys = getFeederBlockingPendingDateKeys_(selectedFeederSubstation, selectedDateKey);
 
             submitBtn.style.display = allRowsSubmitted ? "none" : "block";
-            if (blockingPendingKeys.length) {
+            // USER REQUEST (2026-09-14): jab tak is substation ka fresh history data
+            // sync ho raha hai, ab tak ka (khaali) cache dekh kar galat "saari dates
+            // Pending" alert dikhane ki jagah ek saaf "Data sync ho raha hai" message
+            // dikhaate hain - load poora hote hi (loadFeederSubstationHistory_ ke
+            // .then me) yeh dobara render hoga aur sahi status aa jayega.
+            const isHistorySyncing = feederHistorySyncingFor_ && feederHistorySyncingFor_ === normalizeFeederSubstationKey_(selectedFeederSubstation);
+            if (isHistorySyncing) {
+                setFeederStatus("Data sync ho raha hai... kripya thoda wait kijiye", true, "alert");
+            } else if (blockingPendingKeys.length) {
                 setFeederStatus(buildFeederPendingAlertMessage_(blockingPendingKeys), true, "alert");
             } else {
                 updateFeederPendingAlert(selectedFeederSubstation);
             }
-            if (allRowsSubmitted && !blockingPendingKeys.length) {
+            if (allRowsSubmitted && !blockingPendingKeys.length && !isHistorySyncing) {
                 setFeederStatus("Is date ki feeder reading pehle se submit ho chuki hai.", true, "success");
             }
             listBox.innerHTML = rows.map((row, index) => {
@@ -14677,7 +17069,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadRevenuePendingList(type) {
@@ -14764,7 +17156,20 @@
                 // chahiye utna lene denge (uske apne 3 attempt khud hi ek waqt ke
                 // baad give up kar dete hain), taaki bade DC me bhi poora sahi data
                 // mile chahe thoda zyada time lage.
-                const liveRows = await syncRevenueLiveEntriesFromSheet();
+                // SPEED FIX (2026-09-15, USER-REPORTED slowness): yeh call bina
+                // scopeDc ke poori Circle (sabhi 24 DC) ki Live Entries fetch karti
+                // thi, jabki Pending DO List hamesha sirf `activeDC` ke liye hi
+                // dikhti hai (neeche saara matching activeDC se hi hota hai) - Daily
+                // Progress (Revenue tab) me already isi tarah `scopeDc` diya jaata
+                // hai (`revenueSummaryScopeDc` dekhein) - wahi proven, safe pattern
+                // yahan bhi. `syncRevenueLiveEntriesFromSheet` khud hi apni scope-
+                // tracking (`revenueLiveEntriesCachedScopeDc`) rakhta hai, isliye
+                // agar kisi aur report ne pehle hi POORI (sabhi-DC) fetch kar rakhi
+                // ho to wahi turant reuse ho jaayegi - dobara scoped fetch nahi
+                // hogi. `activeDC` khaali ho (kabhi is screen ko Division/Circle
+                // scope me khola jaaye) to `scopeDc` bhi khaali jaayega, matlab
+                // pehle jaisa hi (poora) fetch hoga - koi regression nahi.
+                const liveRows = await syncRevenueLiveEntriesFromSheet(3, false, activeDC || null);
                 revenuePendingDiag.liveTotal = liveRows.length;
                 let liveDcMatched = 0;
                 liveRows.forEach((row) => {
@@ -16059,17 +18464,27 @@
         // na hua ho), to null return karta hai - caller (renderRevenueLiveProgress)
         // tab purani (poori) sync method par fallback kar leta hai, taaki report
         // kabhi bhi khaali/galat na dikhe.
+        // SPEED FIX (2026-09-15): `dcName` ab OPTIONAL hai. Backend (.gs) ka
+        // getEntries/getTDEntries pehle se hi bina `dc_name` ke bhi `date` filter
+        // support karta hai (sirf DC-scope ke liye nahi likha gaya tha, general
+        // hai) - `dc_name` khaali chhodne par backend sabhi 24 DC ka data padhta
+        // hai lekin RESPONSE me sirf maangi hui date ki rows bhejta hai (poori
+        // history nahi) - Division/Circle Live Progress ab isi tarah "aaj ki"
+        // chhoti list turant paa sakte hain, bina 24-DC/poori-history wali slow
+        // shared sync (jo Cash Reconcile/Pending DO List/Report Download ke liye
+        // zaroori hai, usko bilkul nahi chheda) par fallback kiye.
         async function fetchRevenueLiveProgressFastRows_(dcName, dateStr, attempts = 2) {
-            if (!revenueCollectionSubmitScriptUrl || !dcName) return null;
+            if (!revenueCollectionSubmitScriptUrl) return null;
+            const dcParam = dcName ? `&dc_name=${encodeURIComponent(dcName)}` : "";
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 try {
                     const [paidParsed, tdParsed] = await Promise.all([
                         withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
-                            const paidResponse = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getEntries&dc_name=${encodeURIComponent(dcName)}&date=${encodeURIComponent(dateStr)}&t=${Date.now()}`);
+                            const paidResponse = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getEntries${dcParam}&date=${encodeURIComponent(dateStr)}&t=${Date.now()}`);
                             return await paidResponse.json();
                         }),
                         withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
-                            const tdResponse = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getTDEntries&dc_name=${encodeURIComponent(dcName)}&date=${encodeURIComponent(dateStr)}&t=${Date.now()}`);
+                            const tdResponse = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getTDEntries${dcParam}&date=${encodeURIComponent(dateStr)}&t=${Date.now()}`);
                             return await tdResponse.json();
                         })
                     ]);
@@ -16423,17 +18838,32 @@
             if (activeDC) activeViewLevel = "DC";
             else if (activeDiv) activeViewLevel = "DIVISION";
             else activeViewLevel = "CIRCLE";
-            // PERF FIX (2026-08-20): DC-scope par pehle FAST, isolated path try karo
-            // (sirf is DC + sirf aaj ki date) - dekhein fetchRevenueLiveProgressFastRows_
-            // ke upar wala detailed comment. Agar yeh kaam kar jaaye to poori 24-DC/
-            // poori-history wali slow sync ki zaroorat hi nahi padti. Fail ho jaaye
-            // (ya DIVISION/CIRCLE scope ho, jinke liye yeh fast path applicable nahi)
-            // to purani (poori) sync method par turant fallback - taaki behavior kabhi
-            // pehle se KHARAB na ho, sirf DC-scope me FAST ho.
+            // PERF FIX (2026-08-20, extended 2026-09-15): DC-scope par pehle FAST,
+            // isolated path try karo (sirf is DC + sirf aaj ki date) - dekhein
+            // fetchRevenueLiveProgressFastRows_ ke upar wala detailed comment.
+            // SPEED FIX (2026-09-15): ab Division/Circle scope me bhi yahi fast
+            // path try karte hain - bas dc_name khaali chhodte hain (backend sabhi
+            // DC ka "aaj ka" data deta hai, poori history nahi), phir Division ke
+            // liye us chhoti (already-today-only) list ko client-side apne DC-set
+            // tak filter kar dete hain (yeh filter free hai, kyunki list pehle se
+            // hi chhoti hai). Kisi bhi scope me fast path fail ho jaaye to purani
+            // (poori) sync method par turant fallback - taaki behavior kabhi pehle
+            // se KHARAB na ho, sirf FAST ho.
             let rows = null;
             if (activeViewLevel === "DC" && activeDC) {
                 rows = await fetchRevenueLiveProgressFastRows_(activeDC, getCurrentDateDDMMYYYY());
                 if (myToken !== revenueLiveProgressToken) { progress.stop(); return; }
+            } else if (activeViewLevel === "DIVISION" || activeViewLevel === "CIRCLE") {
+                const todayRows = await fetchRevenueLiveProgressFastRows_("", getCurrentDateDDMMYYYY());
+                if (myToken !== revenueLiveProgressToken) { progress.stop(); return; }
+                if (todayRows) {
+                    if (activeViewLevel === "DIVISION" && activeDiv) {
+                        const dcSet = new Set(getDivisionDcNames(activeDiv).map((n) => normalizeDcName(n)));
+                        rows = todayRows.filter((r) => dcSet.has(normalizeDcName(r.dcName)));
+                    } else {
+                        rows = todayRows;
+                    }
+                }
             }
             if (!rows) {
                 await Promise.all([syncRevenueLiveEntriesFromSheet(), syncRevenueTdEntriesFromSheet()]);
@@ -16641,7 +19071,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         let revenueReportMode = "DAILY";
@@ -16749,7 +19179,16 @@
             const scopeKey = activeDC || activeDiv || "CIRCLE";
             if (revenueReportLoadedScopeKey === scopeKey) return;
 
-            Promise.all([syncRevenueLiveEntriesFromSheet(), syncRevenueTdEntriesFromSheet()]).then(() => {
+            // SPEED FIX (2026-09-15, USER-REPORTED slowness): DC scope me (activeDC
+            // set) ab `scopeDc` diya jaata hai - Daily Progress jaisa hi proven
+            // pattern (poori history nahi chahiye yahan bhi, sirf DC-scope; date/
+            // month filter upar `getRevenueCombinedFilteredEntries` se local hi
+            // lagta hai, isliye scope-by-DC se koi filtering-logic nahi tootegi).
+            // Division/Circle scope me (activeDC khaali) `scopeDc` bhi khaali
+            // jaayega, matlab pehle jaisa hi poora (sabhi DC) fetch hoga - kyunki
+            // wahan sach me sabhi DC ka data chahiye, koi regression nahi.
+            const reportDownloadScopeDc = activeDC || null;
+            Promise.all([syncRevenueLiveEntriesFromSheet(3, false, reportDownloadScopeDc), syncRevenueTdEntriesFromSheet(3, false, reportDownloadScopeDc)]).then(() => {
                 revenueReportLoadedScopeKey = scopeKey;
                 if (renderToken !== revenueReportRenderToken || !document.getElementById("revenue-report-download-view")?.classList.contains("active")) return;
                 const refreshedBaseRows = revenueReportMode === "MONTHLY"
@@ -16777,14 +19216,24 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         async function downloadRevenueSelectedReport(type) {
             if (revenueReportDownloadInProgress) return showToast("Download process chal raha hai, kripya wait kijiye", false);
             setRevenueReportDownloadState(true, "Downloading... kripya wait kijiye", true);
             try {
-                await Promise.all([syncRevenueLiveEntriesFromSheet(), syncRevenueTdEntriesFromSheet()]);
+                // SPEED FIX (2026-09-15): isi screen (Report Download) ke on-screen
+                // render mein DC-scope me ab `scopeDc` diya jaata hai - agar yahan
+                // Download button bina scope ke hi purani unscoped sync call karta
+                // rahta, to render fast hone ke baad bhi Download click karte hi
+                // dobara ek POORI (sabhi-DC) fetch trigger ho jaati (kyunki shared
+                // cache ki scope-tracking DC-scoped aur unscoped fetch ko alag maanti
+                // hai) - isliye yahan bhi wahi scope diya taaki dono consistent/fast
+                // rahein. Division/Circle scope me pehle jaisa hi (poora) fetch hota
+                // hai.
+                const downloadScopeDc = activeDC || null;
+                await Promise.all([syncRevenueLiveEntriesFromSheet(3, false, downloadScopeDc), syncRevenueTdEntriesFromSheet(3, false, downloadScopeDc)]);
                 const rows = getRevenueSelectedReportRows();
                 if (!rows.length) {
                     setRevenueReportDownloadState(false, "Report ke liye data nahi hai", false);
@@ -17014,7 +19463,14 @@
             // renderRevenueCashSyncingProgress - jo hata di gayi hai).
             const progress = renderSyncingProgress(tableBox, isRenderValid, "SYNCING DATA... PLEASE WAIT");
             try {
-                await Promise.all([syncRevenueLiveEntriesFromSheet(), getRevenueUploadedPaidMasterRows()]);
+                // SPEED FIX (2026-09-15, USER-REPORTED slowness): Cash Reconcile
+                // hamesha ek `activeDC` ke liye hi hai (NGB Cash List side -
+                // getRevenueUploadedPaidMasterRows - pehle se hi DC-scoped hai) -
+                // sirf yeh "Paid by Staff" live entries wali call bina scope ke
+                // poori Circle fetch karti thi. Daily Progress jaisa hi safe
+                // `scopeDc` pattern (empty activeDC par khud purana unscoped
+                // behavior par fallback ho jaata hai, koi regression nahi).
+                await Promise.all([syncRevenueLiveEntriesFromSheet(3, false, activeDC || null), getRevenueUploadedPaidMasterRows()]);
                 if (renderToken !== revenueCashReconcileRenderToken) { progress.stop(); return; }
                 revenueCashReconcileRows = buildRevenueCashReconcileRows();
                 populateRevenueCashHqOptions(revenueCashReconcileRows);
@@ -17057,7 +19513,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadRevenueCashReconcile(type) {
@@ -17473,7 +19929,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadRevenueHqVillageReport(type) {
@@ -17496,11 +19952,11 @@
                     if (!window.jspdf?.jsPDF) { setRevenueHqVillageDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
-                    doc.text(periodLine, 148, 25, { align: "center" });
-                    doc.autoTable({ startY: 31, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [21, 128, 61] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 22, { align: "center" });
+                    doc.text(periodLine, 148, 28, { align: "center" });
+                    doc.autoTable({ startY: 34, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [21, 128, 61] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                     setRevenueHqVillageDownloadState(false, "PDF download ho chuki hai", true);
                     return;
@@ -17845,7 +20301,7 @@
             statusBox.style.background = ok ? "#eff6ff" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#93c5fd" : "#fda4af";
             statusBox.style.color = ok ? "#1d4ed8" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadRevenueTargetAchievement(type) {
@@ -17877,11 +20333,11 @@
                     if (!window.jspdf?.jsPDF) { setRevenueTargetDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
-                    doc.text(periodLine, 148, 25, { align: "center" });
-                    doc.autoTable({ startY: 31, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 22, { align: "center" });
+                    doc.text(periodLine, 148, 28, { align: "center" });
+                    doc.autoTable({ startY: 34, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                     setRevenueTargetDownloadState(false, "PDF download ho chuki hai", true);
                     return;
@@ -18064,7 +20520,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadRevenueTopDefaulters(type) {
@@ -18093,11 +20549,11 @@
                     if (!window.jspdf?.jsPDF) { setRevenueDefaultersDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
-                    doc.text(periodLine, 148, 25, { align: "center" });
-                    doc.autoTable({ startY: 31, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 22, { align: "center" });
+                    doc.text(periodLine, 148, 28, { align: "center" });
+                    doc.autoTable({ startY: 34, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                     setRevenueDefaultersDownloadState(false, "PDF download ho chuki hai", true);
                     return;
@@ -18352,7 +20808,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadRevenueHqVillageList(type) {
@@ -18383,13 +20839,13 @@
                     if (!window.jspdf?.jsPDF) { setRevenueHqVillageListDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 7);
-                    doc.setFontSize(12); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 6);
+                    doc.setFontSize(12); doc.setTextColor(0); doc.text(reportTitle, 148, 14, { align: "center" });
                     doc.setFontSize(9);
-                    doc.text(filterLine1, 148, 17, { align: "center" });
-                    doc.text(filterLine2, 148, 22, { align: "center" });
-                    doc.text(periodLine, 148, 27, { align: "center" });
-                    doc.autoTable({ startY: 33, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [21, 128, 61] } });
+                    doc.text(filterLine1, 148, 19, { align: "center" });
+                    doc.text(filterLine2, 148, 24, { align: "center" });
+                    doc.text(periodLine, 148, 29, { align: "center" });
+                    doc.autoTable({ startY: 35, head: [headers], body: rows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [21, 128, 61] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                     setRevenueHqVillageListDownloadState(false, "PDF download ho chuki hai", true);
                     return;
@@ -19554,7 +22010,7 @@
             statusBox.style.background = ok ? "#ecfdf5" : "#fff1f2";
             statusBox.style.borderColor = ok ? "#86efac" : "#fda4af";
             statusBox.style.color = ok ? "#166534" : "#991b1b";
-            statusBox.innerHTML = escapeHtml(statusMessage);
+            statusBox.innerHTML = (isLoading ? `<span class="btn-inline-spinner" style="border-color: rgba(22,101,52,0.35); border-top-color: #166534; vertical-align: -1px;"></span>` : "") + escapeHtml(statusMessage);
         }
 
         function downloadVrDownloadLog(type) {
@@ -19575,10 +22031,10 @@
                     if (!window.jspdf?.jsPDF) { setVrDownloadLogDownloadState(false, "PDF library load nahi hui", false); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(scopeLine, 148, 19, { align: "center" });
-                    doc.autoTable({ startY: 25, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(scopeLine, 148, 22, { align: "center" });
+                    doc.autoTable({ startY: 28, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [29, 78, 216] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                     setVrDownloadLogDownloadState(false, "PDF download ho chuki hai", true);
                     return;
@@ -20250,8 +22706,13 @@
                 const rows = isLikelyCsvPayload(rawCsv) ? parseMeterCheckingReportCsv(rawCsv) : [];
                 meterCheckingReportRows = rows;
                 meterCheckingReportLoadedDcKey = dcKey;
+                meterCheckingReportStale = false; // ITEM-8 FIX (2026-09-15): fresh fetch safal
                 return rows;
             } catch (_) {
+                // ITEM-8 FIX (2026-09-15): pehle se koi data ho to use hi wapas
+                // rakhte hain (behavior unchanged) - bas ek stale flag set karte
+                // hain taaki screen par ek chhota warning dikhaya ja sake.
+                meterCheckingReportStale = meterCheckingReportRows.length > 0;
                 return meterCheckingReportRows;
             }
         }
@@ -20311,6 +22772,11 @@
             const rows = await loadMeterCheckingReportRows(activeDC);
             const filtered = getMeterCheckingReportFilteredRows(rows);
             const staffFilter = document.getElementById("meter-checking-report-staff")?.value || "";
+            // ITEM-8 FIX (2026-09-15): naya fetch fail hone par purana (cached)
+            // data dikhne par chhota staleness note - sirf display text.
+            const meterCheckingStaleNote = (filtered.length && meterCheckingReportStale)
+                ? `<div style="margin-top:8px; text-align:center; font-size:11px; font-weight:900; color:#b45309;">⚠ Naya data load nahi ho saka, pehle se load data dikha rahe hain</div>`
+                : "";
 
             if (meterCheckingReportMode === "MONTHLY") {
                 // Month-wise: date ke hisaab se group karke sirf count dikhate hain
@@ -20331,7 +22797,7 @@
                     });
                 }
                 html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL CHECKED${staffFilter ? ` - ${escapeHtml(staffFilter)}` : ""}</div><div class="mt-2 text-center text-[13px] font-black">${filtered.length}</div></div>`;
-                tableBox.innerHTML = html;
+                tableBox.innerHTML = html + meterCheckingStaleNote;
             } else {
                 // Date-wise: screen par sirf Name of Staff + Checked Connection ki
                 // summary dikhate hain - poora consumer-level detail (Consumer/IVRS/
@@ -20352,7 +22818,7 @@
                     });
                 }
                 html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL CHECKED${staffFilter ? ` - ${escapeHtml(staffFilter)}` : ""}</div><div class="mt-2 text-center text-[13px] font-black">${filtered.length}</div></div>`;
-                tableBox.innerHTML = html;
+                tableBox.innerHTML = html + meterCheckingStaleNote;
             }
         }
 
@@ -20385,7 +22851,15 @@
             return /[ऀ-ॿ]/.test(String(text || ""));
         }
 
-        function renderMeterCheckingHindiCellImage_(text, cellWidthMm, cellHeightMm) {
+        // USER REQUEST (2026-09-14, O&M/VIG PDF alignment fix): pehle Hindi
+        // cell ka text canvas ke LEFT se hi likha jaata tha, hamesha - jo
+        // column ke apne halign (jaise "center") se match nahi karta tha,
+        // isliye Hindi wale cell (jaise "लागू नहीं") aur plain English/number
+        // wale cell alag-alag jagah dikhte the (ek row me "idhar-udhar" jaisa
+        // lagta tha). Ab `align` param (default "left", Meeter Checking ka
+        // purana behaviour bilkul same rakhne ke liye) column ke halign ke
+        // hisab se text ko canvas ke andar bhi center/left karta hai.
+        function renderMeterCheckingHindiCellImage_(text, cellWidthMm, cellHeightMm, align) {
             const scale = 6; // crisp raster taaki PDF zoom karne par bhi saaf dikhe
             const widthPx = Math.max(24, Math.round(cellWidthMm * scale));
             const heightPx = Math.max(24, Math.round(cellHeightMm * scale));
@@ -20422,13 +22896,15 @@
             const lineHeight = fontSizePx * 1.25;
             const totalTextHeight = lines.length * lineHeight;
             const startY = Math.max(padPx * 0.5, (heightPx - totalTextHeight) / 2);
+            ctx.textAlign = align === "center" ? "center" : "left";
+            const textX = align === "center" ? widthPx / 2 : padPx;
             lines.forEach((line, i) => {
-                ctx.fillText(line, padPx, startY + i * lineHeight, maxWidth);
+                ctx.fillText(line, textX, startY + i * lineHeight, maxWidth);
             });
             return canvas.toDataURL("image/png");
         }
 
-        function drawMeterCheckingHindiCell_(doc, cellData) {
+        function drawMeterCheckingHindiCell_(doc, cellData, align) {
             const { x, y, width, height } = cellData.cell;
             doc.setFillColor(255, 255, 255);
             doc.rect(x, y, width, height, "F");
@@ -20436,7 +22912,7 @@
             doc.setLineWidth(0.1);
             doc.rect(x, y, width, height, "S");
             try {
-                const imgData = renderMeterCheckingHindiCellImage_(String(cellData.cell.raw ?? ""), width, height);
+                const imgData = renderMeterCheckingHindiCellImage_(String(cellData.cell.raw ?? ""), width, height, align);
                 doc.addImage(imgData, "PNG", x + 0.4, y + 0.3, Math.max(0.1, width - 0.8), Math.max(0.1, height - 0.6));
             } catch (_) {}
         }
@@ -20462,12 +22938,12 @@
                     if (!window.jspdf?.jsPDF) { setMeterCheckingReportDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF({ orientation: "landscape" });
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 12, { align: "center" });
-                    doc.setFontSize(9); doc.text(`Period: ${periodLabel}`, 148, 19, { align: "center" });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Period: ${periodLabel}`, 148, 22, { align: "center" });
                     const remarkColIndex = headers.length - 1;
                     doc.autoTable({
-                        startY: 25, head: [headers], body: bodyRows, theme: "grid",
+                        startY: 28, head: [headers], body: bodyRows, theme: "grid",
                         styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" },
                         headStyles: { fillColor: [111, 66, 38] },
                         didDrawCell: (cellData) => {
@@ -20584,10 +23060,10 @@
                     if (!window.jspdf?.jsPDF) { setMeterCheckingLiveDownloadState(false, "PDF library load nahi hui"); return; }
                     const { jsPDF } = window.jspdf;
                     const doc = new jsPDF();
-                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 10);
-                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 105, 14, { align: "center" });
-                    doc.setFontSize(9); doc.text(`Date: ${todayLabel}`, 105, 21, { align: "center" });
-                    doc.autoTable({ startY: 27, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: [111, 66, 38] } });
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(reportTitle, 105, 16, { align: "center" });
+                    doc.setFontSize(9); doc.text(`Date: ${todayLabel}`, 105, 23, { align: "center" });
+                    doc.autoTable({ startY: 29, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 8, cellPadding: 2 }, headStyles: { fillColor: [111, 66, 38] } });
                     savePdfDocumentForDevice(doc, `${fileName}.pdf`);
                 } else {
                     const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
@@ -20780,6 +23256,8 @@
                 if (imageToExcelToolAdminMenuItem) imageToExcelToolAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 const freezeAdminMenuItem = document.getElementById("freeze-admin-header-menu-item");
                 if (freezeAdminMenuItem) freezeAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
+                const omvigAdminMenuItem = document.getElementById("omvig-admin-header-menu-item");
+                if (omvigAdminMenuItem) omvigAdminMenuItem.style.display = id === "subdn-chhapara" ? "block" : "none";
                 closeHeaderMenu();
                 const searchBtn = document.getElementById("search-btn");
                 if (id === "home") {
