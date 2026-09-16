@@ -229,9 +229,13 @@
             ? stagingMakeNamespacedStorage_(__stagingRealSessionStorage, "STAGING_")
             : __stagingRealSessionStorage;
         // ============================================================================
-        // END ITEM-10 PHASE-1 SAFETY PATCH — is line ke baad se poora app.js bilkul
-        // waisa hi hai jaisa live me hai (sirf IndexedDB DB-naam me 2 jagah "-STAGING"
-        // suffix, neeche unke apne constant-definition line par).
+        // END ITEM-10 PHASE-1 SAFETY PATCH (CORE) — is line ke baad se app.js
+        // waisa hi hai jaisa live me hai, SIVAAY in chhoti, alag se clearly-marked
+        // jagahon ke: (1) IndexedDB DB-naam me 2 jagah "-STAGING" suffix, neeche
+        // unke apne constant-definition line par; (2) "ITEM-10 PHASE-1 SHMS
+        // SYNTHETIC MOCK" block, shmsSubmitScriptUrl/shmsCsvUrl declaration ke
+        // turant baad (STAGING_MOCK_RESPONSES registry me sirf SHMS ke 2 GET
+        // entries daalta hai - koi gate/logic nahi badalta).
         // ============================================================================
 
         const divisionConfigs = {
@@ -382,6 +386,96 @@
         };
         const stockMaterialsCsvUrl = "https://docs.google.com/spreadsheets/d/1OfrU7ZuN5LV9f_3hqORv66BVLYKFGIBBjDyeSXHwldA/export?format=csv&gid=641545139";
         const shmsCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTbq-yne90yg9Vn8eylxM3zKMfZjPLlVhca3JhsjAzMlcm6MAVl8vAA-xXVgZI_XjWQBHyjB36YO1Cz/pub?output=csv";
+
+        // ITEM-10 PHASE-1 SHMS SYNTHETIC MOCK (2026-09-16, USER-REQUESTED, separate
+        // approval round after the base STAGING_SAFE_MODE patch): sirf STAGING
+        // copy me, sirf SHMS module ke READ paths ke liye synthetic TEST data yahan
+        // register karte hain - "shmsSubmitScriptUrl" aur "shmsCsvUrl" abhi-abhi
+        // upar define hue hain, isliye yeh block yahan (upar wale core patch block
+        // ke bajaye) rakha hai - wahan in variables ka istemal karte waqt "const"
+        // TDZ ki wajah se ReferenceError aata (woh block in dono constants ki
+        // declaration se PEHLE chalta hai). Is se koi safety gate (CSP, fetch/XHR/
+        // GViz call-site block, storage/IndexedDB/cache isolation) BILKUL nahi
+        // badalta - yeh sirf STAGING_MOCK_RESPONSES registry me 2 naye entries
+        // daalta hai, jo upar wala fetch()/XHR patch already read karta hai.
+        //
+        // SCOPE (kya-kya mock hua, kya NAHI):
+        //  - GET ${shmsSubmitScriptUrl}?action=getSummary  -> mock hota hai (state
+        //    switch ke through, neeche dekhein).
+        //  - GET ${shmsCsvUrl} (feeder/substation master CSV, SHMS Entry-form
+        //    dropdown aur SHMS Pending Dashboard dono isi se chalte hain) -> mock
+        //    hota hai.
+        //  - SHMS ka POST/submit (naya SHMS event save karna, ${shmsSubmitScriptUrl}
+        //    par bina "action" param ke doPost) -> is mock se BILKUL touch nahi
+        //    hota. Upar wala fetch/XHR gate har non-GET production request ko
+        //    UNCONDITIONALLY block karta hai (mock/allowlist ka koi rasta hi nahi
+        //    hai us code-path me) - safe-mode me submit hamesha blocked hi rahega.
+        //  - Kisi doosre module (Peak Load/Feeder/STM/Stock/Revenue/etc) ka
+        //    getSummary/CSV isse kabhi match nahi karega - mock key SHMS ki EXACT
+        //    poori base-URL + "::action" (ya poora normalized CSV URL + "::GET")
+        //    par based hai, sirf action-naam par nahi.
+        //
+        // STATE SWITCH (populated/empty/error, "loading" apne aap hota hai jab tak
+        // Promise resolve na ho): window.STAGING_MOCK_SHMS_STATE control karta hai
+        // getSummary ka response. Chrome DevTools console me kabhi bhi badlo aur
+        // SHMS Daily Progress / Pending Dashboard screen refresh/dobara kholo:
+        //     window.STAGING_MOCK_SHMS_STATE = "populated";  // default - TEST rows
+        //     window.STAGING_MOCK_SHMS_STATE = "empty";      // [] - "0 entries" UI
+        //     window.STAGING_MOCK_SHMS_STATE = "error";      // mock hata jaisa hi
+        //         // (getter "undefined" deta hai) - fetch/XHR patch ka EXISTING
+        //         // "TEST BACKEND NOT CONFIGURED" reject-path fire hota hai, koi
+        //         // naya error-simulation code nahi likha gaya.
+        window.STAGING_MOCK_SHMS_STATE = window.STAGING_MOCK_SHMS_STATE || "populated";
+
+        // Sirf UI/Tailwind visual testing ke liye - naam/mobile/reason sab clearly
+        // "TEST" prefix ke saath, kisi real staff/consumer ki nakal nahi.
+        const STAGING_SHMS_MOCK_SUMMARY_ROWS_POPULATED_ = [
+            {
+                substation: "TEST SUBSTATION 1", feeder: "TEST FEEDER A", event_type: "Un-Planned",
+                date: "15/09/2026", time_from: "10:00", time_to: "11:30", total_duration: "1:30",
+                reason: "TEST REASON - synthetic data", meter_no: "TEST-MTR-001",
+                operator_name: "TEST OPERATOR ONE", operator_mobile: "9990000001",
+                submitted_at: "15/09/2026 - 11:35"
+            },
+            {
+                substation: "TEST SUBSTATION 1", feeder: "TEST FEEDER B", event_type: "Planned",
+                date: "15/09/2026", time_from: "14:00", time_to: "15:00", total_duration: "1:00",
+                reason: "TEST REASON - scheduled maintenance", meter_no: "TEST-MTR-002",
+                operator_name: "TEST OPERATOR TWO", operator_mobile: "9990000002",
+                submitted_at: "15/09/2026 - 15:05"
+            },
+            {
+                substation: "TEST SUBSTATION 2", feeder: "TEST FEEDER C", event_type: "Un-Planned",
+                date: "15/09/2026", time_from: "18:20", time_to: "19:00", total_duration: "0:40",
+                reason: "TEST REASON - fault clearance", meter_no: "TEST-MTR-003",
+                operator_name: "TEST OPERATOR THREE", operator_mobile: "9990000003",
+                submitted_at: "15/09/2026 - 19:10"
+            }
+        ];
+
+        // Backend (shms-submit-script.gs doGet action=getSummary) jo array-of-
+        // objects deta hai, usi shape/field-names (substation, feeder, event_type,
+        // date "dd/MM/yyyy", time_from, time_to, total_duration, reason, meter_no,
+        // operator_name, operator_mobile, submitted_at "dd/MM/yyyy - HH:mm") me.
+        Object.defineProperty(window.STAGING_MOCK_RESPONSES, `${shmsSubmitScriptUrl}::getSummary`, {
+            configurable: true,
+            enumerable: true,
+            get: function () {
+                if (window.STAGING_MOCK_SHMS_STATE === "empty") return [];
+                if (window.STAGING_MOCK_SHMS_STATE === "error") return undefined;
+                return STAGING_SHMS_MOCK_SUMMARY_ROWS_POPULATED_;
+            }
+        });
+
+        // shms-submit-script.gs jaisa hi CSV shape jaisa parseShmsCsv() expect
+        // karta hai: header row + col0=substation, col1=feeder, col2=meterNo.
+        window.STAGING_MOCK_RESPONSES[stagingNormalizeUrlForMockKey_(shmsCsvUrl) + "::GET"] =
+            "Substation,Feeder,Meter No\n" +
+            "TEST SUBSTATION 1,TEST FEEDER A,TEST-MTR-001\n" +
+            "TEST SUBSTATION 1,TEST FEEDER B,TEST-MTR-002\n" +
+            "TEST SUBSTATION 2,TEST FEEDER C,TEST-MTR-003\n";
+        // END ITEM-10 PHASE-1 SHMS SYNTHETIC MOCK
+
         const lokAdalatFallbackTotals = {
             "ADEGAON": 752,
             "CHHAPARA-1": 564,
