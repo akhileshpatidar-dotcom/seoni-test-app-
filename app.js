@@ -7416,16 +7416,20 @@
                     // sakti thi. Ab sirf isi app ki apni cache ("seoni-app-"
                     // prefix wali, service-worker.js ke CACHE_VERSION se match)
                     // delete hoti hai.
-                    // ITEM-10 PHASE-1 FIX (2026-09-16, STAGING COPY ONLY): "seoni-app-"
-                    // prefix live ke "seoni-app-shell-v2" AUR staging ke naye
-                    // "seoni-staging-app-shell-v1" dono ko match karta - staging par
-                    // Refresh button dabane se live ka cache bhi delete ho sakta tha
-                    // (same origin, akhileshpatidar-dotcom.github.io). Isliye YAHAN
-                    // (sirf staging copy me) prefix ko staging-specific kar diya hai -
-                    // ab yeh sirf staging ki apni cache delete karega, live ka
-                    // "seoni-app-shell-v2" kabhi touch nahi hoga. Live app.js me yeh
-                    // line "seoni-app-" hi rahegi, kyunki wahan koi doosra "seoni-app-"
-                    // prefix wala cache exist hi nahi karta.
+                    // ITEM-10 PHASE-1 FIX (2026-09-16, STAGING COPY ONLY): purane
+                    // staging cache-naam ("seoni-app-shell-STAGING-v1") ke saath
+                    // upar wala "seoni-app-" prefix live ke "seoni-app-shell-v2"
+                    // AUR staging dono ko match kar raha tha (same origin,
+                    // akhileshpatidar-dotcom.github.io, isliye Refresh button
+                    // dabane se live ka cache bhi delete ho sakta tha). Fix ke
+                    // taur par staging ka cache-naam khud "seoni-staging-app-shell-v1"
+                    // rakha gaya (service-worker.js me) - yeh naam "seoni-app-"
+                    // prefix se shuru hi nahi hota. Isliye YAHAN (sirf staging copy
+                    // me) prefix ko bhi "seoni-staging-app-shell-" kar diya hai, jo
+                    // sirf staging ki apni cache match/delete karta hai, live ke
+                    // "seoni-app-shell-v2" ko kabhi touch nahi karta. Live app.js me
+                    // yeh line "seoni-app-" hi rahegi, kyunki wahan koi doosra
+                    // "seoni-app-" prefix wala cache exist hi nahi karta.
                     await Promise.all(keys.filter((key) => key.startsWith("seoni-staging-app-shell-")).map((key) => caches.delete(key)));
                 }
                 if ("serviceWorker" in navigator) {
