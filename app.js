@@ -3412,11 +3412,14 @@
                 listBox.innerHTML = `<div style="text-align:center; color:#991b1b; font-size:0.68rem;">Freeze script URL set nahi hai</div>`;
                 return;
             }
-            listBox.innerHTML = `<div style="text-align:center; color:#64748b; font-size:0.68rem;">SYNCING DATA... PLEASE WAIT<div class="app-sync-spinner"></div></div>`;
+            // Freeze admin list bhi baaki reports ke same shared progress UI se
+            // load hoti hai: message, round spinner, progress line aur percentage.
+            const progress = renderSyncingProgress(listBox, () => document.getElementById("freeze-admin-list") === listBox);
             try {
                 const parsed = await loadRemoteJson(`${revenueFreezeTrackingScriptUrl}?action=listFreezes`);
                 const freezes = Array.isArray(parsed?.freezes) ? parsed.freezes : [];
                 if (!freezes.length) {
+                    await progress.finish();
                     listBox.innerHTML = `<div style="text-align:center; color:#64748b; font-size:0.68rem;">Abhi tak koi freeze nahi hua</div>`;
                     return;
                 }
@@ -3436,6 +3439,8 @@
                         dcStatusByFreeze[f.freeze_id] = {};
                     }
                 }));
+
+                await progress.finish();
 
                 const allDcs = getAllDcNames();
                 listBox.innerHTML = freezes.map((f) => {
@@ -3479,6 +3484,7 @@
                     `;
                 }).join("");
             } catch (error) {
+                progress.stop();
                 listBox.innerHTML = `<div style="text-align:center; color:#991b1b; font-size:0.68rem;">List load nahi ho payi</div>`;
             }
         }
@@ -6471,16 +6477,21 @@
         // Isliye yahi standard text ab default label hai, aur baaki sabhi
         // call-sites (Mobile/Revenue/Freeze/SHMS/Pending List) bhi apna pehle
         // wala custom text hata kar isi ek jaisa text pass karte hain.
+        let syncingProgressSequence_ = 0;
+
         function renderSyncingProgress(cont, isStillValid, label = "SYNCING DATA... PLEASE WAIT", subLabel = "") {
+            // Each report gets its own IDs. Earlier, two reports loading at once
+            // could both find the same global ID and update the wrong progress bar.
+            const instanceId = `sync-progress-${++syncingProgressSequence_}`;
             cont.innerHTML = `
                 <div class="text-center py-10">
                     <p class="font-black text-slate-500" style="font-size:0.85rem;">${escapeHtml(label)}</p>
                     ${subLabel ? `<p class="font-bold text-slate-400" style="font-size:0.66rem; margin-top:3px;">${escapeHtml(subLabel)}</p>` : ""}
                     <div class="app-sync-spinner"></div>
                     <div style="max-width:220px; margin:14px auto 0; background:#e2e8f0; border-radius:999px; height:8px; overflow:hidden;">
-                        <div id="summary-sync-progress-fill" style="height:100%; width:2%; background:linear-gradient(90deg,#0d9488,#0f766e); border-radius:999px; transition:width 0.25s ease;"></div>
+                        <div id="${instanceId}-fill" style="height:100%; width:2%; background:linear-gradient(90deg,#0d9488,#0f766e); border-radius:999px; transition:width 0.25s ease;"></div>
                     </div>
-                    <p id="summary-sync-progress-text" class="font-bold text-slate-400" style="font-size:0.72rem; margin-top:6px;">2%</p>
+                    <p id="${instanceId}-text" class="font-bold text-slate-400" style="font-size:0.72rem; margin-top:6px;">2%</p>
                 </div>
             `;
             let percent = 2;
@@ -6491,8 +6502,8 @@
                     clearInterval(intervalId);
                     return;
                 }
-                const fill = document.getElementById("summary-sync-progress-fill");
-                const text = document.getElementById("summary-sync-progress-text");
+                const fill = cont.querySelector(`#${instanceId}-fill`);
+                const text = cont.querySelector(`#${instanceId}-text`);
                 if (!fill || !text) {
                     clearInterval(intervalId);
                     return;
@@ -6523,8 +6534,8 @@
                     finished = true;
                     clearInterval(intervalId);
                     if (!isStillValid()) return resolve();
-                    const fill = document.getElementById("summary-sync-progress-fill");
-                    const text = document.getElementById("summary-sync-progress-text");
+                    const fill = cont.querySelector(`#${instanceId}-fill`);
+                    const text = cont.querySelector(`#${instanceId}-text`);
                     if (fill && text) {
                         fill.classList.remove("sync-progress-pulse");
                         text.classList.remove("sync-progress-pulse");
