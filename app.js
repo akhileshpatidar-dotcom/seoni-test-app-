@@ -3146,10 +3146,14 @@
             // nahi chhedta - legacy sirf tab chalta hai jab reconciliation
             // backend available na ho (purana/redeploy-na-hua backend - capability
             // mismatch fallback).
-            if (paidInfo?.reconciled) {
+            // Reconciliation response me sirf matched/paid IVRS entries aati hain.
+            // Scope marker true ho aur current IVRS response-map me na ho, to woh
+            // authoritative UNPAID hai; use legacy cache path par bhejne se purani
+            // multi-row payment entries count ko dobara badha deti thi.
+            if (paidInfo?.reconciled || paidInfoByIvrs?.__reconciledScope === true) {
                 const bucketCategory = revenueCategoryList.includes(category) ? category : "OTHER";
                 if (!group.categories[bucketCategory]) group.categories[bucketCategory] = { paid: 0, unpaid: 0, paidAmount: 0, unpaidAmount: 0 };
-                const amount = Number(paidInfo.amount || 0);
+                const amount = Number(paidInfo?.amount || 0);
                 if (amount > 0) {
                     group.categories[bucketCategory].paid += 1;
                     group.categories[bucketCategory].paidAmount += amount;
@@ -5255,6 +5259,17 @@
             );
             if (reconciliation && reconciliation.supported) {
                 const paidInfoByDc = {};
+                getRevenueCategoryTargetDcs().forEach((dcName) => {
+                    const normalizedDc = normalizeDcName(dcName);
+                    if (!normalizedDc) return;
+                    const dcInfo = paidInfoByDc[normalizedDc] || {};
+                    Object.defineProperty(dcInfo, "__reconciledScope", {
+                        value: true,
+                        enumerable: false,
+                        configurable: false
+                    });
+                    paidInfoByDc[normalizedDc] = dcInfo;
+                });
                 reconciliation.byKey.forEach((info, key) => {
                     const sepIdx = key.indexOf("|");
                     if (sepIdx < 0) return;
