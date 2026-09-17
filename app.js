@@ -3,6 +3,7 @@
                 const sig = "Seoni Circle App - Original developer: Akhilesh Patidar (AE) - github.com/akhileshpatidar-dotcom/patidar-seoni-circle-app - Build signature: SC-AKP-2026";
                 console.log("%c" + sig, "color:#0d9488; font-weight:bold;");
                 window.__APP_SIGNATURE__ = sig;
+                window.__REVENUE_RECONCILIATION_BUILD__ = "2026-09-17-r4";
             } catch (e) {}
         })();
 
