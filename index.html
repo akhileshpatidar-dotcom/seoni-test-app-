@@ -2,29 +2,6 @@
 <html lang="hi">
 <head>
     <meta charset="UTF-8">
-    <!-- ITEM-10 PHASE-1 SAFETY PATCH (2026-09-16): defense-in-depth, sirf STAGING
-         copy me. app.js ka fetch/XHR gate + loadRevenueCollectionViaGviz() call-site
-         gate hi asli/mukhya suraksha hai (JS logic) - yeh CSP header sirf ek
-         doosri, browser-level safety-net hai agar wrapper me kabhi koi bug ho,
-         tab bhi browser khud production Google/Apps Script connection ko block
-         kar dega. "connect-src" fetch/XHR/etc targets restrict karta hai.
-         "script-src" CORRECTION (2026-09-16, USER-REQUESTED - CORRECTION 1) ke
-         through add kiya gaya hai: app.js ka Revenue module GViz/JSONP data
-         dynamic <script src="https://docs.google.com/..."> tag se laata hai -
-         yeh connect-src se cover NAHI hota (script loading connect-src me nahi,
-         script-src me governed hoti hai). Is naye "script-src" me: 'self'
-         (./app.js jaisi local scripts), 'unsafe-inline' (app ke 207+ existing
-         onclick="..." jaise inline handlers chalte rehne ke liye - koi inline
-         handler is patch me naya nahi joda gaya) aur cdnjs.cloudflare.com
-         (jspdf/xlsx libraries) allow hain; docs.google.com/script.google.com
-         is list me NAHI hai isliye GViz <script src> ab browser-level par bhi
-         block ho jaata hai. NOTE: iski wajah se is staging build me GPS location
-         lookup (nominatim.openstreetmap.org) aur Bijlee Bill Calculator
-         (billing.mpez.co.in) jaise unrelated external-fetch features bhi block
-         ho jayenge jab tak visual/Tailwind testing chal rahi hai - yeh sirf
-         Tailwind/mock testing ke liye staging hai, in doosre features ke liye
-         nahi. Live index.html me yeh tag bilkul nahi hai. -->
-    <meta http-equiv="Content-Security-Policy" content="connect-src 'self' https://script.google.com https://script.googleusercontent.com https://*.googleusercontent.com https://docs.google.com https://api.allorigins.win; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Seoni Circle App</title>
     <meta name="description" content="Seoni Circle App — Madhya Pradesh Electricity Department field staff ke liye revenue collection, meter reading aur stock management app.">
@@ -38,14 +15,7 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230d9488'/%3E%3Cpath d='M55 15 L30 55 H48 L42 85 L72 42 H52 Z' fill='%23ffffff'/%3E%3C/svg%3E">
     <link rel="manifest" href="./manifest.json">
     <link rel="apple-touch-icon" href="./icon-192.png">
-    <!-- ITEM-10 PHASE-1 PASS-2 (2026-09-16): Pass-1 me CDN + compiled CSS dono
-         saath load ho rahe the (safety fallback + side-by-side sanity check ke
-         liye) - user ne verify kar liya ki dono same dikhte hain, ab CDN
-         wali script line hata di gayi hai, sirf production-compiled
-         tailwind-generated.css hi load hoti hai (asli/final test - CDN ke
-         bina). Yeh sirf STAGING copy me hai, live index.html abhi tak
-         bilkul nahi chhua gaya hai. -->
-    <link rel="stylesheet" href="./tailwind-generated.css">
+    <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Righteous&family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
@@ -1826,8 +1796,6 @@
         </main>
     </div>
 
-    <!-- STAGING cache-buster: har reviewed reconciliation build ko sab devices par
-         ek hi app.js mile; purana service-worker/browser JS reuse na kare. -->
-    <script src="./app.js?v=20260917-freeze-light-r2"></script>
+    <script src="./app.js?v=20260917-freeze-light-live-r1"></script>
 </body>
 </html>

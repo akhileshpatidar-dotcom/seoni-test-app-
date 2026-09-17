@@ -3,296 +3,8 @@
                 const sig = "Seoni Circle App - Original developer: Akhilesh Patidar (AE) - github.com/akhileshpatidar-dotcom/patidar-seoni-circle-app - Build signature: SC-AKP-2026";
                 console.log("%c" + sig, "color:#0d9488; font-weight:bold;");
                 window.__APP_SIGNATURE__ = sig;
-                window.__REVENUE_RECONCILIATION_BUILD__ = "2026-09-17-r4";
             } catch (e) {}
         })();
-
-        // ============================================================================
-        // ITEM-10 PHASE-1 SAFETY PATCH (2026-09-16) — STAGING COPY ONLY.
-        // Live app.js me yeh poora block bilkul nahi hai — sirf yahi STAGING repo me.
-        //
-        // MAQSAD: staging par app khulne/report-screens dekhne/kisi bhi submit-jaisi
-        // action se PRODUCTION Google Sheets/Apps Script par ek bhi real request na
-        // jaaye (na GET na POST) — jab tak uska apna alag test-backend na ho aur
-        // explicitly mock registry me register na kiya jaaye. Neeche diya poora
-        // gate sirf browser ke 2 network primitives (fetch, XMLHttpRequest) par
-        // lagta hai — isse app.js ke baaki 235+ existing functions (submit/report/
-        // admin/auto-load sab) me EK LINE bhi badalni nahi padi, sab apna kaam
-        // waise hi karte hain, bas unki asli request kabhi network tak jaati nahi.
-        // ============================================================================
-        const STAGING_SAFE_MODE = true;
-
-        // Production Google domains — Apps Script exec URLs, published-CSV export
-        // URLs, aur Apps Script ke response-redirect wali googleusercontent.com
-        // domain (generic match — sirf "script." wali nahi, har googleusercontent.com
-        // sub-path bhi, kyunki Google kabhi is domain ke alag paths bhi
-        // Apps-Script-response ke liye use karta hai).
-        const STAGING_BLOCKED_HOST_SUBSTRINGS_ = [
-            "script.google.com",
-            "script.googleusercontent.com",
-            "googleusercontent.com",
-            "docs.google.com"
-        ];
-        const STAGING_TEST_REVENUE_URL_ = "https://script.google.com/macros/s/AKfycbw6fndSDtCG9o0h2edlGPG43sirRHBAa5jTVmiT5yUX7L7gC1f6HcIkaiLTZH4joZaA/exec";
-
-        function stagingIsAllowedTestRevenueGet_(rawUrl, method) {
-            return String(method || "GET").toUpperCase() === "GET"
-                && String(rawUrl || "").split("?")[0] === STAGING_TEST_REVENUE_URL_;
-        }
-
-        function stagingIsAllowedRevenueMasterGet_(rawUrl, method) {
-            if (String(method || "GET").toUpperCase() !== "GET") return false;
-            let candidate = String(rawUrl || "");
-            try { candidate = decodeURIComponent(candidate); } catch (_) {}
-            try {
-                const configuredUrls = Object.values(revenueCollectionCsvUrls || {});
-                Object.values(divisionConfigs || {}).forEach((division) => {
-                    (division.dcs || []).forEach((dc) => {
-                        if (dc && dc.csvUrl) configuredUrls.push(dc.csvUrl);
-                    });
-                });
-                return configuredUrls.some((configuredUrl) => {
-                    const base = String(configuredUrl || "").split("&t=")[0];
-                    return !!base && candidate.includes(base);
-                });
-            } catch (_) {
-                return false;
-            }
-        }
-
-        function stagingIsAllowedRevenueTestRead_(rawUrl, method) {
-            return stagingIsAllowedTestRevenueGet_(rawUrl, method)
-                || stagingIsAllowedRevenueMasterGet_(rawUrl, method);
-        }
-
-        // MOCK REGISTRY: key format "<exact backend base-URL>::<action>" un GET
-        // calls ke liye jo "?action=XYZ" query param bhejte hain (Apps Script ke
-        // sabhi doGet handlers) — module-naam se NAHI, kyunki kai modules ka action
-        // naam common hai ("getSummary" SHMS/Peak Load/Feeder/STM/Mobile Update/VR
-        // sabme hai) lekin har module ka base exec-URL unique hai. CSV/no-action
-        // wali GET requests (published-sheet CSV export, action param nahi hota)
-        // ke liye key format "<poori normalized URL, timestamp/cache-buster param
-        // hataakar>::GET" hai. Abhi yeh khaali hai — jab tak SHMS (ya koi aur
-        // module) ki entry yahan explicitly daali na jaaye, uska GET bhi block
-        // rahega (yahi "zero production requests" proof ka aadhar hai).
-        window.STAGING_MOCK_RESPONSES = window.STAGING_MOCK_RESPONSES || {};
-
-        function stagingNormalizeUrlForMockKey_(rawUrl) {
-            try {
-                const u = new URL(rawUrl, window.location.href);
-                // CORRECTION (2026-09-16, USER-REQUESTED): "gid" ko yahan se
-                // DELETE mat karo - yeh timestamp jaisa cache-buster nahi hai,
-                // balki Sheet TAB identifier hai (ek hi spreadsheet ke alag-alag
-                // gid=0 / gid=1334246662 alag data-source/tab hote hain). Isko
-                // strip karne se do alag tabs ka mock-key collide ho jaata aur
-                // galat report data serve hota. Sirf genuinely volatile params
-                // (jaise "t" = Date.now() cache-buster) yahan remove hote hain.
-                u.searchParams.delete("t");        // cache-buster (Date.now())
-                return u.origin + u.pathname + (u.search ? "?" + u.searchParams.toString() : "");
-            } catch (_) {
-                return String(rawUrl || "").split("&t=")[0];
-            }
-        }
-
-        function stagingBuildMockKey_(rawUrl) {
-            let action = "";
-            try {
-                const u = new URL(rawUrl, window.location.href);
-                action = u.searchParams.get("action") || "";
-            } catch (_) {}
-            if (action) {
-                let base = String(rawUrl).split("?")[0];
-                return `${base}::${action}`;
-            }
-            return `${stagingNormalizeUrlForMockKey_(rawUrl)}::GET`;
-        }
-
-        // Ek hi URL string do baar check hoti hai: (1) jaisi hai waisi (raw), (2)
-        // decodeURIComponent kiya hua roop — kyunki kuch fallback candidates
-        // (jaise api.allorigins.win CORS-proxy) asli docs.google.com URL ko apne
-        // "?url=<encoded>" query-param ke ANDAR chhupa dete hain. Sirf apni
-        // hostname dekhne se yeh proxy-wrapped case bilkul miss ho jaata (proxy
-        // khud google.com nahi hai) — isliye poori URL string (encoded + decoded
-        // dono) me substring-match karte hain.
-        function stagingIsProductionUrl_(rawUrl) {
-            const raw = String(rawUrl || "");
-            let decoded = raw;
-            try { decoded = decodeURIComponent(raw); } catch (_) {}
-            return STAGING_BLOCKED_HOST_SUBSTRINGS_.some((host) => raw.includes(host) || decoded.includes(host));
-        }
-
-        let stagingLastBlockToastAt_ = 0;
-        function stagingLogBlockedRequest_(method, url, via) {
-            // Poora detail hamesha console me jaata hai (Network-tab jaisi
-            // visibility chahiye to yahan milegi) — screen par toast sirf har 4
-            // second me ek baar (flood na ho).
-            console.warn(`[STAGING_SAFE_MODE] ${via} blocked: ${method} ${url}`);
-            const now = Date.now();
-            if (now - stagingLastBlockToastAt_ > 4000) {
-                stagingLastBlockToastAt_ = now;
-                try {
-                    if (typeof showToast === "function") {
-                        showToast("⚠️ TEST BACKEND NOT CONFIGURED — production request blocked (staging safe mode)", true);
-                    }
-                } catch (_) {}
-            }
-        }
-
-        // --- FETCH PATCH ---
-        // input ".js Request object" ya plain string dono ho sakta hai (fetch()
-        // dono accept karta hai) — dono se URL aur method sahi nikaalna zaroori
-        // hai, warna Request-object wali koi bhi future call gate se bach sakti hai.
-        const __stagingOrigFetch = window.fetch ? window.fetch.bind(window) : null;
-        if (__stagingOrigFetch) {
-            window.fetch = function (input, init) {
-                let url = "";
-                let method = "GET";
-                try {
-                    if (typeof input === "string") {
-                        url = input;
-                    } else if (input && typeof input === "object") {
-                        url = input.url || "";
-                        method = input.method || method;
-                    }
-                    if (init && init.method) method = init.method;
-                } catch (_) {}
-                method = String(method || "GET").toUpperCase();
-
-                if (STAGING_SAFE_MODE && stagingIsProductionUrl_(url)) {
-                    if (method !== "GET") {
-                        // Requirement: koi bhi non-GET (POST/PUT/DELETE/PATCH)
-                        // production URL par KABHI nahi jaati — koi allowlist
-                        // mechanism yahan hai hi nahi.
-                        stagingLogBlockedRequest_(method, url, "fetch");
-                        return Promise.reject(new Error("STAGING_SAFE_MODE: production write blocked"));
-                    }
-                    if (stagingIsAllowedRevenueTestRead_(url, method)) {
-                        return __stagingOrigFetch(input, init);
-                    }
-                    const mockKey = stagingBuildMockKey_(url);
-                    const mock = window.STAGING_MOCK_RESPONSES[mockKey];
-                    if (mock !== undefined) {
-                        const body = typeof mock === "string" ? mock : JSON.stringify(mock);
-                        return Promise.resolve(new Response(body, { status: 200, headers: { "Content-Type": "application/json" } }));
-                    }
-                    stagingLogBlockedRequest_(method, url, "fetch");
-                    return Promise.reject(new Error("STAGING_SAFE_MODE: TEST BACKEND NOT CONFIGURED"));
-                }
-                return __stagingOrigFetch(input, init);
-            };
-        }
-
-        // --- XMLHttpRequest PATCH ---
-        // xhrGetText() (loadRemoteText ka fallback path) raw XHR istemal karta
-        // hai, isliye sirf fetch patch karna kaafi nahi — XHR ko bhi isi tarah
-        // gate karna zaroori hai, warna GET wale fallback attempts se production
-        // tak pahunch sakti thi.
-        const __StagingOrigXHROpen = XMLHttpRequest.prototype.open;
-        const __StagingOrigXHRSend = XMLHttpRequest.prototype.send;
-        XMLHttpRequest.prototype.open = function (method, url) {
-            try {
-                this.__stagingMethod = String(method || "GET").toUpperCase();
-                this.__stagingUrl = url;
-                this.__stagingBlocked = STAGING_SAFE_MODE
-                    && stagingIsProductionUrl_(url)
-                    && !stagingIsAllowedRevenueTestRead_(url, this.__stagingMethod);
-            } catch (_) {
-                this.__stagingBlocked = false;
-            }
-            return __StagingOrigXHROpen.apply(this, arguments);
-        };
-        XMLHttpRequest.prototype.send = function (body) {
-            if (this.__stagingBlocked) {
-                stagingLogBlockedRequest_(this.__stagingMethod, this.__stagingUrl, "XHR");
-                const xhr = this;
-                // Asli request kabhi bheji nahi jaati. Ek microtask-jaisi delay ke
-                // baad ek REAL "error" Event dispatch karte hain — XMLHttpRequest
-                // EventTarget hai, isliye yeh dono tarah ke listener ko trigger
-                // karega: (a) xhr.onerror = fn wali property-style assignment
-                // (jaisa xhrGetText me hai), (b) xhr.addEventListener("error", fn)
-                // wali standard style bhi. Dono cases me Promise turant reject
-                // hoti hai, kabhi pending nahi rehti.
-                setTimeout(function () {
-                    try { xhr.dispatchEvent(new Event("error")); } catch (_) {}
-                }, 0);
-                return;
-            }
-            return __StagingOrigXHRSend.apply(this, arguments);
-        };
-
-        // --- localStorage / sessionStorage NAMESPACE ISOLATION ---
-        // Cache Storage jaisa hi issue: localStorage/sessionStorage bhi
-        // ORIGIN-scoped hote hain, path-scoped nahi - staging aur live same origin
-        // (akhileshpatidar-dotcom.github.io) share karte hain. Neeche wala
-        // top-level "const localStorage = ..." (classic <script>, koi module
-        // nahi) is poore app.js ke BAAD wale saare "localStorage.xxx" calls (77
-        // jagah) ko - BINA unme se kisi ko chhue - is wrapper se guzar deta hai.
-        // Har key ko "STAGING_" prefix milta hai, isliye staging kabhi live ki
-        // asli keys padh/likh/delete nahi karta, aur live par staging ka koi asar
-        // nahi padta.
-        function stagingMakeNamespacedStorage_(real, prefix) {
-            function snapshotKeys() {
-                // Object.keys(real) par nirbhar nahi - Storage interface ka
-                // sahi/spec-wala tareeka real.length + real.key(i) hai.
-                const keys = [];
-                for (let i = 0; i < real.length; i++) {
-                    const k = real.key(i);
-                    if (k !== null && k.indexOf(prefix) === 0) keys.push(k);
-                }
-                return keys;
-            }
-            return {
-                getItem: function (k) { return real.getItem(prefix + k); },
-                setItem: function (k, v) { return real.setItem(prefix + k, v); },
-                removeItem: function (k) { return real.removeItem(prefix + k); },
-                clear: function () {
-                    // SIRF STAGING_ prefix wali keys hatengi - underlying live
-                    // storage kabhi poora clear nahi hota.
-                    snapshotKeys().forEach(function (k) { real.removeItem(k); });
-                },
-                key: function (i) {
-                    const k = snapshotKeys()[i];
-                    return k === undefined ? null : k.slice(prefix.length);
-                },
-                get length() { return snapshotKeys().length; }
-            };
-        }
-        const __stagingRealLocalStorage = window.localStorage;
-        const __stagingRealSessionStorage = window.sessionStorage;
-        const localStorage = STAGING_SAFE_MODE
-            ? stagingMakeNamespacedStorage_(__stagingRealLocalStorage, "STAGING_")
-            : __stagingRealLocalStorage;
-        const sessionStorage = STAGING_SAFE_MODE
-            ? stagingMakeNamespacedStorage_(__stagingRealSessionStorage, "STAGING_")
-            : __stagingRealSessionStorage;
-        // ============================================================================
-        // END ITEM-10 PHASE-1 SAFETY PATCH (CORE) — is line ke baad se app.js
-        // waisa hi hai jaisa live me hai, SIVAAY in chhoti, alag se clearly-marked
-        // jagahon ke: (1) IndexedDB DB-naam me 2 jagah "-STAGING" suffix, neeche
-        // unke apne constant-definition line par; (2) "ITEM-10 PHASE-1 STOCK
-        // SYNTHETIC MOCK" block, stockMaterialsCsvUrl declaration ke turant baad;
-        // (3) "ITEM-10 PHASE-1 SHMS SYNTHETIC MOCK" block, shmsSubmitScriptUrl/
-        // shmsCsvUrl declaration ke turant baad. (2) aur (3) dono sirf
-        // STAGING_MOCK_RESPONSES registry me apne-apne module ke GET entries
-        // daalte hain - koi gate/logic nahi badalte.
-        //
-        // (4) "ITEM-10 STOCK EMPTY/ERROR/STALE FIX" - yeh teeno (2)/(3) jaisa
-        // "staging-only" nahi hai, yeh ek asli BUSINESS-LOGIC correctness fix hai
-        // (Stock module me purana/stale/demo data "current" jaisa dikhne wala bug,
-        // mock testing se hi expose hua tha). Isliye single confined block nahi -
-        // 4 jagah bikhra hai: (a) stockMaterialsStatus/stockMaterialsStale
-        // declaration, stockMaterials array ke turant baad; (b) poora
-        // loadStockMaterialsData() function replaced + naya getStockStatusBannerHtml_()
-        // helper, dono saath; (c) renderStockDashboard() ke innerHTML ke top par
-        // banner; (d) renderMaterialList()/renderLiveStock()/renderLowStock()/
-        // renderStockReport() - char render functions me banner + empty-state
-        // handling. Yeh fix abhi sirf STAGING copy me hai (mock testing ke liye
-        // zaroori tha), LIVE me nahi gaya hai - alag se approval milne ke baad hi
-        // live me jaayega. CSP/fetch-XHR-GViz gates/storage-cache isolation/Stock
-        // POST-submit logic/SHMS mock/kisi doosre module ko yeh fix bilkul nahi
-        // chhuta.
-        // ============================================================================
-
 
         const divisionConfigs = {
             "DIVISION SEONI": {
@@ -407,7 +119,7 @@
         const vehicleReadingCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQIv4JMsV1n8vy9cJ0o2UaS45-fh_c3n9u-rqwXjuCZWDNZNRaJlgUKnT4gtP3_kTtpCrQvrTcojWQo/pub?output=csv";
         const vehicleReadingSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbyqG_i3xzySgBJETTnmEo5WhZV_51eaXex_0-vIWhmCqdWNF0Y2Uar6wZPdgjDPBVmi/exec";
         const vehicleReadingVehicles = ["407- MP22ZB6089", "BOLERO- MP22ZC1591", "407- MP22G4316", "CAMPER- MP22G4342"];
-        const revenueCollectionSubmitScriptUrl = STAGING_TEST_REVENUE_URL_;
+        const revenueCollectionSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbzaimPwzUYELgmujpaBbfByy0BcjOERA8e0mslNdbH5uUw2L6L24785obmdcpcDOc53Ww/exec";
         const revenueOfflineQueueStorageKey = "seoni-revenue-offline-submit-queue-v1";
         // Meeter Cheking (2026-09-10 addition) - abhi sirf SEONI (T) DC ke liye live hai.
         // Forward-compatible design (user requirement): future me kisi aur DC me yeh feature
@@ -621,7 +333,7 @@
         let staffAdminCurrentAccount = null;
         const revenueUploadedPaidStorageKey = "seoni-revenue-uploaded-paid-cache-v2";
         const revenueCategoryRawPaymentStorageKey = "seoni-revenue-category-raw-payment-rows-v2";
-        const revenueCategoryRawPaymentDbName = "seoni-revenue-category-payment-db-v2-STAGING";
+        const revenueCategoryRawPaymentDbName = "seoni-revenue-category-payment-db-v2";
         const revenueCategoryRawPaymentStoreName = "dc-payment-rows";
         const revenuePaidUploadMetaStorageKey = "seoni-revenue-paid-upload-meta-v1";
         const feederCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT8bBAXJZhlwS_giGXBlS6rDXJ_auZfWZzNVPQaBnD09jB_m7jnrqeGGX5WP8V2jOD_WL90_KQ2pJa4/pub?output=csv";
@@ -3007,23 +2719,13 @@
         function getRevenueMasterRowsForDc(dcName) {
             const normalizedDc = normalizeDcName(dcName);
             const dcKey = getRevenueCollectionDcKey(dcName);
-            const revenueRows = (revenueCollectionRowsByDc[dcKey] || [])
-                .filter((row) => normalizeRevenueIvrs(row.ivrsNo))
-                .map((row) => ({ ...row, dcName: normalizedDc }));
+            const revenueRows = revenueCollectionRowsByDc[dcKey] || [];
             const consumerRows = getConsumerRows(dcName)
                 .map(mapRevenueConsumerRow)
                 .filter((row) => normalizeRevenueIvrs(row.ivrsNo))
                 .map((row) => ({ ...row, dcName: normalizedDc }));
-
-            // Revenue reconciliation reports ka authoritative Master wahi fresh
-            // Revenue CSV hai jo strict loader ne load kiya. Iske saath Mobile/
-            // consumer cache merge karne par report ka total navigation-history
-            // par nirbhar ho raha tha (CHHAPARA-2 me 49 extra consumers). Revenue
-            // rows available hon to unhi ko use karo; consumerRows sirf legacy/
-            // offline fallback hain jab Revenue Master bilkul available na ho.
-            const sourceRows = revenueRows.length ? revenueRows : consumerRows;
             const mergedByIvrs = new Map();
-            sourceRows.forEach((row) => {
+            [...consumerRows, ...revenueRows].forEach((row) => {
                 const ivrs = normalizeRevenueIvrs(row.ivrsNo);
                 if (!ivrs) return;
                 const existing = mergedByIvrs.get(ivrs) || {};
@@ -3065,39 +2767,12 @@
         // hai - sirf un call-site par jo Revenue Category reconciliation reports
         // (Category Wise, HQ/Village Wise, Target vs Achievement, Top Defaulters)
         // use karte hain.
-        const revenueCategoryMasterFreshAt_ = new Map();
-        const revenueCategoryMasterFreshInFlight_ = new Map();
-        const REVENUE_CATEGORY_MASTER_FRESH_TTL_MS = 60000;
-
         async function ensureRevenueCategoryMasterDataLoadedStrict_(dcNames) {
             const list = Array.from(new Set((dcNames || []).map((name) => normalizeDcName(name)).filter(Boolean)));
-            const now = Date.now();
-            const results = await Promise.all(list.map(async (dcName) => {
-                const lastFreshAt = Number(revenueCategoryMasterFreshAt_.get(dcName) || 0);
-                if (now - lastFreshAt < REVENUE_CATEGORY_MASTER_FRESH_TTL_MS && getRevenueMasterRowsForDc(dcName).length) {
-                    return { dcName, ok: true };
-                }
-                let pending = revenueCategoryMasterFreshInFlight_.get(dcName);
-                if (!pending) {
-                    pending = (async () => {
-                        const rows = await loadRevenueCollectionData(dcName, true, { requireRemote: true });
-                        if (Array.isArray(rows) && rows.length) revenueCategoryMasterFreshAt_.set(dcName, Date.now());
-                        return rows;
-                    })();
-                    revenueCategoryMasterFreshInFlight_.set(dcName, pending);
-                }
-                try {
-                    const rows = await pending;
-                    return { dcName, ok: Array.isArray(rows) && rows.length > 0 };
-                } finally {
-                    if (revenueCategoryMasterFreshInFlight_.get(dcName) === pending) {
-                        revenueCategoryMasterFreshInFlight_.delete(dcName);
-                    }
-                }
-            }));
-            const failedDcs = results.filter((result) => !result.ok).map((result) => result.dcName);
+            await ensureRevenueCategoryMasterDataLoaded(list);
+            const failedDcs = list.filter((dcName) => !getConsumerRows(dcName).length);
             if (failedDcs.length) {
-                const error = new Error(`Fresh Master consumer data load nahi ho paya in DC ke liye: ${failedDcs.join(", ")}. Purana cached data use karke report nahi banayi gayi.`);
+                const error = new Error(`Master consumer data load nahi ho paya in DC ke liye: ${failedDcs.join(", ")}`);
                 error.failedDcs = failedDcs;
                 throw error;
             }
@@ -3157,14 +2832,10 @@
             // nahi chhedta - legacy sirf tab chalta hai jab reconciliation
             // backend available na ho (purana/redeploy-na-hua backend - capability
             // mismatch fallback).
-            // Reconciliation response me sirf matched/paid IVRS entries aati hain.
-            // Scope marker true ho aur current IVRS response-map me na ho, to woh
-            // authoritative UNPAID hai; use legacy cache path par bhejne se purani
-            // multi-row payment entries count ko dobara badha deti thi.
-            if (paidInfo?.reconciled || paidInfoByIvrs?.__reconciledScope === true) {
+            if (paidInfo?.reconciled) {
                 const bucketCategory = revenueCategoryList.includes(category) ? category : "OTHER";
                 if (!group.categories[bucketCategory]) group.categories[bucketCategory] = { paid: 0, unpaid: 0, paidAmount: 0, unpaidAmount: 0 };
-                const amount = Number(paidInfo?.amount || 0);
+                const amount = Number(paidInfo.amount || 0);
                 if (amount > 0) {
                     group.categories[bucketCategory].paid += 1;
                     group.categories[bucketCategory].paidAmount += amount;
@@ -3741,9 +3412,7 @@
                 listBox.innerHTML = `<div style="text-align:center; color:#991b1b; font-size:0.68rem;">Freeze script URL set nahi hai</div>`;
                 return;
             }
-            // Keep the Freeze admin loader on the same visual pattern as every
-            // report loader (spinner + animated line + percentage).
-            listBox.innerHTML = getStandardSyncingMarkup_();
+            listBox.innerHTML = `<div style="text-align:center; color:#64748b; font-size:0.68rem;">SYNCING DATA... PLEASE WAIT<div class="app-sync-spinner"></div></div>`;
             try {
                 const parsed = await loadRemoteJson(`${revenueFreezeTrackingScriptUrl}?action=listFreezes`);
                 const freezes = Array.isArray(parsed?.freezes) ? parsed.freezes : [];
@@ -4326,7 +3995,7 @@
                     console.log("[FreezeReport] step2 calling fetchRevenueFreezeSnapshotRowsForScope", active.freeze_id, fetchCategory); // DIAGNOSTIC (2026-09-13, temp)
                     const { rows, dcStatusMap } = await fetchRevenueFreezeSnapshotRowsForScope(active.freeze_id, fetchCategory);
                     console.log("[FreezeReport] step3 snapshot done, rows.length =", rows.length, "dcStatusMap =", dcStatusMap); // DIAGNOSTIC (2026-09-13, temp)
-                    await warmRevenueCategoryUploadedPaidCache();
+                    await warmRevenueFreezePaidSummaryCache_();
                     console.log("[FreezeReport] step4 warmCache done"); // DIAGNOSTIC (2026-09-13, temp)
                     lastRevenueProgressFreezeResult = { active, rows, dcStatusMap };
                 } else {
@@ -4854,7 +4523,7 @@
                 return `${categorySelectHtml}<div style="text-align:center; color:#64748b; font-size:0.72rem; font-weight:800; padding:20px 0;">Upar diye gaye dropdown se report type chunein.</div>`;
             }
             if (progressFreezeLoading || !lastRevenueProgressFreezeResult) {
-                return `${categorySelectHtml}${getStandardSyncingMarkup_()}`;
+                return `${categorySelectHtml}<div style="text-align:center; font-size:0.72rem; font-weight:900; color:#1d4ed8; padding:20px 0;">SYNCING DATA... PLEASE WAIT<div class="app-sync-spinner"></div></div>`;
             }
             const data = computeRevenueFreezeReportData();
             if (!data || data.error) {
@@ -5180,6 +4849,70 @@
             return fetchUploadedPaidEntriesWithRetry_(dcName, attempts);
         }
 
+        // Freeze report-only lightweight sync. The normal Revenue reports keep
+        // using their existing category endpoint unchanged. This endpoint omits
+        // PAYMENT ROWS JSON and tariff parsing because Freeze status needs only
+        // aggregate amount/date for each unique DC+IVRS.
+        const REVENUE_FREEZE_PAID_BATCH_SIZE = 6;
+        const revenueFreezePaidCacheWarmedAt_ = {};
+        const REVENUE_FREEZE_PAID_CACHE_TTL_MS = 60000;
+        async function fetchRevenueFreezePaidSummaryBatch_(dcNames, attempts = 2) {
+            const names = Array.from(new Set((dcNames || []).map(normalizeDcName).filter(Boolean)));
+            if (!names.length) return { status: "success", scope_mode: "batch", requested_dc_names: [], entries: [] };
+            for (let attempt = 1; attempt <= attempts; attempt++) {
+                const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 90000);
+                try {
+                    const parsed = await withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
+                        const url = `${revenueCollectionSubmitScriptUrl}?action=getFreezePaidSummary&dc_names=${encodeURIComponent(names.join(","))}&t=${Date.now()}`;
+                        const response = await fetch(url, controller ? { signal: controller.signal } : {});
+                        return await response.json();
+                    });
+                    const returnedNames = Array.isArray(parsed?.requested_dc_names)
+                        ? parsed.requested_dc_names.map(normalizeDcName).filter(Boolean).sort()
+                        : [];
+                    const expectedNames = names.slice().sort();
+                    const exactScope = returnedNames.length === expectedNames.length
+                        && returnedNames.every((name, index) => name === expectedNames[index]);
+                    if (parsed?.status === "success" && parsed.scope_mode === "batch"
+                        && exactScope && Array.isArray(parsed.entries)) return parsed;
+                } catch (_) {} finally {
+                    clearTimeout(timer);
+                }
+                if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 800));
+            }
+            return null;
+        }
+
+        async function warmRevenueFreezePaidSummaryCache_() {
+            const targetDcs = Array.from(new Set(getRevenueFreezeTargetDcs().map(normalizeDcName).filter(Boolean)));
+            const now = Date.now();
+            const pendingDcs = targetDcs.filter((dcName) => now - (revenueFreezePaidCacheWarmedAt_[dcName] || 0) > REVENUE_FREEZE_PAID_CACHE_TTL_MS);
+            if (!pendingDcs.length) return;
+            const batches = [];
+            for (let i = 0; i < pendingDcs.length; i += REVENUE_FREEZE_PAID_BATCH_SIZE) {
+                batches.push(pendingDcs.slice(i, i + REVENUE_FREEZE_PAID_BATCH_SIZE));
+            }
+            let batchFailed = false;
+            await runWithConcurrencyLimit_(batches, 2, async (batchDcs) => {
+                const parsed = await fetchRevenueFreezePaidSummaryBatch_(batchDcs);
+                if (!parsed) { batchFailed = true; return; }
+                const rowsByDc = {};
+                parsed.entries.forEach((row) => {
+                    const dcName = normalizeDcName(getRevenueUploadedPaidRowDcName(row));
+                    if (!dcName) return;
+                    if (!rowsByDc[dcName]) rowsByDc[dcName] = [];
+                    rowsByDc[dcName].push(row);
+                });
+                batchDcs.forEach((dcName) => {
+                    saveRevenueUploadedPaidEntriesLocalBulk(rowsByDc[dcName] || [], dcName, true);
+                    revenueFreezePaidCacheWarmedAt_[dcName] = Date.now();
+                });
+            });
+            // Old/not-yet-deployed backend: retain the existing proven behavior.
+            if (batchFailed) await warmRevenueCategoryUploadedPaidCache();
+        }
+
         // Ek saath sabhi DC ka fetch chalane (Promise.all) ki jagah, ek chhoti si
         // concurrency-limited "pool" - ek time par sirf `limit` (5) DC ka request
         // Apps Script ko jaata hai, baki queue me wait karte hain. Isse Apps Script
@@ -5267,22 +5000,9 @@
             // List, Non-Payee 3M/6M/Since-Connection, Top Defaulters - inn sabhi
             // reports ka apna khud ka koi code yahan CHHUA nahi gaya) bilkul
             // unchanged rehte hue bhi sahi kaam karte rahein.
-            const reconciliation = revenueCategoryReconciliationCache_.get(
-                revenueCategoryReconciliationCacheKey_(mode, filterValue, getRevenueCategoryTargetDcs())
-            );
+            const reconciliation = revenueCategoryReconciliationCache_.get(`${mode}|${filterValue}`);
             if (reconciliation && reconciliation.supported) {
                 const paidInfoByDc = {};
-                getRevenueCategoryTargetDcs().forEach((dcName) => {
-                    const normalizedDc = normalizeDcName(dcName);
-                    if (!normalizedDc) return;
-                    const dcInfo = paidInfoByDc[normalizedDc] || {};
-                    Object.defineProperty(dcInfo, "__reconciledScope", {
-                        value: true,
-                        enumerable: false,
-                        configurable: false
-                    });
-                    paidInfoByDc[normalizedDc] = dcInfo;
-                });
                 reconciliation.byKey.forEach((info, key) => {
                     const sepIdx = key.indexOf("|");
                     if (sepIdx < 0) return;
@@ -6751,17 +6471,6 @@
         // Isliye yahi standard text ab default label hai, aur baaki sabhi
         // call-sites (Mobile/Revenue/Freeze/SHMS/Pending List) bhi apna pehle
         // wala custom text hata kar isi ek jaisa text pass karte hain.
-        function getStandardSyncingMarkup_() {
-            return `<div class="text-center py-10">
-                <p class="font-black text-slate-500" style="font-size:0.85rem;">SYNCING DATA... PLEASE WAIT</p>
-                <div class="app-sync-spinner"></div>
-                <div style="max-width:220px; margin:14px auto 0; background:#e2e8f0; border-radius:999px; height:8px; overflow:hidden;">
-                    <div class="sync-static-progress-fill" style="height:100%; width:65%; background:linear-gradient(90deg,#0d9488,#0f766e); border-radius:999px;"></div>
-                </div>
-                <p class="font-bold text-slate-400" style="font-size:0.72rem; margin-top:6px;">SYNCING...</p>
-            </div>`;
-        }
-
         function renderSyncingProgress(cont, isStillValid, label = "SYNCING DATA... PLEASE WAIT", subLabel = "") {
             cont.innerHTML = `
                 <div class="text-center py-10">
@@ -7994,7 +7703,7 @@
                     // sakti thi. Ab sirf isi app ki apni cache ("seoni-app-"
                     // prefix wali, service-worker.js ke CACHE_VERSION se match)
                     // delete hoti hai.
-                    await Promise.all(keys.filter((key) => key.startsWith("seoni-staging-app-shell-")).map((key) => caches.delete(key)));
+                    await Promise.all(keys.filter((key) => key.startsWith("seoni-app-")).map((key) => caches.delete(key)));
                 }
                 if ("serviceWorker" in navigator) {
                     const reg = await navigator.serviceWorker.getRegistration();
@@ -15446,20 +15155,6 @@
             return normalizeLookupValue(dcName || "");
         }
 
-        // Revenue Master URL ka primary map kuch DC tak hi simit hai. Division
-        // configuration me jo existing per-DC csvUrl diya hai, use fallback ke
-        // roop me lene se Division report kisi valid DC (jaise ADEGAON) par
-        // bina wajah fail nahi hoti. Koi naya source/logic add nahi hota.
-        function getRevenueCollectionCsvUrl_(dcName = activeDC) {
-            const dcKey = getRevenueCollectionDcKey(dcName);
-            if (revenueCollectionCsvUrls[dcKey]) return revenueCollectionCsvUrls[dcKey];
-            for (const division of Object.values(divisionConfigs || {})) {
-                const match = (division.dcs || []).find((dc) => getRevenueCollectionDcKey(dc.name) === dcKey);
-                if (match && match.csvUrl) return match.csvUrl;
-            }
-            return "";
-        }
-
         // SEONI (T) DC ke liye request: underlying data column same rehta hai
         // (HQ NAME / VILLAGE), sirf iske Revenue reports me DISPLAY label alag
         // dikhna hai - "HQ Name" ki jagah "Name of Staff", "Village" ki jagah
@@ -15649,11 +15344,11 @@
             };
         }
 
-        async function loadRevenueCollectionData(dcName = activeDC, forceRefresh = false, options = null) {
+        async function loadRevenueCollectionData(dcName = activeDC, forceRefresh = false) {
             const dcKey = getRevenueCollectionDcKey(dcName);
             if (!forceRefresh && revenueCollectionLoadedByDc[dcKey]) return revenueCollectionRowsByDc[dcKey] || [];
 
-            const csvUrl = getRevenueCollectionCsvUrl_(dcName);
+            const csvUrl = revenueCollectionCsvUrls[dcKey];
             const cacheKey = `seoni-revenue-collection-csv-v5-${dcKey}`;
 
             if (!forceRefresh) {
@@ -15724,12 +15419,6 @@
                     } catch (_) {}
                 }
             }
-
-            // Revenue reconciliation reports ko exact/current Master chahiye. Unke
-            // strict caller me remote CSV ke fail hone par purana consumer/cache
-            // fallback silently accept nahi karte; normal callers ka purana
-            // fallback behaviour bilkul unchanged rehta hai.
-            if (options && options.requireRemote) return [];
 
             let mobileUpdateRows = getConsumerRows(dcName);
             if (!mobileUpdateRows.length) mobileUpdateRows = await ensureDcDataLoaded(dcName);
@@ -20618,20 +20307,7 @@
         // yeh code chhoo tak nahi raha.
         // =====================================================================
         const revenueCategoryReconciliationCache_ = new Map();
-        const revenueCategoryReconciliationInFlight_ = new Map();
         const REVENUE_CATEGORY_RECONCILIATION_TTL_MS = 60000;
-
-        function revenueCategoryReconciliationDcList_(dcNames) {
-            return Array.from(new Set((dcNames || [])
-                .map((dcName) => normalizeDcName(dcName))
-                .filter(Boolean)))
-                .sort((a, b) => a.localeCompare(b));
-        }
-
-        function revenueCategoryReconciliationCacheKey_(mode, periodValue, dcNames) {
-            const normalizedMode = mode === "MONTHLY" ? "MONTHLY" : "DAILY";
-            return `${revenueCategoryReconciliationDcList_(dcNames).join(",")}|${normalizedMode}|${String(periodValue || "").trim()}`;
-        }
 
         function revenueReconciliationPeriodParams_(mode, periodValue) {
             const periodMode = mode === "MONTHLY" ? "month" : "date";
@@ -20667,11 +20343,7 @@
                                 if (attempt < 2) { await new Promise((resolve) => setTimeout(resolve, 600 * attempt)); continue; }
                                 return { ok: false, dcs: failedInResponse };
                             }
-                            return {
-                                ok: true,
-                                entries: Array.isArray(parsed.entries) ? parsed.entries : [],
-                                ambiguousEntries: Array.isArray(parsed.legacy_ambiguous_entries) ? parsed.legacy_ambiguous_entries : []
-                            };
+                            return { ok: true, entries: Array.isArray(parsed.entries) ? parsed.entries : [] };
                         }
                         // capability === "error" -> genuine/validation failure, retry neeche.
                     } catch (_) {}
@@ -20686,19 +20358,6 @@
             if (failedDcs.length) {
                 const error = new Error(`Revenue reconciliation data load nahi ho paya in DC ke liye: ${failedDcs.join(", ")}`);
                 error.failedDcs = failedDcs;
-                throw error;
-            }
-
-            const ambiguousEntries = batchResults.flatMap((result) => result.ambiguousEntries || []);
-            if (ambiguousEntries.length) {
-                const examples = ambiguousEntries.slice(0, 5).map((entry) => {
-                    const dcName = normalizeDcName(entry.dc_name || "") || "UNKNOWN DC";
-                    const ivrs = normalizeRevenueIvrs(entry.ivrs_no) || "UNKNOWN IVRS";
-                    return `${dcName}/${ivrs}`;
-                }).join(", ");
-                const error = new Error(`Exact Daily Paid/Unpaid report nahi ban sakti: purane multiple-payment records ki exact payment date available nahi hai (${examples}${ambiguousEntries.length > 5 ? " aadi" : ""})`);
-                error.code = "REVENUE_RECONCILIATION_AMBIGUOUS";
-                error.ambiguousEntries = ambiguousEntries;
                 throw error;
             }
 
@@ -20740,36 +20399,19 @@
         // is app me warmRevenueCategoryUploadedPaidCache/revenueCategoryCache-
         // WarmedAt ka existing pattern hai.
         async function ensureRevenueCategoryReconciliationLoaded(mode, filterValue) {
-            const dcList = revenueCategoryReconciliationDcList_(getRevenueCategoryTargetDcs());
-            const cacheKey = revenueCategoryReconciliationCacheKey_(mode, filterValue, dcList);
+            const cacheKey = `${mode}|${filterValue}`;
             const cached = revenueCategoryReconciliationCache_.get(cacheKey);
             if (cached && Date.now() - cached.loadedAt < REVENUE_CATEGORY_RECONCILIATION_TTL_MS) return cached;
+            const dcList = Array.from(new Set(getRevenueCategoryTargetDcs().map((dcName) => normalizeDcName(dcName)).filter(Boolean)));
             if (!dcList.length) {
                 const empty = { supported: false, byKey: new Map(), loadedAt: Date.now() };
                 revenueCategoryReconciliationCache_.set(cacheKey, empty);
                 return empty;
             }
-            const existingPromise = revenueCategoryReconciliationInFlight_.get(cacheKey);
-            if (existingPromise) return existingPromise;
-            const loadPromise = (async () => {
-                const result = await fetchRevenueCategoryReconciliationBatch_(dcList, mode, filterValue);
-                const record = {
-                    supported: result.supported === true,
-                    byKey: result.byKey || new Map(),
-                    loadedAt: Date.now(),
-                    dcNames: dcList.slice()
-                };
-                revenueCategoryReconciliationCache_.set(cacheKey, record);
-                return record;
-            })();
-            revenueCategoryReconciliationInFlight_.set(cacheKey, loadPromise);
-            try {
-                return await loadPromise;
-            } finally {
-                if (revenueCategoryReconciliationInFlight_.get(cacheKey) === loadPromise) {
-                    revenueCategoryReconciliationInFlight_.delete(cacheKey);
-                }
-            }
+            const result = await fetchRevenueCategoryReconciliationBatch_(dcList, mode, filterValue);
+            const record = { supported: result.supported === true, byKey: result.byKey || new Map(), loadedAt: Date.now() };
+            revenueCategoryReconciliationCache_.set(cacheKey, record);
+            return record;
         }
 
         // USER-APPROVED correction #8: Unique Master Consumer = Paid Consumer +
@@ -24011,7 +23653,7 @@
         // zyada bada hota hai (localStorage jaisi tight limit nahi) - isliye
         // ab yeh CSV IndexedDB me (parsed rows ke roop me) cache karte hain,
         // taaki cache reliably bana rahe aur search hamesha fast (~1 sec) ho.
-        const meterCheckingConsumerDbName = "seoni-meter-checking-consumer-db-v1-STAGING";
+        const meterCheckingConsumerDbName = "seoni-meter-checking-consumer-db-v1";
         const meterCheckingConsumerStoreName = "consumer-csv";
 
         function openMeterCheckingConsumerDb() {
