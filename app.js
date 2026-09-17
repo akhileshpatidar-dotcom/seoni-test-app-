@@ -32,6 +32,31 @@
             "googleusercontent.com",
             "docs.google.com"
         ];
+        const STAGING_TEST_REVENUE_URL_ = "https://script.google.com/macros/s/AKfycbw6fndSDtCG9o0h2edlGPG43sirRHBAa5jTVmiT5yUX7L7gC1f6HcIkaiLTZH4joZaA/exec";
+
+        function stagingIsAllowedTestRevenueGet_(rawUrl, method) {
+            return String(method || "GET").toUpperCase() === "GET"
+                && String(rawUrl || "").split("?")[0] === STAGING_TEST_REVENUE_URL_;
+        }
+
+        function stagingIsAllowedRevenueMasterGet_(rawUrl, method) {
+            if (String(method || "GET").toUpperCase() !== "GET") return false;
+            let candidate = String(rawUrl || "");
+            try { candidate = decodeURIComponent(candidate); } catch (_) {}
+            try {
+                return Object.values(revenueCollectionCsvUrls || {}).some((configuredUrl) => {
+                    const base = String(configuredUrl || "").split("&t=")[0];
+                    return !!base && candidate.includes(base);
+                });
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function stagingIsAllowedRevenueTestRead_(rawUrl, method) {
+            return stagingIsAllowedTestRevenueGet_(rawUrl, method)
+                || stagingIsAllowedRevenueMasterGet_(rawUrl, method);
+        }
 
         // MOCK REGISTRY: key format "<exact backend base-URL>::<action>" un GET
         // calls ke liye jo "?action=XYZ" query param bhejte hain (Apps Script ke
@@ -134,6 +159,9 @@
                         stagingLogBlockedRequest_(method, url, "fetch");
                         return Promise.reject(new Error("STAGING_SAFE_MODE: production write blocked"));
                     }
+                    if (stagingIsAllowedRevenueTestRead_(url, method)) {
+                        return __stagingOrigFetch(input, init);
+                    }
                     const mockKey = stagingBuildMockKey_(url);
                     const mock = window.STAGING_MOCK_RESPONSES[mockKey];
                     if (mock !== undefined) {
@@ -158,7 +186,9 @@
             try {
                 this.__stagingMethod = String(method || "GET").toUpperCase();
                 this.__stagingUrl = url;
-                this.__stagingBlocked = STAGING_SAFE_MODE && stagingIsProductionUrl_(url);
+                this.__stagingBlocked = STAGING_SAFE_MODE
+                    && stagingIsProductionUrl_(url)
+                    && !stagingIsAllowedRevenueTestRead_(url, this.__stagingMethod);
             } catch (_) {
                 this.__stagingBlocked = false;
             }
@@ -255,6 +285,7 @@
         // POST-submit logic/SHMS mock/kisi doosre module ko yeh fix bilkul nahi
         // chhuta.
         // ============================================================================
+
 
         const divisionConfigs = {
             "DIVISION SEONI": {
@@ -359,15 +390,17 @@
         // USER REQUEST (2026-09-14): Revenue jaisa hi Daily/Monthly toggle - Daily
         // FAST rahe isliye ek alag lightweight path hai (dekhein
         // loadOmvigDailyReportData_). Default MONTHLY (purana/existing poora
-        // PAID/PENDING/PART-PAID view, koi badlav nahi) - user khud "DAILY" chun
-        // sakta hai fast view ke liye.
-        let omvigReportMode = "MONTHLY"; // "DAILY" | "MONTHLY"
+        // PAID/PENDING/PART-PAID view, koi badlav nahi). Report khulte hi halka,
+        // single-call DAILY view dikhana zaroori hai; user zaroorat par MONTHLY
+        // full view chun sakta hai. Isse Division/Circle open hote hi anjaane me
+        // heavy multi-DC monthly sync shuru nahi hoti.
+        let omvigReportMode = "DAILY"; // "DAILY" | "MONTHLY"
         const vehicleReadingStorageKey = "seoni_vehicle_reading_state_v1";
         const vehicleReadingListStorageKey = "seoni_vehicle_reading_list_v1";
         const vehicleReadingCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQIv4JMsV1n8vy9cJ0o2UaS45-fh_c3n9u-rqwXjuCZWDNZNRaJlgUKnT4gtP3_kTtpCrQvrTcojWQo/pub?output=csv";
         const vehicleReadingSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbyqG_i3xzySgBJETTnmEo5WhZV_51eaXex_0-vIWhmCqdWNF0Y2Uar6wZPdgjDPBVmi/exec";
         const vehicleReadingVehicles = ["407- MP22ZB6089", "BOLERO- MP22ZC1591", "407- MP22G4316", "CAMPER- MP22G4342"];
-        const revenueCollectionSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbzaimPwzUYELgmujpaBbfByy0BcjOERA8e0mslNdbH5uUw2L6L24785obmdcpcDOc53Ww/exec";
+        const revenueCollectionSubmitScriptUrl = STAGING_TEST_REVENUE_URL_;
         const revenueOfflineQueueStorageKey = "seoni-revenue-offline-submit-queue-v1";
         // Meeter Cheking (2026-09-10 addition) - abhi sirf SEONI (T) DC ke liye live hai.
         // Forward-compatible design (user requirement): future me kisi aur DC me yeh feature
@@ -403,165 +436,7 @@
             "SEONIRES": "https://docs.google.com/spreadsheets/d/12d4nBlUJ5MoamEZdtNteTSixTt9UdvbrPmjS9tBRUw8/export?format=csv&gid=0"
         };
         const stockMaterialsCsvUrl = "https://docs.google.com/spreadsheets/d/1OfrU7ZuN5LV9f_3hqORv66BVLYKFGIBBjDyeSXHwldA/export?format=csv&gid=641545139";
-
-        // ITEM-10 PHASE-1 STOCK SYNTHETIC MOCK (2026-09-16, USER-REQUESTED, 2nd
-        // module after SHMS, same rules/approach reused): sirf Stock/Material ke
-        // READ paths (Apps Script "getMasterStock" action, aur uska CSV fallback)
-        // ke liye synthetic TEST data. "stockSubmitScriptUrl" upar line 314 par
-        // aur "stockMaterialsCsvUrl" upar hi define ho chuke hain, isliye yahan
-        // safe hai. Koi safety gate (CSP/fetch/XHR/GViz/storage/cache isolation)
-        // nahi badalta - sirf STAGING_MOCK_RESPONSES me 2 naye GET entries.
-        //
-        // SCOPE: yeh Stock ka RECEIVE/ISSUE POST/submit (naya stock movement save
-        // karna) ko BILKUL touch nahi karta - upar wala fetch/XHR gate har non-GET
-        // production request ko unconditionally block karta hai, yahan koi
-        // mock/allowlist rasta hi nahi hai - safe-mode me submit hamesha blocked.
-        // Mock keys SHMS jaisi hi EXACT base-URL+action / normalized-CSV-URL+GET
-        // hain - kisi doosre module se collide nahi karte.
-        //
-        // STATE SWITCH: window.STAGING_MOCK_STOCK_STATE = "populated" (default) |
-        // "empty" | "error" - console me badlo, Stock screen dobara kholo:
-        //     window.STAGING_MOCK_STOCK_STATE = "empty";
-        // NOTE (existing app behavior, mock ne nahi banaya): agar getMasterStock
-        // khaali [] de to loadStockMaterialsData() khud hi CSV fallback try karta
-        // hai (line ~8135) - isliye "empty" state me bhi CSV mock (neeche, isi
-        // switch se juda) khaali header-only text deta hai taaki screen genuinely
-        // "koi material nahi" dikhaye, real CSV-empty-response jaisa hi. "error"
-        // state me getMasterStock hi turant reject ho jaata hai (jaisa SHMS me
-        // tha) - loadStockMaterialsData ka catch(_) ise chup-chap swallow kar leta
-        // hai (yeh EXISTING behavior hai, maine nahi likha), CSV fallback us case
-        // me code ke hisaab se try hi nahi hota.
-        window.STAGING_MOCK_STOCK_STATE = window.STAGING_MOCK_STOCK_STATE || "populated";
-
-        const STAGING_STOCK_MOCK_ROWS_POPULATED_ = [
-            { id: "TEST-001", material_name: "TEST MATERIAL - AB CABLE", unit: "Meter", opening_stock: 500, balance_stock: 420 },
-            { id: "TEST-002", material_name: "TEST MATERIAL - DISC INSULATOR", unit: "Nos", opening_stock: 80, balance_stock: 55 },
-            { id: "TEST-003", material_name: "TEST MATERIAL - LT PIN INSULATOR", unit: "Nos", opening_stock: 150, balance_stock: 110 }
-        ];
-        const STAGING_STOCK_MOCK_CSV_HEADER_ = "MATERIAL NAME,UNIT,OPENING STOCK,BALANCE STOCK";
-        const STAGING_STOCK_MOCK_CSV_TEXT_POPULATED_ =
-            `${STAGING_STOCK_MOCK_CSV_HEADER_}\n` +
-            "TEST MATERIAL - AB CABLE,Meter,500,420\n" +
-            "TEST MATERIAL - DISC INSULATOR,Nos,80,55\n" +
-            "TEST MATERIAL - LT PIN INSULATOR,Nos,150,110\n";
-
-        // Backend (stock-material-submit-script.gs doGet action=getMasterStock) jo
-        // array-of-objects deta hai, usi shape/field-names me (id, material_name,
-        // unit, opening_stock, balance_stock).
-        Object.defineProperty(window.STAGING_MOCK_RESPONSES, `${stockSubmitScriptUrl}::getMasterStock`, {
-            configurable: true,
-            enumerable: true,
-            get: function () {
-                if (window.STAGING_MOCK_STOCK_STATE === "empty") return [];
-                if (window.STAGING_MOCK_STOCK_STATE === "error") return undefined;
-                return STAGING_STOCK_MOCK_ROWS_POPULATED_;
-            }
-        });
-
-        // Master-sheet CSV export jaisa hi shape jaisa parseStockMaterialsCsv()
-        // expect karta hai: header row (MATERIAL NAME/UNIT/OPENING STOCK/BALANCE
-        // STOCK) + data rows.
-        Object.defineProperty(window.STAGING_MOCK_RESPONSES, stagingNormalizeUrlForMockKey_(stockMaterialsCsvUrl) + "::GET", {
-            configurable: true,
-            enumerable: true,
-            get: function () {
-                if (window.STAGING_MOCK_STOCK_STATE === "empty") return `${STAGING_STOCK_MOCK_CSV_HEADER_}\n`;
-                return STAGING_STOCK_MOCK_CSV_TEXT_POPULATED_;
-            }
-        });
-        // END ITEM-10 PHASE-1 STOCK SYNTHETIC MOCK
-
         const shmsCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTbq-yne90yg9Vn8eylxM3zKMfZjPLlVhca3JhsjAzMlcm6MAVl8vAA-xXVgZI_XjWQBHyjB36YO1Cz/pub?output=csv";
-
-        // ITEM-10 PHASE-1 SHMS SYNTHETIC MOCK (2026-09-16, USER-REQUESTED, separate
-        // approval round after the base STAGING_SAFE_MODE patch): sirf STAGING
-        // copy me, sirf SHMS module ke READ paths ke liye synthetic TEST data yahan
-        // register karte hain - "shmsSubmitScriptUrl" aur "shmsCsvUrl" abhi-abhi
-        // upar define hue hain, isliye yeh block yahan (upar wale core patch block
-        // ke bajaye) rakha hai - wahan in variables ka istemal karte waqt "const"
-        // TDZ ki wajah se ReferenceError aata (woh block in dono constants ki
-        // declaration se PEHLE chalta hai). Is se koi safety gate (CSP, fetch/XHR/
-        // GViz call-site block, storage/IndexedDB/cache isolation) BILKUL nahi
-        // badalta - yeh sirf STAGING_MOCK_RESPONSES registry me 2 naye entries
-        // daalta hai, jo upar wala fetch()/XHR patch already read karta hai.
-        //
-        // SCOPE (kya-kya mock hua, kya NAHI):
-        //  - GET ${shmsSubmitScriptUrl}?action=getSummary  -> mock hota hai (state
-        //    switch ke through, neeche dekhein).
-        //  - GET ${shmsCsvUrl} (feeder/substation master CSV, SHMS Entry-form
-        //    dropdown aur SHMS Pending Dashboard dono isi se chalte hain) -> mock
-        //    hota hai.
-        //  - SHMS ka POST/submit (naya SHMS event save karna, ${shmsSubmitScriptUrl}
-        //    par bina "action" param ke doPost) -> is mock se BILKUL touch nahi
-        //    hota. Upar wala fetch/XHR gate har non-GET production request ko
-        //    UNCONDITIONALLY block karta hai (mock/allowlist ka koi rasta hi nahi
-        //    hai us code-path me) - safe-mode me submit hamesha blocked hi rahega.
-        //  - Kisi doosre module (Peak Load/Feeder/STM/Stock/Revenue/etc) ka
-        //    getSummary/CSV isse kabhi match nahi karega - mock key SHMS ki EXACT
-        //    poori base-URL + "::action" (ya poora normalized CSV URL + "::GET")
-        //    par based hai, sirf action-naam par nahi.
-        //
-        // STATE SWITCH (populated/empty/error, "loading" apne aap hota hai jab tak
-        // Promise resolve na ho): window.STAGING_MOCK_SHMS_STATE control karta hai
-        // getSummary ka response. Chrome DevTools console me kabhi bhi badlo aur
-        // SHMS Daily Progress / Pending Dashboard screen refresh/dobara kholo:
-        //     window.STAGING_MOCK_SHMS_STATE = "populated";  // default - TEST rows
-        //     window.STAGING_MOCK_SHMS_STATE = "empty";      // [] - "0 entries" UI
-        //     window.STAGING_MOCK_SHMS_STATE = "error";      // mock hata jaisa hi
-        //         // (getter "undefined" deta hai) - fetch/XHR patch ka EXISTING
-        //         // "TEST BACKEND NOT CONFIGURED" reject-path fire hota hai, koi
-        //         // naya error-simulation code nahi likha gaya.
-        window.STAGING_MOCK_SHMS_STATE = window.STAGING_MOCK_SHMS_STATE || "populated";
-
-        // Sirf UI/Tailwind visual testing ke liye - naam/mobile/reason sab clearly
-        // "TEST" prefix ke saath, kisi real staff/consumer ki nakal nahi.
-        const STAGING_SHMS_MOCK_SUMMARY_ROWS_POPULATED_ = [
-            {
-                substation: "TEST SUBSTATION 1", feeder: "TEST FEEDER A", event_type: "Un-Planned",
-                date: "15/09/2026", time_from: "10:00", time_to: "11:30", total_duration: "1:30",
-                reason: "TEST REASON - synthetic data", meter_no: "TEST-MTR-001",
-                operator_name: "TEST OPERATOR ONE", operator_mobile: "9990000001",
-                submitted_at: "15/09/2026 - 11:35"
-            },
-            {
-                substation: "TEST SUBSTATION 1", feeder: "TEST FEEDER B", event_type: "Planned",
-                date: "15/09/2026", time_from: "14:00", time_to: "15:00", total_duration: "1:00",
-                reason: "TEST REASON - scheduled maintenance", meter_no: "TEST-MTR-002",
-                operator_name: "TEST OPERATOR TWO", operator_mobile: "9990000002",
-                submitted_at: "15/09/2026 - 15:05"
-            },
-            {
-                substation: "TEST SUBSTATION 2", feeder: "TEST FEEDER C", event_type: "Un-Planned",
-                date: "15/09/2026", time_from: "18:20", time_to: "19:00", total_duration: "0:40",
-                reason: "TEST REASON - fault clearance", meter_no: "TEST-MTR-003",
-                operator_name: "TEST OPERATOR THREE", operator_mobile: "9990000003",
-                submitted_at: "15/09/2026 - 19:10"
-            }
-        ];
-
-        // Backend (shms-submit-script.gs doGet action=getSummary) jo array-of-
-        // objects deta hai, usi shape/field-names (substation, feeder, event_type,
-        // date "dd/MM/yyyy", time_from, time_to, total_duration, reason, meter_no,
-        // operator_name, operator_mobile, submitted_at "dd/MM/yyyy - HH:mm") me.
-        Object.defineProperty(window.STAGING_MOCK_RESPONSES, `${shmsSubmitScriptUrl}::getSummary`, {
-            configurable: true,
-            enumerable: true,
-            get: function () {
-                if (window.STAGING_MOCK_SHMS_STATE === "empty") return [];
-                if (window.STAGING_MOCK_SHMS_STATE === "error") return undefined;
-                return STAGING_SHMS_MOCK_SUMMARY_ROWS_POPULATED_;
-            }
-        });
-
-        // shms-submit-script.gs jaisa hi CSV shape jaisa parseShmsCsv() expect
-        // karta hai: header row + col0=substation, col1=feeder, col2=meterNo.
-        window.STAGING_MOCK_RESPONSES[stagingNormalizeUrlForMockKey_(shmsCsvUrl) + "::GET"] =
-            "Substation,Feeder,Meter No\n" +
-            "TEST SUBSTATION 1,TEST FEEDER A,TEST-MTR-001\n" +
-            "TEST SUBSTATION 1,TEST FEEDER B,TEST-MTR-002\n" +
-            "TEST SUBSTATION 2,TEST FEEDER C,TEST-MTR-003\n";
-        // END ITEM-10 PHASE-1 SHMS SYNTHETIC MOCK
-
         const lokAdalatFallbackTotals = {
             "ADEGAON": 752,
             "CHHAPARA-1": 564,
@@ -580,18 +455,17 @@
             { id: "M004", name: "Disc Insulator", unit: "Nos", opening: 75, inward: 20, issue: 63, min: 25 },
             { id: "M005", name: "LT Pin Insulator", unit: "Nos", opening: 140, inward: 40, issue: 149, min: 35 }
         ];
-        // ITEM-10 STOCK EMPTY/ERROR/STALE FIX (2026-09-16, USER-REQUESTED, multi-
-        // round-corrected): "stockMaterials" upar wale 5 hardcoded demo rows se
-        // shuru hota hai, lekin yeh sirf ek PLACEHOLDER hai jab tak
-        // loadStockMaterialsData() ka pehla attempt complete NAHI ho jaata - us
-        // pehle attempt ke turant shuru hote hi (neeche dekhein) inhe khaali kar
-        // diya jaata hai, taaki yeh demo data kabhi "current stock" jaisa
-        // real/production data samajh kar na dikhe.
+        // STOCK EMPTY/ERROR/STALE FIX (2026-09-16, USER-REQUESTED): "stockMaterials"
+        // upar wale 5 hardcoded demo rows se shuru hota hai, lekin yeh sirf ek
+        // PLACEHOLDER hai jab tak loadStockMaterialsData() ka pehla attempt complete
+        // NAHI ho jaata - us pehle attempt ke turant shuru hote hi (neeche dekhein)
+        // inhe khaali kar diya jaata hai, taaki yeh demo data kabhi "current stock"
+        // jaisa real/production data samajh kar na dikhe.
         //
-        // "loaded"/"empty"/"error" teeno states clearly alag hain - "empty" ek
-        // VALID successful (0 rows) response hai, "error" ka matlab load hi fail
-        // hua (network/parse/staging-safe-mode-block). "uninitialized"/"loading"
-        // dono ko "koi valid data nahi mila abhi tak" maana jaata hai.
+        // "loaded"/"empty"/"error" teeno states clearly alag hain - "empty" ek VALID
+        // successful (0 rows) response hai, "error" ka matlab load hi fail hua
+        // (network/parse failure). "uninitialized"/"loading" dono ko "koi valid data
+        // nahi mila abhi tak" maana jaata hai.
         let stockMaterialsStatus = "uninitialized"; // "uninitialized" | "loading" | "loaded" | "empty" | "error"
         let stockMaterialsStale = false; // true = last refresh fail hua, PURANA (loaded/empty) data dikha rahe hain
         let stockMovements = [
@@ -740,7 +614,7 @@
         let staffAdminCurrentAccount = null;
         const revenueUploadedPaidStorageKey = "seoni-revenue-uploaded-paid-cache-v2";
         const revenueCategoryRawPaymentStorageKey = "seoni-revenue-category-raw-payment-rows-v2";
-        const revenueCategoryRawPaymentDbName = "seoni-revenue-category-payment-db-v2" + (STAGING_SAFE_MODE ? "-STAGING" : "");
+        const revenueCategoryRawPaymentDbName = "seoni-revenue-category-payment-db-v2-STAGING";
         const revenueCategoryRawPaymentStoreName = "dc-payment-rows";
         const revenuePaidUploadMetaStorageKey = "seoni-revenue-paid-upload-meta-v1";
         const feederCsvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vT8bBAXJZhlwS_giGXBlS6rDXJ_auZfWZzNVPQaBnD09jB_m7jnrqeGGX5WP8V2jOD_WL90_KQ2pJa4/pub?output=csv";
@@ -3162,6 +3036,56 @@
             }));
         }
 
+        // ISOLATED ADDITION (2026-09-17, USER-REPORTED): ensureRevenueCategoryMaster-
+        // DataLoaded() ke andar dono try/catch khaali hain - kisi DC ka Master
+        // consumer data load fail hone par bhi silently aage badh jaata hai, aur
+        // Category Wise/HQ-Village/Target-Achievement/Top-Defaulters report us DC
+        // ke bina hi (bina kisi error ke) ban jaati hai. Us shared function ko
+        // KHUD nahi chheda - Freeze Revenue module bhi usi function ko use karta
+        // hai aur wo module bilkul untouched rehna chahiye. Iski jagah yeh ek
+        // chhota wrapper hai jo poora attempt hone ke baad bhi jin DC ka Master
+        // consumer data khaali reh gaya, unhe saaf error ke roop me upar bhejta
+        // hai - sirf un call-site par jo Revenue Category reconciliation reports
+        // (Category Wise, HQ/Village Wise, Target vs Achievement, Top Defaulters)
+        // use karte hain.
+        const revenueCategoryMasterFreshAt_ = new Map();
+        const revenueCategoryMasterFreshInFlight_ = new Map();
+        const REVENUE_CATEGORY_MASTER_FRESH_TTL_MS = 60000;
+
+        async function ensureRevenueCategoryMasterDataLoadedStrict_(dcNames) {
+            const list = Array.from(new Set((dcNames || []).map((name) => normalizeDcName(name)).filter(Boolean)));
+            const now = Date.now();
+            const results = await Promise.all(list.map(async (dcName) => {
+                const lastFreshAt = Number(revenueCategoryMasterFreshAt_.get(dcName) || 0);
+                if (now - lastFreshAt < REVENUE_CATEGORY_MASTER_FRESH_TTL_MS && getRevenueMasterRowsForDc(dcName).length) {
+                    return { dcName, ok: true };
+                }
+                let pending = revenueCategoryMasterFreshInFlight_.get(dcName);
+                if (!pending) {
+                    pending = (async () => {
+                        const rows = await loadRevenueCollectionData(dcName, true, { requireRemote: true });
+                        if (Array.isArray(rows) && rows.length) revenueCategoryMasterFreshAt_.set(dcName, Date.now());
+                        return rows;
+                    })();
+                    revenueCategoryMasterFreshInFlight_.set(dcName, pending);
+                }
+                try {
+                    const rows = await pending;
+                    return { dcName, ok: Array.isArray(rows) && rows.length > 0 };
+                } finally {
+                    if (revenueCategoryMasterFreshInFlight_.get(dcName) === pending) {
+                        revenueCategoryMasterFreshInFlight_.delete(dcName);
+                    }
+                }
+            }));
+            const failedDcs = results.filter((result) => !result.ok).map((result) => result.dcName);
+            if (failedDcs.length) {
+                const error = new Error(`Fresh Master consumer data load nahi ho paya in DC ke liye: ${failedDcs.join(", ")}. Purana cached data use karke report nahi banayi gayi.`);
+                error.failedDcs = failedDcs;
+                throw error;
+            }
+        }
+
         function createRevenueCategoryGroup(name, extra = {}) {
             const group = { name, paidTotal: 0, unpaidTotal: 0, paidAmountTotal: 0, unpaidAmountTotal: 0, categories: {}, ...extra };
             revenueCategoryList.forEach((category) => {
@@ -3181,13 +3105,62 @@
         // ignore ho jaata hai (consumer poori tarah clear maana jaata hai).
         function addRevenueCategoryConsumer(group, row, paidInfoByIvrs, paidCountedIvrsSet = null) {
             const category = normalizeRevenueCategory(row.tariffCategory || row.category || "");
-            if (!revenueCategoryList.includes(category)) return;
             const ivrs = normalizeRevenueIvrs(row.ivrsNo);
             const paidInfo = paidInfoByIvrs?.[ivrs];
+            const dueAmount = parseRevenuePaidAmount(row.netBill || row.arrears || 0);
+            // ISOLATED ADDITION (2026-09-17, USER-APPROVED corrections): yeh counter
+            // "Unique Master Consumer" ki asli ginti rakhta hai - is function ko
+            // exactly ek baar har unique (DC+IVRS) Master consumer ke liye call kiya
+            // jaata hai (getRevenueMasterRowsForDc pehle se IVRS ke hisaab se dedupe
+            // karta hai), isliye yeh count hamesha sahi rehta hai chahe consumer
+            // aage PAID/UNPAID/OTHER kisi bhi bucket me jaaye ya (legacy path me)
+            // category match na hone par bilkul drop ho jaaye. Download flow me
+            // (downloadProgressRevenueCategorySummary) ise Paid+Unpaid totals ke
+            // against check karke "invariant mismatch" pakda jaata hai - taaki
+            // koi bhi galti silently report me na chhup jaaye.
+            group.__uniqueMasterCount = (group.__uniqueMasterCount || 0) + 1;
+            // ISOLATED ADDITION (2026-09-17, USER-APPROVED corrections): naya
+            // backend reconciliation endpoint (getRevenueCategoryReconciliation)
+            // se mila EXACT-DATE-capable, per-consumer (DC+IVRS) aggregate mile to
+            // usi ke corrected business rules follow karo:
+            //   (a) consumer PAID count hamesha max 1 - chahe us consumer ki
+            //       kitni bhi payment rows selected period me match hui hon;
+            //   (b) ek baar bhi valid payment milne par (partial ho ya poora)
+            //       consumer SIRF PAID bucket me jaata hai, UNPAID me kabhi nahi
+            //       (jo neeche legacy path me "remainingAfterPaid > 0" wala bug
+            //       tha, usse yeh naya branch bilkul prabhavit nahi);
+            //   (c) missing/unknown tariff category wale valid Master consumer
+            //       "OTHER" bucket me jaate hain - grand total (group.paidTotal/
+            //       unpaidTotal, jo invariant-check aur TOTAL column dono use
+            //       karte hain) se kabhi drop nahi hote. Existing LV1-LV5
+            //       per-category column layout (revenueCategoryList) bilkul
+            //       unchanged rehta hai - OTHER us list me kabhi nahi jodi gayi,
+            //       isliye PDF/Excel me koi naya column nahi aata.
+            // Yeh naya branch legacy code (neeche, bilkul unchanged) ko bilkul
+            // nahi chhedta - legacy sirf tab chalta hai jab reconciliation
+            // backend available na ho (purana/redeploy-na-hua backend - capability
+            // mismatch fallback).
+            if (paidInfo?.reconciled) {
+                const bucketCategory = revenueCategoryList.includes(category) ? category : "OTHER";
+                if (!group.categories[bucketCategory]) group.categories[bucketCategory] = { paid: 0, unpaid: 0, paidAmount: 0, unpaidAmount: 0 };
+                const amount = Number(paidInfo.amount || 0);
+                if (amount > 0) {
+                    group.categories[bucketCategory].paid += 1;
+                    group.categories[bucketCategory].paidAmount += amount;
+                    group.paidTotal += 1;
+                    group.paidAmountTotal += amount;
+                } else {
+                    group.categories[bucketCategory].unpaid += 1;
+                    group.categories[bucketCategory].unpaidAmount += dueAmount;
+                    group.unpaidTotal += 1;
+                    group.unpaidAmountTotal += dueAmount;
+                }
+                return;
+            }
+            if (!revenueCategoryList.includes(category)) return;
             const paidCountKey = `${normalizeRevenueUploadedPaidInfoSourceSignature(paidInfo)}|${ivrs}`;
             if (paidInfo && paidCountedIvrsSet?.has(paidCountKey)) return;
             const sourceCategoryPaidInfos = getRevenueCategoryPaidInfosBySourceCategory(paidInfo);
-            const dueAmount = parseRevenuePaidAmount(row.netBill || row.arrears || 0);
             if (sourceCategoryPaidInfos.length) {
                 let paidThisConsumer = 0;
                 sourceCategoryPaidInfos.forEach((item) => {
@@ -3299,19 +3272,34 @@
         // se bilkul independent, wahan pehle se hi koi restriction nahi thi) -
         // isliye is change se wahan koi asar nahi padta.
         function isRevenueUploadedPaidInCategoryPeriod(row, mode, filterValue) {
-            const uploadedRaw = getRevenueUploadedPaidRowUploadedDate(row);
-            if (!uploadedRaw) return false;
-            const uploadedMonthKey = getRevenueMonthKey(uploadedRaw);
-            if (!uploadedMonthKey) return false;
             if (mode === "MONTHLY") {
+                const uploadedRaw = getRevenueUploadedPaidRowUploadedDate(row);
+                if (!uploadedRaw) return false;
+                const uploadedMonthKey = getRevenueMonthKey(uploadedRaw);
+                if (!uploadedMonthKey) return false;
                 const targetMonthKey = normalizeRevenueMonthFilterKey(filterValue);
                 if (!targetMonthKey) return false;
                 return uploadedMonthKey === targetMonthKey;
             }
+            // ISOLATED FIX (2026-09-17, USER-CONFIRMED bug): pehle DAILY (non-
+            // MONTHLY) mode bhi sirf "uploaded MAHINA" match karta tha - EXACT
+            // selected DATE kabhi check hi nahi hoti thi, isliye ek din select
+            // karne par bhi poore mahine ke uploads paid dikh jaate the. Ab yeh
+            // row ki apni ACTUAL payment date (getRevenueUploadedPaidRowDate,
+            // jisme paymentDate/payment_date/paymentDateRaw jaise saare alias
+            // fields pehle se handle hain) ko selected EXACT date se compare
+            // karta hai. MONTHLY mode ka upar wala 2026-08-13 uploaded-month
+            // business rule bilkul unchanged hai - sirf yeh niche wali DAILY
+            // branch badli hai. (Naye backend reconciliation endpoint ke
+            // available hone par is function ka DAILY result ab authoritative
+            // paid/unpaid decision me use hi nahi hota - sirf legacy/purane-
+            // backend fallback aur diagnostic stats ke liye reh gaya hai, par
+            // ab wahan bhi sahi jawab deta hai.)
             const targetDate = normalizeRevenueReportDate(filterValue || getCurrentDateDDMMYYYY());
             if (!targetDate) return false;
-            const targetMonthKey = getRevenueMonthKey(targetDate);
-            return uploadedMonthKey === targetMonthKey;
+            const rowPaymentDateRaw = getRevenueUploadedPaidRowDate(row);
+            if (!rowPaymentDateRaw) return false;
+            return normalizeRevenueReportDate(rowPaymentDateRaw) === targetDate;
         }
 
         // DD-MM-YYYY ko YYYY-MM-DD me convert karta hai taaki string "<=" se
@@ -4587,7 +4575,17 @@
         // par) me poora/complete amount hi dikhta hai, yeh badlav sirf is on-screen
         // summary table tak seemित hai. Ek hi shared table-renderer, taaki HQ-wise
         // aur DC-wise dono jagah exact same look/behaviour rahe.
-        function renderFreezeGroupSummaryTableHtml(nameColLabel, summaryRows, titleText) {
+        // USER REQUEST (2026-09-16): O&M/VIG Daily summary table ke PAID column
+        // header ko "YESTERDAY PAID" dikhana hai (Daily me sirf latest date ke
+        // settlements hote hain, poora baseline-vs-paid compare nahi - isliye
+        // PENDING hamesha 0 dikhta hai, jo bina label ke confusing tha). Isliye
+        // yahan 2 OPTIONAL param jode (paidColLabel/pendingColLabel) - default
+        // "PAID"/"PENDING" hi rehta hai, Freeze Tracking Report ke maujooda 3
+        // call (jo naye param bilkul nahi bhejte) me output bilkul waisa hi
+        // rahega, koi badlav nahi.
+        function renderFreezeGroupSummaryTableHtml(nameColLabel, summaryRows, titleText, paidColLabel, pendingColLabel) {
+            paidColLabel = paidColLabel || "PAID";
+            pendingColLabel = pendingColLabel || "PENDING";
             const headCellStyle = "padding:6px 4px; font-size:0.56rem; font-weight:900; text-transform:uppercase; background:#0891b2; color:#fff; text-align:center;";
             const bodyCellStyle = "padding:5px 4px; font-size:0.62rem; text-align:center; border-bottom:1px solid #e2e8f0;";
             const rowsHtml = summaryRows.map((r) => {
@@ -4616,8 +4614,8 @@
                             <tr>
                                 <th rowspan="2" style="${headCellStyle}">${escapeHtml(nameColLabel)}</th>
                                 <th rowspan="2" style="${headCellStyle}">TOTAL<br>CONSUMER</th>
-                                <th colspan="2" style="${headCellStyle}">PAID</th>
-                                <th colspan="2" style="${headCellStyle}">PENDING</th>
+                                <th colspan="2" style="${headCellStyle}">${escapeHtml(paidColLabel)}</th>
+                                <th colspan="2" style="${headCellStyle}">${escapeHtml(pendingColLabel)}</th>
                             </tr>
                             <tr>
                                 <th style="${headCellStyle}">COUNT</th>
@@ -5229,6 +5227,51 @@
         }
 
         function buildRevenueCategoryUploadedPaidInfo(mode, filterValue) {
+            // ISOLATED ADDITION (2026-09-17, USER-APPROVED corrections): agar naye
+            // backend reconciliation endpoint (getRevenueCategoryReconciliation) se
+            // is exact mode+filterValue ke liye pehle se hi ensureRevenueCategory-
+            // ReconciliationLoaded() ke through data warm ho chuka hai (caller
+            // hamesha isse pehle await karta hai), to usi EXACT-DATE-capable,
+            // per-consumer aggregate ko authoritative maan kar seedhe return karo -
+            // neeche wala poora legacy computation (raw/local cache "more rows
+            // wins" heuristic + uploaded-month matching) bilkul chhua nahi jaata,
+            // aur sirf tab chalta hai jab reconciliation backend available na ho
+            // (purana/redeploy-na-hua backend - capability mismatch fallback).
+            //
+            // Backward-compatible shape: normalCount/normalAmount/categoryTotals
+            // jaise purane field bhi bhar dete hain, taaki isRevenueMasterConsumer-
+            // Paid()/getRevenueMasterConsumerPaidAmount() (Particular Consumer
+            // List, Non-Payee 3M/6M/Since-Connection, Top Defaulters - inn sabhi
+            // reports ka apna khud ka koi code yahan CHHUA nahi gaya) bilkul
+            // unchanged rehte hue bhi sahi kaam karte rahein.
+            const reconciliation = revenueCategoryReconciliationCache_.get(
+                revenueCategoryReconciliationCacheKey_(mode, filterValue, getRevenueCategoryTargetDcs())
+            );
+            if (reconciliation && reconciliation.supported) {
+                const paidInfoByDc = {};
+                reconciliation.byKey.forEach((info, key) => {
+                    const sepIdx = key.indexOf("|");
+                    if (sepIdx < 0) return;
+                    const dcName = key.slice(0, sepIdx);
+                    const ivrs = key.slice(sepIdx + 1);
+                    if (!dcName || !ivrs) return;
+                    if (!paidInfoByDc[dcName]) paidInfoByDc[dcName] = {};
+                    const amount = Number(info.amount || 0);
+                    paidInfoByDc[dcName][ivrs] = {
+                        reconciled: true,
+                        amount,
+                        category: info.category || "",
+                        legacyAmbiguous: !!info.legacyAmbiguous,
+                        normalCount: amount > 0 ? 1 : 0,
+                        normalAmount: amount > 0 ? amount : 0,
+                        agAmount: 0, agCount: 0,
+                        mixedAmount: 0, mixedCount: 0,
+                        unknownAmount: 0, unknownCount: 0,
+                        categoryTotals: (amount > 0 && info.category) ? { [info.category]: { amount, count: 1 } } : {}
+                    };
+                });
+                return paidInfoByDc;
+            }
             const paidInfoByDc = {};
             getRevenueCategoryPaymentSourceRows().forEach((paymentRow) => {
                 const dcName = getRevenueUploadedPaidRowDcName(paymentRow);
@@ -5263,7 +5306,15 @@
             return paidInfoByDc;
         }
 
-        function buildRevenueCategoryDiagnostic(mode, filterValue) {
+        // ISOLATED ADDITION (2026-09-17, USER-APPROVED): optional `rows` (already-
+        // built buildRevenueCategorySummaryRows() output) - jab diya jaata hai to
+        // OTHER-bucket (missing/unknown tariff category, valid Master consumer)
+        // ke Paid/Unpaid count+amount bhi diagnostic me judte hain, taaki Grand
+        // Total aur LV1-LV5 column-sum ke beech ka antar (agar ho) kis wajah se
+        // hai yeh pata chal sake. `rows` na diya jaaye to bilkul purana behaviour
+        // (koi other* field object me nahi aata) - is function ka ek hi caller
+        // hai, isliye backward-compat sirf documentation ke liye hai.
+        function buildRevenueCategoryDiagnostic(mode, filterValue, rows = null) {
             const targetDcs = new Set(getRevenueCategoryTargetDcs().map((dcName) => normalizeDcName(dcName)).filter(Boolean));
             const masterIvrsByDc = {};
             targetDcs.forEach((dcName) => {
@@ -5305,13 +5356,28 @@
                     }
             });
 
+            let otherPaidCount = 0, otherUnpaidCount = 0, otherPaidAmount = 0, otherUnpaidAmount = 0;
+            (rows || []).forEach((row) => {
+                if (row.type === "SUB_TOTAL" || row.type === "SUBDN_TOTAL") return;
+                const other = row.categories?.OTHER;
+                if (!other) return;
+                otherPaidCount += Number(other.paid || 0);
+                otherUnpaidCount += Number(other.unpaid || 0);
+                otherPaidAmount += Number(other.paidAmount || 0);
+                otherUnpaidAmount += Number(other.unpaidAmount || 0);
+            });
+
             return {
                 uploadedUnique: uploadedRows,
                 selectedMonth: selectedMonthRows,
                 matchedMaster: matchedMasterRows,
                 outOfMonth: outOfMonthRows,
                 masterNotMatched: masterNotMatchedRows,
-                missingDate
+                missingDate,
+                otherPaidCount,
+                otherUnpaidCount,
+                otherPaidAmount,
+                otherUnpaidAmount
             };
         }
 
@@ -5382,6 +5448,9 @@
                 totalGroup.unpaidTotal += Number(row.unpaidTotal || 0);
                 totalGroup.paidAmountTotal += Number(row.paidAmountTotal || 0);
                 totalGroup.unpaidAmountTotal += Number(row.unpaidAmountTotal || 0);
+                // ISOLATED ADDITION (2026-09-17): __uniqueMasterCount rollup - taaki
+                // SUB TOTAL/DIVISION TOTAL rows par bhi invariant check ho sake.
+                totalGroup.__uniqueMasterCount = (totalGroup.__uniqueMasterCount || 0) + Number(row.__uniqueMasterCount || 0);
             });
             return totalGroup;
         }
@@ -5399,6 +5468,7 @@
                 totals.unpaidTotal += Number(row.unpaidTotal || 0);
                 totals.paidAmountTotal += Number(row.paidAmountTotal || 0);
                 totals.unpaidAmountTotal += Number(row.unpaidAmountTotal || 0);
+                totals.__uniqueMasterCount = (totals.__uniqueMasterCount || 0) + Number(row.__uniqueMasterCount || 0);
             });
             return totals;
         }
@@ -5443,7 +5513,7 @@
             return `${((num / den) * 100).toFixed(1)}%`;
         }
 
-        function exportRevenueCategorySummary(fmt, rows, label, reportType, diagnostic = null) {
+        function exportRevenueCategorySummary(fmt, rows, label, reportType, diagnostic = null, staleWarning = null) {
             const levelT = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
             const firstCols = activeViewLevel === "CIRCLE" ? ["DIVISION", "DC NAME"] : [activeViewLevel === "DC" ? revenueHqLabelUpper() : "DC NAME"];
             // Naya layout: saari 5 category (LV1-LV5) + TOTAL ek hi table me cram karne
@@ -5513,6 +5583,12 @@
                     ["PERIOD", label],
                     ["SCOPE", getRevenueCategoryScopeLabel()],
                     ["GENERATED AT", generatedAt],
+                    // ISOLATED ADDITION (2026-09-17, USER-APPROVED condition): reconciliation
+                    // backend abhi purana/unavailable ho aur legacy fallback totals dikhaye
+                    // ja rahe hon, to yeh ek extra "WARNING" row jud jaati hai - jab
+                    // staleWarning na ho (normal case), yeh row bilkul nahi aati, baaki CSV
+                    // structure byte-for-byte pehle jaisa hi rehta hai.
+                    ...(staleWarning ? [["WARNING", staleWarning]] : []),
                     [],
                     ["TABLE 1: DOMESTIC / NON DOMESTIC / PUBLIC WATER WORKS AND STREET LIGHTS"],
                     headerA,
@@ -5545,7 +5621,15 @@
             doc.setFontSize(7);
             doc.setTextColor(100);
             doc.text(`Generated: ${generatedAt}`, 283, 10, { align: "right" });
-            const tableStartY = 32;
+            // ISOLATED ADDITION (2026-09-17, USER-APPROVED condition): staleWarning na
+            // ho (normal case) to yeh block bilkul kuch nahi karta - tableStartY aur
+            // poora neeche wala table layout pehle jaisa hi (32) rehta hai.
+            if (staleWarning) {
+                doc.setFontSize(8);
+                doc.setTextColor(190, 18, 60);
+                doc.text(staleWarning, 148, 30, { align: "center" });
+            }
+            const tableStartY = staleWarning ? 36 : 32;
             const groupedHeadFor = (categoriesWithLabels) => [
                 [
                     ...firstCols.map((col) => ({ content: col, rowSpan: 2, styles: { valign: "middle", halign: "center", lineColor: [15, 23, 42], lineWidth: 0.25 } })),
@@ -5659,15 +5743,31 @@
                 const parsed = parseSummarySelection(rawVal, summaryMode);
                 const reportType = summaryMode === "MONTHLY" ? "MONTHLY" : "DAILY";
                 const filterValue = getRevenueProgressFilterValue(parsed.daily, parsed.monthly);
-                await Promise.all([
-                    ensureRevenueCategoryMasterDataLoaded(getRevenueCategoryTargetDcs()),
+                const [, , , reconciliation] = await Promise.all([
+                    ensureRevenueCategoryMasterDataLoadedStrict_(getRevenueCategoryTargetDcs()),
                     ensureRevenueCategoryRawPaymentRowsLoaded(),
-                    warmRevenueCategoryUploadedPaidCache()
+                    warmRevenueCategoryUploadedPaidCache(),
+                    ensureRevenueCategoryReconciliationLoaded(reportType, filterValue)
                 ]);
                 const rows = buildRevenueCategorySummaryRows(reportType, filterValue);
-                const diagnostic = buildRevenueCategoryDiagnostic(reportType, filterValue);
-                exportRevenueCategorySummary(fmt, rows, parsed.label, reportType, diagnostic);
-                setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} download ho chuki hai`), 500);
+                // USER-APPROVED correction #8: invariant mismatch mile to Excel/PDF
+                // silently nahi niklegi - saaf error (DC/HQ naam + difference) dikhega.
+                const invariantMismatches = checkRevenueCategorySummaryInvariant_(rows);
+                if (invariantMismatches.length) {
+                    const detail = invariantMismatches.slice(0, 5).map((m) => `${m.name} (${m.diff > 0 ? "+" : ""}${m.diff})`).join(", ");
+                    throw new Error(`Paid+Unpaid Unique Master Consumer se match nahi kar raha - ${detail}${invariantMismatches.length > 5 ? " aadi" : ""}`);
+                }
+                // ISOLATED ADDITION (2026-09-17, USER-APPROVED condition): backend abhi
+                // purana/reconciliation-unsupported hai to legacy fallback totals
+                // "normal/correct report" ki tarah SILENT nahi dikhte - report ke andar
+                // (additive line, existing layout/columns bilkul unchanged) aur download-
+                // complete toast dono me saaf "STALE/LEGACY" warning jaata hai.
+                const staleWarning = reconciliation && reconciliation.supported === false
+                    ? "STALE/LEGACY - totals may be inaccurate (backend update pending)"
+                    : null;
+                const diagnostic = buildRevenueCategoryDiagnostic(reportType, filterValue, rows);
+                exportRevenueCategorySummary(fmt, rows, parsed.label, reportType, diagnostic, staleWarning);
+                setTimeout(() => setProgressCategoryDownloadState(false, staleWarning ? `${downloadTypeLabel} download ho chuki hai - STALE/LEGACY, totals may be inaccurate` : `${downloadTypeLabel} download ho chuki hai`), 500);
             } catch (error) {
                 setProgressCategoryDownloadState(false, "Download nahi ho paya");
                 showToast(error?.message || "Category wise report download nahi ho payi", false);
@@ -6912,13 +7012,24 @@
                     // karne ki zaroorat nahi.
                     let hqVillageSummaryData = null;
                     try {
-                        await Promise.all([
-                            ensureRevenueCategoryMasterDataLoaded(getRevenueCategoryTargetDcs()),
+                        const [, , , reconciliation] = await Promise.all([
+                            ensureRevenueCategoryMasterDataLoadedStrict_(getRevenueCategoryTargetDcs()),
                             ensureRevenueCategoryRawPaymentRowsLoaded(),
-                            warmRevenueCategoryUploadedPaidCache()
+                            warmRevenueCategoryUploadedPaidCache(),
+                            ensureRevenueCategoryReconciliationLoaded(revenueMode, revenueFilterValue)
                         ]);
                         if (isStaleSummaryRefresh()) return;
-                        hqVillageSummaryData = buildRevenueHqVillageSummaryData(revenueMode, revenueFilterValue);
+                        // ISOLATED ADDITION (2026-09-17, USER-APPROVED condition): yeh chhoti
+                        // embedded quick-glance widget hai (poora dedicated report nahi) -
+                        // agar reconciliation backend abhi purana/unavailable hai to yahan
+                        // STALE/LEGACY totals dikhane ki jagah simply hide kar dete hain
+                        // (existing hi placeholder text dikhta hai - koi galat number kabhi
+                        // silently nahi dikhta). Dedicated HQ-Village/Target/Top-Defaulters
+                        // reports me isi scenario par saaf STALE/LEGACY warning ke saath
+                        // data dikhta hai (neeche dekhein) - yahan sirf yeh chhota widget hai.
+                        hqVillageSummaryData = (reconciliation && reconciliation.supported === false)
+                            ? null
+                            : buildRevenueHqVillageSummaryData(revenueMode, revenueFilterValue);
                     } catch (_) {
                         hqVillageSummaryData = null;
                     }
@@ -7838,20 +7949,6 @@
                     // sakti thi. Ab sirf isi app ki apni cache ("seoni-app-"
                     // prefix wali, service-worker.js ke CACHE_VERSION se match)
                     // delete hoti hai.
-                    // ITEM-10 PHASE-1 FIX (2026-09-16, STAGING COPY ONLY): purane
-                    // staging cache-naam ("seoni-app-shell-STAGING-v1") ke saath
-                    // upar wala "seoni-app-" prefix live ke "seoni-app-shell-v2"
-                    // AUR staging dono ko match kar raha tha (same origin,
-                    // akhileshpatidar-dotcom.github.io, isliye Refresh button
-                    // dabane se live ka cache bhi delete ho sakta tha). Fix ke
-                    // taur par staging ka cache-naam khud "seoni-staging-app-shell-v1"
-                    // rakha gaya (service-worker.js me) - yeh naam "seoni-app-"
-                    // prefix se shuru hi nahi hota. Isliye YAHAN (sirf staging copy
-                    // me) prefix ko bhi "seoni-staging-app-shell-" kar diya hai, jo
-                    // sirf staging ki apni cache match/delete karta hai, live ke
-                    // "seoni-app-shell-v2" ko kabhi touch nahi karta. Live app.js me
-                    // yeh line "seoni-app-" hi rahegi, kyunki wahan koi doosra
-                    // "seoni-app-" prefix wala cache exist hi nahi karta.
                     await Promise.all(keys.filter((key) => key.startsWith("seoni-staging-app-shell-")).map((key) => caches.delete(key)));
                 }
                 if ("serviceWorker" in navigator) {
@@ -8199,9 +8296,9 @@
             return normalizeDcName(found ? found[1] : fallback) || fallback;
         }
 
-        // ITEM-10 STOCK EMPTY/ERROR/STALE FIX (2026-09-16, USER-REQUESTED, multi-
-        // round-corrected - see stockMaterialsStatus/stockMaterialsStale comment
-        // upar unke declaration par): teen baar user ke independent review ne
+        // STOCK EMPTY/ERROR/STALE FIX (2026-09-16, USER-REQUESTED, multi-round-
+        // corrected - see stockMaterialsStatus/stockMaterialsStale comment upar
+        // unke declaration par): teen baar user ke independent review ne
         // correction maangi thi - (1) empty API+CSV ko "kuch nahi hua" ki jagah
         // explicit valid-empty maana jaaye, (2) unsaved Receive/Issue kaam kisi
         // bhi failure-path me kabhi reset na ho, (3) pehla-hi load fail hone par
@@ -9957,6 +10054,7 @@
         async function fetchOmvigFreezeStatus_(forceRefresh = false) {
             if (!forceRefresh && omvigFreezeStatusCache_) return omvigFreezeStatusCache_;
             const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(`${omvigSubmitScriptUrl}?action=getFreezeStatus&t=${Date.now()}`, 45000)));
+            if (data?.status === "error") throw new Error(data.message || "O&M/VIG freeze status load fail");
             let freezeDate = data?.freeze_date || "";
             const pendingCount = Number(data?.pending_count) || 0;
             // USER REQUEST (2026-09-14): koi bhi (admin panel ya seedha report)
@@ -9997,6 +10095,7 @@
             if (omvigPendingCache_[key]) return omvigPendingCache_[key];
             const url = `${omvigSubmitScriptUrl}?action=getPendingSummary&dc=${encodeURIComponent(dcName)}&t=${Date.now()}`;
             const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, 45000)));
+            if (data?.status === "error") throw new Error(data.message || `O&M/VIG ${dcName} data load fail`);
             const rows = Array.isArray(data?.data) ? data.data : [];
             const result = { rows: rows.map(normalizeOmvigPendingRow_), freeze_date: data?.freeze_date || "" };
             omvigPendingCache_[key] = result;
@@ -10007,22 +10106,51 @@
             return Object.keys(divisionConfigs).flatMap((divisionName) => getDivisionDcNames(divisionName));
         }
 
-        // BUG FIX (2026-09-14, user reported: "pehle time leta tha par khul jaati
-        // thi, ab error aane laga" after re-upload): root cause - `Promise.all`
-        // fail-fast hai, poore 24-DC Circle fetch (jo already 2-2.5 minute leta
-        // hai, `withAppsScriptConcurrencyGate_` sirf 2 concurrent allow karta
-        // hai isliye) me agar EK bhi DC ka call dono retry attempts ke baad bhi
-        // fail ho (transient echo-404/network glitch, poori list itni der chalne
-        // par iska chance bhi badh jaata hai), to POORA fetch turant reject ho
-        // jaata tha - baaki 23 DC ka safal data bhi fenk diya jaata tha aur user
-        // ko seedha "data load nahi ho payi" error dikhta tha. FIX: ab har DC ka
-        // fetch alag try/catch me hai (ek DC fail ho to baaki chalte rehte hain,
-        // koi Promise.all reject nahi hota), aur sabhi batch poore hone ke baad
-        // jo bhi DC pehli baar fail hui thi unke liye EK final retry-round chalta
-        // hai (transient glitch aksar dusri baar chal jaata hai). Sirf tabhi error
-        // throw hota hai jab is final round ke baad bhi koi DC fail rahe.
+        // SPEED FIX (2026-09-16): Division/Circle ka purana flow har DC ke liye
+        // alag getPendingSummary call karta tha. Backend har call me poori ~9500-row
+        // baseline sheet read karke uske baad DC filter karta tha; Circle me iska
+        // matlab lagbhag 24 full-sheet scans tha. Naya additive `dc_names` batch
+        // mode 6 DC ek call me laata hai, isliye Circle me aam taur par sirf 4
+        // full-sheet scans hote hain. Batch fail ho to backward-compatible per-DC
+        // fallback chalta hai, taaki frontend/backend deployment mismatch se report
+        // na toote.
+        async function fetchOmvigPendingBatch_(dcNames) {
+            const normalizedDcs = Array.from(new Set((dcNames || []).map((name) => String(name || "").trim()).filter(Boolean)));
+            if (!normalizedDcs.length) return { rows: [], freeze_date: "" };
+
+            const allCached = normalizedDcs.every((dcName) => !!omvigPendingCache_[dcName]);
+            if (allCached) {
+                const cachedRows = [];
+                let cachedFreezeDate = "";
+                normalizedDcs.forEach((dcName) => {
+                    const cached = omvigPendingCache_[dcName];
+                    cachedRows.push(...cached.rows);
+                    if (!cachedFreezeDate && cached.freeze_date) cachedFreezeDate = cached.freeze_date;
+                });
+                return { rows: cachedRows, freeze_date: cachedFreezeDate };
+            }
+
+            const url = `${omvigSubmitScriptUrl}?action=getPendingSummary&dc_names=${encodeURIComponent(normalizedDcs.join(","))}&t=${Date.now()}`;
+            const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, 60000)));
+            if (data?.status === "error") throw new Error(data.message || "O&M/VIG batch data load fail");
+            if (data?.scope_mode !== "batch") throw new Error("O&M/VIG batch endpoint backend par deploy nahi hai");
+            const freezeDate = data?.freeze_date || "";
+            const rows = (Array.isArray(data?.data) ? data.data : []).map(normalizeOmvigPendingRow_);
+
+            const dcMap = {};
+            normalizedDcs.forEach((dcName) => { dcMap[normalizeDcName(dcName)] = []; });
+            rows.forEach((row) => {
+                const key = normalizeDcName(row.dc_name);
+                if (dcMap[key]) dcMap[key].push(row);
+            });
+            normalizedDcs.forEach((dcName) => {
+                omvigPendingCache_[dcName] = { rows: dcMap[normalizeDcName(dcName)] || [], freeze_date: freezeDate };
+            });
+            return { rows, freeze_date: freezeDate };
+        }
+
         async function fetchOmvigPendingForDcs_(dcNames) {
-            const BATCH = 5; // Freeze module jaisa hi - max 5 DC parallel
+            const BATCH = 6;
             let freezeDateOut = "";
             const allRows = [];
             const failedDcs = [];
@@ -10037,7 +10165,13 @@
             };
             for (let i = 0; i < dcNames.length; i += BATCH) {
                 const batch = dcNames.slice(i, i + BATCH);
-                await Promise.all(batch.map(fetchOneDc));
+                try {
+                    const result = await fetchOmvigPendingBatch_(batch);
+                    allRows.push(...result.rows);
+                    if (!freezeDateOut && result.freeze_date) freezeDateOut = result.freeze_date;
+                } catch (_) {
+                    await Promise.all(batch.map(fetchOneDc));
+                }
             }
             if (failedDcs.length) {
                 const retryList = failedDcs.slice();
@@ -10066,6 +10200,7 @@
             if (omvigPaidCache_[key]) return omvigPaidCache_[key];
             const url = `${omvigSubmitScriptUrl}?action=getPaidSummary${dc ? `&dc=${encodeURIComponent(dc)}` : ""}&t=${Date.now()}`;
             const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, dc ? 45000 : 90000)));
+            if (data?.status === "error") throw new Error(data.message || "O&M/VIG paid data load fail");
             const rows = Array.isArray(data?.data) ? data.data : [];
             const result = rows.map(normalizeOmvigPaidRow_);
             omvigPaidCache_[key] = result;
@@ -10187,13 +10322,30 @@
             return rows;
         }
 
+        // USER REQUEST (2026-09-16): DC-wise SUMMARY TABLE (Circle/Division/DC
+        // level, sabhi jagah) me ab tak PART PAID case "PENDING" bucket me
+        // count hota tha (sirf poori tarah balanced_amount cover hone par hi
+        // "PAID" gina jaata tha) - isse GRAND TOTAL PAID COUNT admin panel ke
+        // "matched" figure se kam dikhta tha aur user ko confusing laga. Yeh
+        // ab `filterOmvigRowsByStatus_` ke "PAID" wale definition (isPaidNow YA
+        // koi bhi payment aaya ho) jaisa hi consistent hai - kisi bhi payment
+        // wale case ko "PAID" bucket me gina jaata hai, amount me sirf abhi tak
+        // JITNA paisa aaya hai wahi (poora balanced_amount nahi, jab tak poora
+        // cover na ho jaaye).
+        function omvigIsInPaidBucket_(r) {
+            return r.isPaidNow || Number(r.paidAmountNow || 0) > 0;
+        }
+        function omvigPaidBucketAmount_(r) {
+            return r.isPaidNow ? Number(r.pending_amount || 0) : Number(r.paidAmountNow || 0);
+        }
+
         // DC level ke liye ek hi row ka summary (Freeze NP ke DC-wise summary
         // jaisa hi shape/table, bas is scope me hamesha ek hi row hogi).
         function buildOmvigSingleDcSummaryRow_(rowsWithStatus, dcName) {
             const g = { name: dcName || "-", totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 };
             rowsWithStatus.forEach((r) => {
                 g.totalCount += 1;
-                if (r.isPaidNow) { g.paidCount += 1; g.paidAmount += Number(r.pending_amount || 0); }
+                if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
                 else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
             });
             return g;
@@ -10225,10 +10377,80 @@
                 if (!map[key]) map[key] = emptyGroup(key);
                 const g = map[key];
                 g.totalCount += 1;
-                if (r.isPaidNow) { g.paidCount += 1; g.paidAmount += Number(r.pending_amount || 0); }
+                if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
                 else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
             });
             return getDivisionDcNames(divisionName).map((dcName) => map[normalizeDcName(dcName)] || emptyGroup(normalizeDcName(dcName)));
+        }
+
+        // USER REQUEST (2026-09-16): Circle level par jab KOI Division filter
+        // nahi laga hota, poori Circle ki DC-wise summary (har Division ka
+        // SUB_TOTAL + aakhir me GRAND_TOTAL) pehle SHARED `buildFreezeDcWiseSummaryRows`
+        // (Freeze Tracking Report ke saath common) se aati thi - us function ko
+        // O&M/VIG ke naye "PART PAID bhi PAID bucket me" rule ke liye nahi
+        // chheda (Freeze Report ka apna alag business meaning hai, scope
+        // discipline). Yeh O&M/VIG-only copy hai, bilkul wahi DC-wise+SUB_TOTAL+
+        // GRAND_TOTAL shape, bas naye omvigIsInPaidBucket_/omvigPaidBucketAmount_
+        // rule ke saath - is function ka call sirf CIRCLE, no-division-filter
+        // scope se hota hai (renderOmvigCircleLevelHtml_ + getOmvigDownloadSummaryRows_),
+        // isliye DIVISION-level branch ki zaroorat nahi.
+        function buildOmvigCircleDcWiseSummaryRows_(rowsWithStatus) {
+            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 });
+            const withPercents = (g) => ({
+                ...g,
+                paidPercent: g.totalCount ? ((g.paidCount / g.totalCount) * 100).toFixed(1) : "0.0",
+                pendingPercent: g.totalCount ? ((g.pendingCount / g.totalCount) * 100).toFixed(1) : "0.0"
+            });
+            const map = {};
+            (rowsWithStatus || []).forEach((r) => {
+                const key = normalizeDcName(r.dc_name) || "-";
+                if (!map[key]) map[key] = emptyGroup(key);
+                const g = map[key];
+                g.totalCount += 1;
+                if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
+                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+            });
+
+            const rows = [];
+            const grand = emptyGroup("GRAND TOTAL");
+            Object.keys(divisionConfigs).forEach((divisionName) => {
+                const dcRows = getDivisionDcNames(divisionName).map((dcName) => {
+                    const key = normalizeDcName(dcName);
+                    return withPercents(map[key] || emptyGroup(key));
+                });
+                rows.push(...dcRows);
+                const divTotal = emptyGroup(getDivisionTotalLabel(divisionName));
+                dcRows.forEach((r) => {
+                    divTotal.totalCount += r.totalCount; divTotal.paidCount += r.paidCount; divTotal.paidAmount += r.paidAmount;
+                    divTotal.pendingCount += r.pendingCount; divTotal.pendingAmount += r.pendingAmount;
+                });
+                rows.push({ ...withPercents(divTotal), type: "SUB_TOTAL" });
+                grand.totalCount += divTotal.totalCount; grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
+                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount;
+            });
+            rows.push({ ...withPercents(grand), type: "GRAND_TOTAL" });
+            return rows;
+        }
+
+        // USER REQUEST (2026-09-16, USER-REPORTED via screenshot): Circle (Division
+        // filter laga hua) aur Division-level summary table me neeche ek TOTAL row
+        // missing thi - sirf per-DC rows dikhte the. Dono jagah buildOmvigDivisionDcSummaryRows_
+        // (O&M/VIG-only helper, Freeze Report ke saath SHARED nahi) use hoti hai -
+        // isliye total sirf yahin jodte hain, Freeze Report ki shared
+        // buildFreezeDcWiseSummaryRows/renderFreezeDcWiseSummaryHtml ko bilkul nahi
+        // chhedte (wahan already Circle-wide view me SUB_TOTAL+GRAND_TOTAL sahi
+        // dikh rahe hain, unse koi lena-dena nahi). Daily aur Monthly dono ek hi
+        // renderOmvigDivisionLevelHtml_/renderOmvigCircleLevelHtml_ reuse karte
+        // hain, isliye yeh fix dono me apne aap aa jaata hai.
+        function appendOmvigTotalRow_(rows) {
+            const total = { name: "TOTAL", totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, type: "GRAND_TOTAL" };
+            rows.forEach((r) => {
+                total.totalCount += r.totalCount; total.paidCount += r.paidCount; total.paidAmount += r.paidAmount;
+                total.pendingCount += r.pendingCount; total.pendingAmount += r.pendingAmount;
+            });
+            total.paidPercent = total.totalCount ? ((total.paidCount / total.totalCount) * 100).toFixed(1) : "0.0";
+            total.pendingPercent = total.totalCount ? ((total.pendingCount / total.totalCount) * 100).toFixed(1) : "0.0";
+            return rows.concat([total]);
         }
 
         function omvigFilterSelectHtml_(id, placeholder, options, selectedValue) {
@@ -10240,6 +10462,15 @@
         }
 
         const OMVIG_STATUS_OPTIONS_ = [{ value: "PAID", label: "PAID (incl. Part Paid)" }, { value: "PENDING", label: "PENDING" }];
+
+        // USER REQUEST (2026-09-16): Daily mode ke summary table me "PAID"
+        // column "YESTERDAY PAID" dikhna chahiye (Monthly me "PAID" hi rehta
+        // hai) - taaki 0 PENDING wale Daily view ko log global "aaj pending
+        // zero hai" na samjh baithein, balki samjhein ki yeh sirf us din ke
+        // jama (settlement) hain.
+        function omvigPaidColLabel_() {
+            return omvigReportMode === "DAILY" ? "YESTERDAY PAID" : "PAID";
+        }
 
         // USER REQUEST (2026-09-14 + fix): DC level par ab poori list seedhe
         // nahi dikhti - sirf is DC ka ek-row SUMMARY. Paid/Unpaid dropdown
@@ -10254,10 +10485,10 @@
             let summaryHtml, listHtml = "";
             if (omvigFilterStatus) {
                 const filteredRows = filterOmvigRowsByStatus_(rowsWithStatus, omvigFilterStatus);
-                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, activeDC, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`);
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, activeDC, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigPaidColLabel_(), "PENDING");
                 listHtml = renderOmvigDcListHtml_(filteredRows);
             } else {
-                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigSingleDcSummaryRow_(rowsWithStatus, activeDC)], "DC SUMMARY (AMOUNT IN LAKH)");
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigSingleDcSummaryRow_(rowsWithStatus, activeDC)], "DC SUMMARY (AMOUNT IN LAKH)", omvigPaidColLabel_(), "PENDING");
             }
             return summaryHtml + statusSelectHtml + listHtml;
         }
@@ -10275,15 +10506,15 @@
             const dcSelectHtml = omvigFilterSelectHtml_("omvig-division-dc-select", "-- Select DC --", dcOptions, omvigFilterDc);
             let summaryHtml, statusSelectHtml = "";
             if (!omvigFilterDc) {
-                summaryHtml = renderFreezeDcWiseSummaryHtml(rowsWithStatus);
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", appendOmvigTotalRow_(buildOmvigDivisionDcSummaryRows_(rowsWithStatus, activeDiv)), "DC WISE SUMMARY (AMOUNT IN LAKH)", omvigPaidColLabel_(), "PENDING");
             } else {
                 const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
                 statusSelectHtml = omvigFilterSelectHtml_("omvig-division-status-select", "-- Select Paid/Unpaid --", OMVIG_STATUS_OPTIONS_, omvigFilterStatus);
                 if (!omvigFilterStatus) {
-                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigSingleDcSummaryRow_(dcRows, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)");
+                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigSingleDcSummaryRow_(dcRows, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)", omvigPaidColLabel_(), "PENDING");
                 } else {
                     const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
-                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`);
+                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigPaidColLabel_(), "PENDING");
                 }
             }
             return summaryHtml + dcSelectHtml + statusSelectHtml;
@@ -10302,20 +10533,26 @@
             const divSelectHtml = omvigFilterSelectHtml_("omvig-circle-division-select", "-- Select Division --", divOptions, omvigFilterDivision);
             let summaryHtml, dcSelectHtml = "", statusSelectHtml = "";
             if (!omvigFilterDivision) {
-                summaryHtml = renderFreezeDcWiseSummaryHtml(rowsWithStatus);
+                // USER REQUEST (2026-09-16): pehle yahan SHARED renderFreezeDcWiseSummaryHtml
+                // (Freeze Tracking Report ke saath common) use hota tha - naye
+                // "PART PAID bhi PAID bucket me" rule + Daily "YESTERDAY PAID"
+                // label ke liye ab O&M/VIG-only buildOmvigCircleDcWiseSummaryRows_
+                // (bilkul wahi DC-wise+SUB_TOTAL+GRAND_TOTAL shape) use karte hain,
+                // Freeze Report ka shared function bilkul nahi chheda.
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", buildOmvigCircleDcWiseSummaryRows_(rowsWithStatus), "DC WISE SUMMARY (AMOUNT IN LAKH)", omvigPaidColLabel_(), "PENDING");
             } else {
                 const dcOptions = getDivisionDcNames(omvigFilterDivision).map((n) => ({ value: n, label: n }));
                 dcSelectHtml = omvigFilterSelectHtml_("omvig-circle-dc-select", "-- Select DC --", dcOptions, omvigFilterDc);
                 if (!omvigFilterDc) {
-                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", buildOmvigDivisionDcSummaryRows_(rowsWithStatus, omvigFilterDivision), "DC-WISE SUMMARY (AMOUNT IN LAKH)");
+                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", appendOmvigTotalRow_(buildOmvigDivisionDcSummaryRows_(rowsWithStatus, omvigFilterDivision)), "DC-WISE SUMMARY (AMOUNT IN LAKH)", omvigPaidColLabel_(), "PENDING");
                 } else {
                     const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
                     statusSelectHtml = omvigFilterSelectHtml_("omvig-circle-status-select", "-- Select Paid/Unpaid --", OMVIG_STATUS_OPTIONS_, omvigFilterStatus);
                     if (!omvigFilterStatus) {
-                        summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigSingleDcSummaryRow_(dcRows, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)");
+                        summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigSingleDcSummaryRow_(dcRows, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)", omvigPaidColLabel_(), "PENDING");
                     } else {
                         const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
-                        summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`);
+                        summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigPaidColLabel_(), "PENDING");
                     }
                 }
             }
@@ -10462,6 +10699,7 @@
             if (omvigDailyReportCache_) return omvigDailyReportCache_;
             const url = `${omvigSubmitScriptUrl}?action=getDailyReport&t=${Date.now()}`;
             const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, 45000)));
+            if (data?.status === "error") throw new Error(data.message || "O&M/VIG daily report load fail");
             const rows = Array.isArray(data?.rows) ? data.rows.map((r) => ({
                 dc_name: String(r.dc_name || "").trim(),
                 consumer_name: String(r.consumer_name || "").trim(),
@@ -10469,8 +10707,81 @@
                 amount: Number(r.amount) || 0,
                 pay_mode: String(r.pay_mode || "").trim()
             })) : [];
-            omvigDailyReportCache_ = { date: data?.date || "", rows };
+            // USER REQUEST (2026-09-16, round 2): "TOTAL CONSUMER" aur "PENDING"
+            // Daily me bhi Monthly jaisa hi SAHI/TRUE dikhna chahiye (poore
+            // baseline ka), sirf "PAID" column hi latest-date ("yesterday") tak
+            // simat rahe. Backend (`getDailyReport`) ab ek chhota per-DC
+            // `dc_summary` (~24 row) bhejta hai jisme yeh already compute hoke
+            // aata hai (baseline poori padhi to jaati hai backend par, par
+            // client ko sirf summary milta hai - poora ~9500-row baseline nahi,
+            // isliye Daily FAST hi rehta hai). Purane backend (jab tak .gs
+            // redeploy na ho) me yeh field hoga hi nahi - `dcSummaryMap` khaali
+            // rahega, sabhi DC ka TOTAL/PENDING 0 dikhega (crash nahi hoga).
+            const dcSummaryList = Array.isArray(data?.dc_summary) ? data.dc_summary : [];
+            const dcSummaryMap = {};
+            dcSummaryList.forEach((s) => {
+                const key = normalizeDcName(s?.dc_name);
+                if (!key) return;
+                dcSummaryMap[key] = {
+                    totalCount: Number(s.totalCount) || 0,
+                    pendingCount: Number(s.pendingCount) || 0,
+                    pendingAmount: Number(s.pendingAmount) || 0,
+                    yesterdayPaidCount: Number(s.yesterdayPaidCount) || 0,
+                    yesterdayPaidAmount: Number(s.yesterdayPaidAmount) || 0
+                };
+            });
+            omvigDailyReportCache_ = { date: data?.date || "", rows, dcSummaryMap };
             return omvigDailyReportCache_;
+        }
+
+        // Daily ke per-DC TRUE summary group - `dcSummaryMap` (backend se) se
+        // TOTAL CONSUMER/PENDING leta hai, "PAID" sirf yesterday ka
+        // count/amount (Monthly ke buildOmvigSingleDcSummaryRow_/
+        // buildOmvigDivisionDcSummaryRows_ jaisa SHAPE hi return karta hai,
+        // taaki renderFreezeGroupSummaryTableHtml/appendOmvigTotalRow_ dono
+        // bina badlaav reuse ho sakein).
+        function omvigDailyDcSummaryGroup_(dcSummaryMap, dcName) {
+            const s = dcSummaryMap[normalizeDcName(dcName)];
+            return {
+                name: dcName || "-",
+                totalCount: s ? s.totalCount : 0,
+                paidCount: s ? s.yesterdayPaidCount : 0,
+                paidAmount: s ? s.yesterdayPaidAmount : 0,
+                pendingCount: s ? s.pendingCount : 0,
+                pendingAmount: s ? s.pendingAmount : 0
+            };
+        }
+
+        function omvigDailyDivisionDcSummaryRows_(dcSummaryMap, divisionName) {
+            return getDivisionDcNames(divisionName).map((dcName) => omvigDailyDcSummaryGroup_(dcSummaryMap, dcName));
+        }
+
+        // Circle-wide (bina Division filter) DC-wise + per-Division SUB_TOTAL +
+        // GRAND_TOTAL - buildOmvigCircleDcWiseSummaryRows_ jaisa hi shape, bas
+        // source dcSummaryMap hai (case-level rowsWithStatus nahi).
+        function omvigDailyCircleDcWiseSummaryRows_(dcSummaryMap) {
+            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 });
+            const withPercents = (g) => ({
+                ...g,
+                paidPercent: g.totalCount ? ((g.paidCount / g.totalCount) * 100).toFixed(1) : "0.0",
+                pendingPercent: g.totalCount ? ((g.pendingCount / g.totalCount) * 100).toFixed(1) : "0.0"
+            });
+            const rows = [];
+            const grand = emptyGroup("GRAND TOTAL");
+            Object.keys(divisionConfigs).forEach((divisionName) => {
+                const dcRows = getDivisionDcNames(divisionName).map((dcName) => withPercents(omvigDailyDcSummaryGroup_(dcSummaryMap, dcName)));
+                rows.push(...dcRows);
+                const divTotal = emptyGroup(getDivisionTotalLabel(divisionName));
+                dcRows.forEach((r) => {
+                    divTotal.totalCount += r.totalCount; divTotal.paidCount += r.paidCount; divTotal.paidAmount += r.paidAmount;
+                    divTotal.pendingCount += r.pendingCount; divTotal.pendingAmount += r.pendingAmount;
+                });
+                rows.push({ ...withPercents(divTotal), type: "SUB_TOTAL" });
+                grand.totalCount += divTotal.totalCount; grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
+                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount;
+            });
+            rows.push({ ...withPercents(grand), type: "GRAND_TOTAL" });
+            return rows;
         }
 
         function scopeOmvigDailyRowsToView_(rows) {
@@ -10485,31 +10796,135 @@
             return rows;
         }
 
+        // USER REQUEST (2026-09-16): Daily ko bhi Monthly jaisa hi summary+dropdown
+        // UX chahiye - Circle/Division level par seedhi list nahi, DC-wise summary
+        // table (Division dropdown se drill-down), DC level par single-DC summary +
+        // Paid/Unpaid dropdown (list sirf tabhi). USER REQUEST (2026-09-16, round
+        // 2): DC-WISE SUMMARY table ke TOTAL CONSUMER/PENDING ab `dcSummaryMap`
+        // (backend se, TRUE poore baseline ka) se aate hain - naye
+        // omvigDailyDcSummaryGroup_/omvigDailyDivisionDcSummaryRows_/
+        // omvigDailyCircleDcWiseSummaryRows_ (upar dekhein) use hote hain, Monthly
+        // wale shared builders (buildOmvigSingleDcSummaryRow_ etc., jo case-level
+        // rowsWithStatus se kaam karte hain) Daily ke SUMMARY table ke liye ab
+        // nahi. Yeh mapOmvigDailyRowsWithStatus_ ab bhi zaroori hai - DC-level ka
+        // Paid/Unpaid dropdown chunne par "list" (kis consumer ne kal kitna paya)
+        // isi flat shape se banti hai, wahan koi badlav nahi.
+        function mapOmvigDailyRowsWithStatus_(rows, date) {
+            return rows.map((r) => ({
+                dc_name: r.dc_name,
+                consumer_name: r.consumer_name,
+                panchanama_no: r.panchanama_no,
+                case_name: "", // Daily ke getDailyReport data me case_name available nahi hai
+                pay_mode: r.pay_mode,
+                pending_amount: r.amount,
+                remainingPending: 0,
+                paidAmountNow: r.amount,
+                balanced_amount: r.amount,
+                isPaidNow: true,
+                paidDateNow: date
+            }));
+        }
+
         async function loadOmvigDailyReportData_(forceRefresh = false) {
             // enrichment (consumer naam, DC fallback) ab backend (`getDailyReport`)
             // hi kar ke deta hai - yahan sirf view-level (DC/Division/Circle)
             // scoping baaki hai, jo purani tarah in-memory/free hai.
-            const { date, rows } = await fetchOmvigDailyReport_(forceRefresh);
+            const { date, rows, dcSummaryMap } = await fetchOmvigDailyReport_(forceRefresh);
             const scoped = scopeOmvigDailyRowsToView_(rows);
-            return { date, rows: scoped };
+            return { date, rowsWithStatus: mapOmvigDailyRowsWithStatus_(scoped, date), dcSummaryMap };
         }
 
+        // Daily-specific render functions (Monthly ki renderOmvigDcLevelHtml_/
+        // renderOmvigDivisionLevelHtml_/renderOmvigCircleLevelHtml_ jaisi hi
+        // dropdown/structure, bas "no filter" summary ab TRUE dcSummaryMap se
+        // banti hai; Paid/Unpaid dropdown chunne wala hissa purane flat
+        // rowsWithStatus-based tareeke se hi hai, wahan koi badlav nahi).
+        function renderOmvigDailyDcLevelHtml_(rowsWithStatus, dcSummaryMap) {
+            const statusSelectHtml = omvigFilterSelectHtml_("omvig-dc-status-select", "-- Select Paid/Unpaid to View List --", OMVIG_STATUS_OPTIONS_, omvigFilterStatus);
+            let summaryHtml, listHtml = "";
+            if (omvigFilterStatus) {
+                const filteredRows = filterOmvigRowsByStatus_(rowsWithStatus, omvigFilterStatus);
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, activeDC, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, "YESTERDAY PAID", "PENDING");
+                listHtml = renderOmvigDcListHtml_(filteredRows);
+            } else {
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, activeDC)], "DC SUMMARY (AMOUNT IN LAKH)", "YESTERDAY PAID", "PENDING");
+            }
+            return summaryHtml + statusSelectHtml + listHtml;
+        }
+
+        function renderOmvigDailyDivisionLevelHtml_(rowsWithStatus, dcSummaryMap) {
+            const dcOptions = getDivisionDcNames(activeDiv).map((n) => ({ value: n, label: n }));
+            const dcSelectHtml = omvigFilterSelectHtml_("omvig-division-dc-select", "-- Select DC --", dcOptions, omvigFilterDc);
+            let summaryHtml, statusSelectHtml = "";
+            if (!omvigFilterDc) {
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", appendOmvigTotalRow_(omvigDailyDivisionDcSummaryRows_(dcSummaryMap, activeDiv)), "DC WISE SUMMARY (AMOUNT IN LAKH)", "YESTERDAY PAID", "PENDING");
+            } else {
+                const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
+                statusSelectHtml = omvigFilterSelectHtml_("omvig-division-status-select", "-- Select Paid/Unpaid --", OMVIG_STATUS_OPTIONS_, omvigFilterStatus);
+                if (!omvigFilterStatus) {
+                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)", "YESTERDAY PAID", "PENDING");
+                } else {
+                    const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
+                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, "YESTERDAY PAID", "PENDING");
+                }
+            }
+            return summaryHtml + dcSelectHtml + statusSelectHtml;
+        }
+
+        function renderOmvigDailyCircleLevelHtml_(rowsWithStatus, dcSummaryMap) {
+            const divOptions = Object.keys(divisionConfigs).map((n) => ({ value: n, label: n.replace(/^DIVISION\s+/i, "") }));
+            const divSelectHtml = omvigFilterSelectHtml_("omvig-circle-division-select", "-- Select Division --", divOptions, omvigFilterDivision);
+            let summaryHtml, dcSelectHtml = "", statusSelectHtml = "";
+            if (!omvigFilterDivision) {
+                summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", omvigDailyCircleDcWiseSummaryRows_(dcSummaryMap), "DC WISE SUMMARY (AMOUNT IN LAKH)", "YESTERDAY PAID", "PENDING");
+            } else {
+                const dcOptions = getDivisionDcNames(omvigFilterDivision).map((n) => ({ value: n, label: n }));
+                dcSelectHtml = omvigFilterSelectHtml_("omvig-circle-dc-select", "-- Select DC --", dcOptions, omvigFilterDc);
+                if (!omvigFilterDc) {
+                    summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", appendOmvigTotalRow_(omvigDailyDivisionDcSummaryRows_(dcSummaryMap, omvigFilterDivision)), "DC-WISE SUMMARY (AMOUNT IN LAKH)", "YESTERDAY PAID", "PENDING");
+                } else {
+                    const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
+                    statusSelectHtml = omvigFilterSelectHtml_("omvig-circle-status-select", "-- Select Paid/Unpaid --", OMVIG_STATUS_OPTIONS_, omvigFilterStatus);
+                    if (!omvigFilterStatus) {
+                        summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)", "YESTERDAY PAID", "PENDING");
+                    } else {
+                        const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
+                        summaryHtml = renderFreezeGroupSummaryTableHtml("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, "YESTERDAY PAID", "PENDING");
+                    }
+                }
+            }
+            return summaryHtml + divSelectHtml + dcSelectHtml + statusSelectHtml;
+        }
+
+        // Download button-set bhi Monthly jaisa hi (dekhein downloadOmvigDailyReport
+        // neeche) - column-set sirf Daily ke actual data (DC/Consumer/Panchanama/
+        // Pay Mode/Amount) tak simat hai, kyunki Monthly wale Circle/Division/
+        // Checked-By/Inspection-Date/EZ-No/Tariff/Case/Balanced-Amount columns
+        // Daily data me hote hi nahi.
         function renderOmvigDailyReportHtml_(data) {
             if (!data.date) {
                 return `<div style="text-align:center; color:#64748b; font-size:0.72rem; padding:20px 0;">Abhi tak koi Paid List upload nahi hui hai.</div>`;
             }
-            const totalAmount = data.rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
-            let html = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-bottom:8px;">Latest Paid Upload - Date: ${escapeHtml(data.date)}</div>`;
-            html += `<div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: 1.4fr 0.9fr 0.8fr;"><div>Consumer / DC</div><div>Panchanama No</div><div>Amount</div></div>`;
-            if (!data.rows.length) {
-                html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is date ke liye is scope me koi settlement nahi mila.</div></div>`;
+            const dateLine = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-bottom:4px;">Latest Paid Upload - Date: ${escapeHtml(data.date)}</div>`;
+            let bodyHtml;
+            if (activeViewLevel === "DC") {
+                bodyHtml = renderOmvigDailyDcLevelHtml_(data.rowsWithStatus, data.dcSummaryMap);
+            } else if (activeViewLevel === "DIVISION") {
+                bodyHtml = renderOmvigDailyDivisionLevelHtml_(data.rowsWithStatus, data.dcSummaryMap);
             } else {
-                data.rows.forEach((r) => {
-                    html += `<div class="summary-table-row" style="grid-template-columns: 1.4fr 0.9fr 0.8fr;"><div>${escapeHtml(r.consumer_name || "-")}<br><span style="font-size:0.58rem; color:#64748b;">${escapeHtml(r.dc_name)}${r.pay_mode ? " | " + escapeHtml(r.pay_mode) : ""}</span></div><div class="font-black">${escapeHtml(r.panchanama_no)}</div><div class="text-emerald-700 font-black">${formatProgressReportAmount(r.amount)}</div></div>`;
-                });
+                bodyHtml = renderOmvigDailyCircleLevelHtml_(data.rowsWithStatus, data.dcSummaryMap);
             }
-            html += `</div><div class="summary-footer"><div class="font-black text-slate-800 text-center">TOTAL SETTLEMENTS: ${data.rows.length} | AMOUNT: ${formatProgressReportAmount(totalAmount)}</div></div>`;
-            return html;
+            const downloadButtons = activeViewLevel === "DC"
+                ? `<div style="display:flex; gap:8px; margin-top:12px;">
+                     <button class="btn-unique" style="flex:1; background:#16a34a; color:#fff;" onclick="downloadOmvigDailyReport('XLS')">⬇️ Excel</button>
+                     <button class="btn-unique" style="flex:1; background:#dc2626; color:#fff;" onclick="downloadOmvigDailyReport('PDF')">⬇️ PDF</button>
+                   </div>`
+                : `<div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+                     <button class="btn-unique" style="flex:1; min-width:100px; background:#16a34a; color:#fff;" onclick="downloadOmvigDailyReport('XLS')">⬇️ Excel</button>
+                     <button class="btn-unique" style="flex:1; min-width:100px; background:#0891b2; color:#fff;" onclick="downloadOmvigDailyReport('PDF_SUMMARY')">📊 Summary PDF</button>
+                     <button class="btn-unique" style="flex:1; min-width:100px; background:#dc2626; color:#fff;" onclick="downloadOmvigDailyReport('PDF_LIST')">📋 List PDF</button>
+                   </div>`;
+            return dateLine + bodyHtml + downloadButtons;
         }
 
         // USER REQUEST (2026-09-14): on-screen dropdown filter (Division/DC/
@@ -10532,6 +10947,12 @@
             return rows;
         }
 
+        // USER REQUEST (2026-09-16): download (Excel/PDF) ka DC-wise summary
+        // table on-screen wale se HAMESHA match karna chahiye - isliye ab yahan
+        // bhi wahi O&M/VIG-only builders (aur TOTAL row) use karte hain jo
+        // screen par use hote hain, SHARED buildFreezeDcWiseSummaryRows nahi
+        // (jisme na to naya "PART PAID bhi PAID" rule hai, na Division-level
+        // par TOTAL row).
         function getOmvigDownloadSummaryRows_(scopedRows, finalRows) {
             const dcInScope = activeViewLevel === "DC" ? activeDC : omvigFilterDc;
             let rows;
@@ -10540,9 +10961,37 @@
                     ? [buildOmvigStatusSummaryRow_(finalRows, dcInScope, omvigFilterStatus)]
                     : [buildOmvigSingleDcSummaryRow_(scopedRows, dcInScope)];
             } else if (activeViewLevel === "CIRCLE" && omvigFilterDivision) {
-                rows = buildOmvigDivisionDcSummaryRows_(scopedRows, omvigFilterDivision);
+                rows = appendOmvigTotalRow_(buildOmvigDivisionDcSummaryRows_(scopedRows, omvigFilterDivision));
+            } else if (activeViewLevel === "DIVISION") {
+                rows = appendOmvigTotalRow_(buildOmvigDivisionDcSummaryRows_(scopedRows, activeDiv));
             } else {
-                rows = buildFreezeDcWiseSummaryRows(scopedRows);
+                rows = buildOmvigCircleDcWiseSummaryRows_(scopedRows);
+            }
+            return rows.map((r) => ({
+                ...r,
+                paidPercent: r.paidPercent !== undefined ? r.paidPercent : (r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0"),
+                pendingPercent: r.pendingPercent !== undefined ? r.pendingPercent : (r.totalCount ? ((r.pendingCount / r.totalCount) * 100).toFixed(1) : "0.0")
+            }));
+        }
+
+        // USER REQUEST (2026-09-16, round 2): Daily ke download (Excel/PDF) ka
+        // DC-wise summary table bhi on-screen jaisa hi TRUE TOTAL CONSUMER/
+        // PENDING dikhaye (dcSummaryMap se) - status-filtered (Paid/Unpaid
+        // dropdown chuna hua) case purane flat rowsWithStatus-based (finalRows)
+        // tareeke se hi hai, wahan koi badlav nahi.
+        function getOmvigDailyDownloadSummaryRows_(finalRows, dcSummaryMap) {
+            const dcInScope = activeViewLevel === "DC" ? activeDC : omvigFilterDc;
+            let rows;
+            if (dcInScope) {
+                rows = omvigFilterStatus
+                    ? [buildOmvigStatusSummaryRow_(finalRows, dcInScope, omvigFilterStatus)]
+                    : [omvigDailyDcSummaryGroup_(dcSummaryMap, dcInScope)];
+            } else if (activeViewLevel === "CIRCLE" && omvigFilterDivision) {
+                rows = appendOmvigTotalRow_(omvigDailyDivisionDcSummaryRows_(dcSummaryMap, omvigFilterDivision));
+            } else if (activeViewLevel === "DIVISION") {
+                rows = appendOmvigTotalRow_(omvigDailyDivisionDcSummaryRows_(dcSummaryMap, activeDiv));
+            } else {
+                rows = omvigDailyCircleDcWiseSummaryRows_(dcSummaryMap);
             }
             return rows.map((r) => ({
                 ...r,
@@ -10558,7 +11007,11 @@
                 const scopedRows = getOmvigDownloadScopedRows_(data.rowsWithStatus);
                 const rowsWithStatus = omvigFilterStatus ? filterOmvigRowsByStatus_(scopedRows, omvigFilterStatus) : scopedRows;
                 const totalCount = rowsWithStatus.length;
-                const paidCount = rowsWithStatus.filter((r) => r.isPaidNow).length;
+                // USER REQUEST (2026-09-16): PART PAID bhi ab "PAID" bucket me
+                // ginte hain (on-screen DC-wise summary table jaisa hi) - taaki
+                // is top box ka PAID/PENDING count niche wali DC-wise summary
+                // table se hamesha match kare.
+                const paidCount = rowsWithStatus.filter((r) => omvigIsInPaidBucket_(r)).length;
                 const pendingCount = totalCount - paidCount;
                 const paidPercent = totalCount ? ((paidCount / totalCount) * 100).toFixed(1) : "0.0";
                 const pendingPercent = totalCount ? ((pendingCount / totalCount) * 100).toFixed(1) : "0.0";
@@ -10743,6 +11196,134 @@
                 showToast("PDF report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
             } catch (error) {
                 showToast(error?.message || "O&M/VIG report download nahi ho paya", false);
+            }
+        }
+
+        // USER REQUEST (2026-09-16): Daily ke liye Monthly jaisa hi download
+        // pattern - Excel + Summary PDF + List PDF (Division/Circle), Excel + PDF
+        // (DC level), wahi dropdown-scoping (getOmvigDownloadScopedRows_/
+        // getOmvigDownloadSummaryRows_/filterOmvigRowsByStatus_ - sab reused,
+        // Monthly-agnostic hain). Column-set Daily ke actual data tak simat hai
+        // (DC/Consumer/Panchanama/Pay Mode/Amount) - Monthly wale Circle/Division/
+        // Checked-By/Inspection-Date/EZ-No/Tariff/Case/Balanced-Amount columns
+        // Daily data me hote hi nahi, isliye copy nahi kiye ja sakte.
+        async function downloadOmvigDailyReport(fmt) {
+            try {
+                const data = await loadOmvigDailyReportData_();
+                if (!data.date) return showToast("Abhi tak koi Paid List upload nahi hui hai", false);
+                const scopedRows = getOmvigDownloadScopedRows_(data.rowsWithStatus);
+                const rowsWithStatus = omvigFilterStatus ? filterOmvigRowsByStatus_(scopedRows, omvigFilterStatus) : scopedRows;
+                const totalCount = rowsWithStatus.length;
+                const totalAmount = rowsWithStatus.reduce((sum, r) => sum + (Number(r.paidAmountNow) || 0), 0);
+
+                let scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
+                const scopeExtras = [];
+                if (activeViewLevel === "CIRCLE" && omvigFilterDivision) scopeExtras.push(omvigFilterDivision.replace(/^DIVISION\s+/i, ""));
+                if ((activeViewLevel === "CIRCLE" || activeViewLevel === "DIVISION") && omvigFilterDc) scopeExtras.push(omvigFilterDc);
+                if (omvigFilterStatus) scopeExtras.push(omvigFilterStatus);
+                if (scopeExtras.length) scope += ` - ${scopeExtras.join(" - ")}`;
+                const reportTitle = `O&M-VIG Daily Report - ${scope}`;
+                const fileName = `${reportTitle}-${data.date}`.replace(/[\\/:*?"<>|]+/g, "_");
+
+                const listHeaders = ["DC", "CONSUMER NAME", "PANCHANAMA NO", "PAY MODE", "AMOUNT"];
+                const listBodyRows = rowsWithStatus.map((r) => [r.dc_name, r.consumer_name, r.panchanama_no, r.pay_mode, r.paidAmountNow]);
+
+                if (fmt === "XLS") {
+                    const csvSafe = (value) => {
+                        const text = String(value ?? "").replace(/\r\n|\r|\n/g, " ");
+                        return /[",]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+                    };
+                    const rows = [[reportTitle], [`Date: ${data.date}`], [],
+                        ["TOTAL SETTLEMENTS", "TOTAL AMOUNT"],
+                        [totalCount, totalAmount], []];
+                    if (activeViewLevel !== "DC") {
+                        const summaryRows = getOmvigDailyDownloadSummaryRows_(rowsWithStatus, data.dcSummaryMap);
+                        rows.push(["DC NAME", "TOTAL", "PAID COUNT", "PAID AMT", "PENDING COUNT", "PENDING AMT", "PAID %", "PENDING %"]);
+                        summaryRows.forEach((r) => rows.push([r.name, r.totalCount, r.paidCount, r.paidAmount, r.pendingCount, r.pendingAmount, `${r.paidPercent}%`, `${r.pendingPercent}%`]));
+                        rows.push([]);
+                    }
+                    rows.push(listHeaders, ...listBodyRows);
+                    const csv = rows.map((row) => row.map(csvSafe).join(",")).join("\n");
+                    await saveShmsBlob(`${fileName}.csv`, new Blob([csv], { type: "text/csv;charset=utf-8" }), "text/csv;charset=utf-8");
+                    return showToast("Excel report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+                }
+
+                if (!window.jspdf?.jsPDF) return showToast("PDF library load nahi hui", false);
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF("l", "mm", "a4");
+                const LEFT_ALIGN_COLS_ = [1, 2];
+                const RIGHT_ALIGN_COLS_ = [4];
+                const omvigDailyColumnStyles_ = {};
+                LEFT_ALIGN_COLS_.forEach((i) => { omvigDailyColumnStyles_[i] = { halign: "left" }; });
+                RIGHT_ALIGN_COLS_.forEach((i) => { omvigDailyColumnStyles_[i] = { halign: "right" }; });
+                const drawFullListTable = (startY) => {
+                    doc.autoTable({
+                        startY,
+                        head: [listHeaders],
+                        body: listBodyRows.length ? listBodyRows : [listHeaders.map(() => "")],
+                        theme: "grid", headStyles: { fillColor: [17, 24, 39], halign: "center" },
+                        styles: { fontSize: 6.5, cellPadding: 1.4, halign: "center", valign: "middle", overflow: "linebreak" },
+                        columnStyles: omvigDailyColumnStyles_,
+                        didDrawCell: (cellData) => {
+                            if (cellData.section === "body" && meterCheckingCellHasDevanagari_(cellData.cell.raw)) {
+                                const align = LEFT_ALIGN_COLS_.includes(cellData.column.index) ? "left" : "center";
+                                drawMeterCheckingHindiCell_(doc, cellData, align);
+                            }
+                        }
+                    });
+                };
+
+                if (fmt === "PDF_LIST") {
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(`${reportTitle} - Full List`, 148, 15, { align: "center" });
+                    doc.setFontSize(9); doc.setTextColor(80); doc.text(`Date: ${data.date}`, 148, 21, { align: "center" });
+                    drawFullListTable(26);
+                    const pdfBlob = doc.output("blob");
+                    await saveShmsBlob(`${fileName}.pdf`, pdfBlob, "application/pdf");
+                    return showToast("PDF report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+                }
+
+                doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                doc.setFontSize(15); doc.setTextColor(0); doc.text(reportTitle, 148, 16, { align: "center" });
+                doc.setFontSize(10); doc.text(`Date: ${data.date}`, 148, 23, { align: "center" });
+
+                doc.autoTable({
+                    startY: 29,
+                    head: [["TOTAL SETTLEMENTS", "TOTAL AMOUNT"]],
+                    body: [[totalCount, totalAmount]],
+                    theme: "grid", headStyles: { fillColor: [17, 24, 39], halign: "center" }, styles: { fontSize: 9, halign: "center" }
+                });
+
+                if (activeViewLevel !== "DC") {
+                    const summaryRows = getOmvigDailyDownloadSummaryRows_(rowsWithStatus, data.dcSummaryMap);
+                    const rowTypeFlags = summaryRows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
+                    doc.autoTable({
+                        startY: doc.lastAutoTable.finalY + 6,
+                        head: [["DC NAME", "TOTAL", "PAID COUNT", "PAID AMT", "PENDING COUNT", "PENDING AMT", "PAID %", "PENDING %"]],
+                        body: summaryRows.map((r) => [r.name, r.totalCount, r.paidCount, r.paidAmount, r.pendingCount, r.pendingAmount, `${r.paidPercent}%`, `${r.pendingPercent}%`]),
+                        theme: "grid", headStyles: { fillColor: [8, 145, 178], halign: "center" }, styles: { fontSize: 7, cellPadding: 1.5, halign: "center" },
+                        didParseCell: function (hookData) {
+                            if (hookData.section === "body") {
+                                const flag = rowTypeFlags[hookData.row.index];
+                                if (flag === 2) { hookData.cell.styles.fillColor = [219, 234, 254]; hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [159, 18, 57]; }
+                                else if (flag === 1) { hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [29, 78, 216]; }
+                            }
+                        }
+                    });
+                }
+
+                if (fmt !== "PDF_SUMMARY") {
+                    doc.addPage("a4", "l");
+                    doc.setFontSize(7); doc.setTextColor(100); doc.text("DEVELOPED BY - AKHILESH PATIDAR (AE)", 14, 8);
+                    doc.setFontSize(13); doc.setTextColor(0); doc.text(`${reportTitle} - Full List`, 148, 15, { align: "center" });
+                    drawFullListTable(20);
+                }
+
+                const pdfBlob = doc.output("blob");
+                await saveShmsBlob(`${fileName}.pdf`, pdfBlob, "application/pdf");
+                showToast("PDF report ka request bhej diya gaya. Agar preview me file na aaye to browser ya GitHub version me check kijiye.", true);
+            } catch (error) {
+                showToast(error?.message || "O&M/VIG Daily report download nahi ho paya", false);
             }
         }
 
@@ -15009,7 +15590,7 @@
             };
         }
 
-        async function loadRevenueCollectionData(dcName = activeDC, forceRefresh = false) {
+        async function loadRevenueCollectionData(dcName = activeDC, forceRefresh = false, options = null) {
             const dcKey = getRevenueCollectionDcKey(dcName);
             if (!forceRefresh && revenueCollectionLoadedByDc[dcKey]) return revenueCollectionRowsByDc[dcKey] || [];
 
@@ -15085,6 +15666,12 @@
                 }
             }
 
+            // Revenue reconciliation reports ko exact/current Master chahiye. Unke
+            // strict caller me remote CSV ke fail hone par purana consumer/cache
+            // fallback silently accept nahi karte; normal callers ka purana
+            // fallback behaviour bilkul unchanged rehta hai.
+            if (options && options.requireRemote) return [];
+
             let mobileUpdateRows = getConsumerRows(dcName);
             if (!mobileUpdateRows.length) mobileUpdateRows = await ensureDcDataLoaded(dcName);
             const mappedMobileRows = mobileUpdateRows.map(mapRevenueConsumerRow).filter((row) => normalizeRevenueIvrs(row.ivrsNo));
@@ -15115,27 +15702,6 @@
         function loadRevenueCollectionViaGviz(csvUrl) {
             return new Promise((resolve, reject) => {
                 const callbackName = `revenueGvizCallback_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-                const gvizUrl = buildRevenueGvizUrl(csvUrl, callbackName);
-
-                // STAGING SAFE MODE (2026-09-16, USER-REQUESTED - CORRECTION 1):
-                // yeh function fetch()/XMLHttpRequest bilkul use nahi karta -
-                // isme ek dynamic <script src="..."> tag banakar JSONP/GViz style
-                // se docs.google.com se data mangwaya jaata hai. Upar wala
-                // fetch/XHR monkey-patch aur connect-src CSP dono isko cover
-                // nahi karte (script loading connect-src se governed nahi hai) -
-                // isliye is exact call-site par bhi, fetch/XHR ke jaisa hi,
-                // production URL explicitly check karke block karte hain, script
-                // tag banane/append karne se PEHLE hi (real network request
-                // isliye kabhi bhejti hi nahi).
-                if (typeof STAGING_SAFE_MODE !== "undefined" && STAGING_SAFE_MODE &&
-                    typeof stagingIsProductionUrl_ === "function" && stagingIsProductionUrl_(gvizUrl)) {
-                    if (typeof stagingLogBlockedRequest_ === "function") {
-                        stagingLogBlockedRequest_("SCRIPT", gvizUrl, "gviz-dynamic-script-src");
-                    }
-                    reject(new Error("TEST BACKEND NOT CONFIGURED (staging safe mode: GViz <script src> request blocked)"));
-                    return;
-                }
-
                 const script = document.createElement("script");
                 const timeout = setTimeout(() => {
                     cleanup();
@@ -15170,7 +15736,7 @@
                     reject(new Error("GViz script load failed"));
                 };
 
-                script.src = gvizUrl;
+                script.src = buildRevenueGvizUrl(csvUrl, callbackName);
                 document.head.appendChild(script);
             });
         }
@@ -19699,34 +20265,647 @@
             return `Revenue Collection Date Report - ${dateValue}${hqSuffix}${typeSuffix}`;
         }
 
-        async function renderRevenueReportDownload() {
+        // ============================================================
+        // REVENUE REPORT DOWNLOAD - Division/Circle ISOLATED fast path
+        // (2026-09-16 speed fix). DC-level scope (activeDC set) ISSE BILKUL
+        // TOUCH NAHI hota - woh neeche renderRevenueReportDownload() ke
+        // pehle if(activeDC) branch me purane hi shared-cache scopeDc path
+        // se chalta hai, byte-for-byte unchanged. Yeh naya path SIRF
+        // Division/Circle (activeDC khaali) ke liye hai, aur Stock fix,
+        // O&M/VIG, Daily Progress "Paid by Staff" Live Revenue tile
+        // (fetchRevenueLiveProgressFastRows_), ya kisi aur Revenue screen
+        // (Cash Reconcile/Pending DO List/Progress Report) ko bilkul nahi
+        // chhedta - woh sab apne purane getRevenueLiveEntries()/
+        // getRevenueTdEntriesLocal() shared-cache par hi chalte rehte hain.
+        //
+        // User-approved corrections (9) is design me:
+        //  1) PAID (per-DC sheets) 6-DC batches me fetch hoti hai; TD
+        //     (ek hi SHARED sheet, sabhi DC ke liye) poore scope ke liye
+        //     sirf EK request - kabhi bhi per-PAID-batch nahi.
+        //  2) dc_names backend ke requireDcName_() se validate hote hain -
+        //     koi bhi failure silently drop nahi hoti, saaf error milta hai.
+        //  3) date/month filtering backend-side hoti hai, matchesMonthFilter_
+        //     normalizeDateDigits_ (normalizeRevenueReportDate/
+        //     getRevenueMonthKey jaisa hi parsing) par based hai - parity
+        //     alag se /tmp/parity_test.js me verify ki gayi.
+        //  4) Yeh apna ALAG isolated cache (revenueReportScopedCacheMap_)
+        //     rakhta hai - shared Live/TD cache ko kabhi READ ya WRITE
+        //     nahi karta.
+        //  5) Cache/request key = normalized DC list + DAILY/MONTHLY mode +
+        //     selected date/month (buildRevenueReportScopeKey_). Render-
+        //     token (revenueReportRenderToken) ke saath milkar ek purani/
+        //     stale response kabhi bhi naye selection ko overwrite nahi
+        //     kar sakti.
+        //  6) Capability sirf api_version se nahi - response ke
+        //     scope_mode/period_mode/period_value/requested_dc_count
+        //     marker fields se confirm hoti hai
+        //     (revenueReportHasCapabilityMarkers_). Marker missing = purana
+        //     backend = silent fallback purane unscoped path par
+        //     (renderRevenueReportDownloadLegacyScoped_) - koi error nahi.
+        //  7) Download button isi loadRevenueReportScopedRows_() cache ko
+        //     reuse karta hai - fresh cache par dobara fetch nahi.
+        //  8) Partial PAID-batch failure ya TD-failure par poori report
+        //     silently partial/khaali nahi dikhti - failed DC naam ke
+        //     saath clear error throw hoti hai (fetchRevenueReportPaidBatch_/
+        //     fetchRevenueReportTdSingle_), jo render/download dono jagah
+        //     user ko saaf dikhta hai.
+        //  9) PAID 6-DC batches me fetch hoti hai (per-DC sheets), par ab
+        //     PARALLEL (existing withAppsScriptConcurrencyGate_ ke 2-concurrent
+        //     limit ke andar) - sequential nahi (round-2 fix, neeche note).
+        //     TD ek hi shared sheet ke liye poore scope me sirf EK request.
+        //
+        // ROUND-2 CORRECTIONS (user review ke baad):
+        //  a) Sequential-batch bug fix: pehle PAID ke 6-DC batches ek-ek karke
+        //     (for-loop + await) chalte the - isse total backend read-cost me
+        //     koi kami nahi thi (same total cells), sirf alag-alag script
+        //     invocations ka overhead JUD raha tha (har request ka apna
+        //     latency/auth/JSON overhead), jo user ne sahi pakda. Ab batches
+        //     Promise.all() se ek saath chhodi jaati hain - app ka existing
+        //     withAppsScriptConcurrencyGate_ (2 concurrent/script-URL) unhe
+        //     khud hi 2-at-a-time serialize karta hai, jo poori app me already
+        //     istemal ho raha hai (kahin naya risk nahi). Isse real-world
+        //     latency sequential se kam hogi, kyunki gate allow karte hi agla
+        //     batch turant shuru ho jaata hai, purane ke poora khatam hone ka
+        //     wait nahi karta.
+        //  b) HONEST NOTE (backend Sheets-API read-cost par): scoping se
+        //     RESPONSE PAYLOAD (jo browser tak aata hai) chhota hota hai -
+        //     kyunki filtering backend par hi ho jaati hai, poori history
+        //     browser tak nahi aati. Division scope me READ-COST bhi kam hota
+        //     hai (sirf us division ki DC sheets padhi jaati hain, sabhi 24
+        //     ki nahi). Circle scope me saari 24 DC sheets ab bhi utni hi
+        //     padhi jaati hain jitni pehle unscoped call me padhti thi (same
+        //     total data) - isliye Circle ke liye "backend read-cost drastically
+        //     kam hua" jaisa claim GALAT tha, maine pehle overstate kiya - woh
+        //     claim yahan se hata diya gaya hai. Circle ka genuine fayda:
+        //     (i) chhota response payload/JSON-parse (sirf maangi hui date/
+        //     month ki rows), (ii) browser me poori history hold/filter nahi
+        //     karni padti, (iii) 6-DC parallel-batching se ek hi mega-request
+        //     (jisme 24 sheets ka pura data ek script-execution me process ho)
+        //     ke bajaye kaam chhote hisso me bant'ta hai, jo Apps Script ki
+        //     6-minute execution-limit ke against ek safety margin deta hai
+        //     bade/purane data-volume me.
+        //     ASLI backend-execution-time/latency measurement sirf ek REAL
+        //     Apps Script deployment (test/staging URL) par actual timed
+        //     HTTP calls se hi possible hai - yeh sandbox environment se
+        //     production Google Sheet tak connect nahi kar sakta. Isliye yeh
+        //     naya code STILL 6-DC batching istemal karta hai (memory/exec-
+        //     time-limit ke against safety ke liye) lekin ab PARALLEL hai
+        //     (fix a upar) - agar user chahen to deploy hone ke baad ek chhoti
+        //     real-timing A/B run (purana unscoped vs naya batched-parallel vs
+        //     ek single-mega-request) karke confirm kar sakte hain ki konsa
+        //     genuinely fastest hai; is stage par main sirf structurally sahi
+        //     aur verifiably-non-regressive design de sakta hoon, real ms
+        //     timing evidence nahi.
+        //  c) Marker validation ab sirf existence/type nahi, VALUES bhi verify
+        //     karta hai - scope_mode==="batch", period_mode expected ke barabar,
+        //     period_value expected periodValue ke barabar, requested_dc_count
+        //     is batch/scope ki length ke barabar, aur `requested_dc_names`
+        //     (naya backend field, upar .gs me joda gaya) is batch/scope ki
+        //     normalized+sorted DC list se EXACT match. Mismatch hone par
+        //     response ko "invalid" maan kar reject karte hain (retry hota
+        //     hai, silently accept nahi karte) - taaki kisi race/bug se galat
+        //     scope ka data kabhi report me na chala jaaye.
+        //  d) In-flight Promise dedupe: agar render chal hi raha ho (fetch
+        //     pending) aur usi beech Download button dabaya jaaye (ya HQ/Type
+        //     dropdown badal kar render dobara call ho), to same scope-key
+        //     ka doosra call ussi chal rahi Promise ko reuse karta hai - naya
+        //     parallel fetch shuru nahi hota (isliye total request count
+        //     kabhi 2x nahi hota).
+        //  e) Cache ab single object nahi, scope-key se keyed Map hai - agar
+        //     koi PURANI (slow) request der se complete ho jaaye jab tak user
+        //     dusre date/division par ja chuka ho, to woh apne hi (ab
+        //     irrelevant) key ke against store hoti hai - current selection
+        //     ki cache-entry kabhi overwrite/corrupt nahi hoti. Map bounded
+        //     hai (max 8 entries, sabse purani hata di jaati hai) taaki
+        //     memory unbounded na badhe.
+        const revenueReportScopedCacheMap_ = new Map(); // scopeKey -> { rows, loadedAt }
+        const REVENUE_REPORT_SCOPED_CACHE_TTL_MS = 60000;
+        const REVENUE_REPORT_SCOPED_CACHE_MAX_ENTRIES = 8;
+        const revenueReportInFlightFetches_ = new Map(); // scopeKey -> Promise
+
+        function buildRevenueReportScopeKey_(dcList, mode, periodValue) {
+            const normalizedDcs = (dcList || []).map((dc) => normalizeDcName(dc || "")).filter(Boolean).sort();
+            return `${normalizedDcs.join(",")}::${mode}::${String(periodValue || "")}`;
+        }
+
+        function revenueReportPeriodParam_(mode, periodValue) {
+            return mode === "MONTHLY" ? `&month=${encodeURIComponent(periodValue || "")}` : `&date=${encodeURIComponent(periodValue || "")}`;
+        }
+
+        function revenueReportChunkDcList_(list, size) {
+            const out = [];
+            for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+            return out;
+        }
+
+        function revenueReportSetScopedCache_(scopeKey, rows) {
+            revenueReportScopedCacheMap_.set(scopeKey, { rows, loadedAt: Date.now() });
+            if (revenueReportScopedCacheMap_.size > REVENUE_REPORT_SCOPED_CACHE_MAX_ENTRIES) {
+                const oldestKey = revenueReportScopedCacheMap_.keys().next().value;
+                revenueReportScopedCacheMap_.delete(oldestKey);
+            }
+        }
+
+        // ROUND-2 (correction #c): sirf marker existence/type nahi, expected
+        // VALUES ke against exact validate karte hain - jo DC list yeh
+        // request cover kar rahi thi wahi backend ne echo ki ho, aur
+        // scope_mode/period_mode/period_value/requested_dc_count bhi is
+        // exact request se match karte hon. Ek bhi mismatch = response ko
+        // reject (retry-able failure maana jaata hai, capability-mismatch
+        // NAHI - kyunki agar markers hi maujood hain to backend naya hai,
+        // bas is response ka data galat/stale scope ka lag raha hai).
+        function revenueReportValidateMarkers_(parsed, expectedDcList, expectedPeriodMode, expectedPeriodValue) {
+            // ROUND-3 FIX: scope_mode check missing tha - comment me claim ki gayi
+            // thi lekin code me likha hi nahi gaya tha (user ne pakda). Is naye
+            // isolated path me hum kabhi bhi `dc_name` (single) nahi bhejte, hamesha
+            // `dc_names` (list) bhejte hain - isliye ek genuine naye backend ka
+            // scope_mode YAHAN hamesha "batch" hi hona chahiye (PAID batches aur
+            // Division/Circle TD request, dono). Kuch aur (jaise "all"/"single")
+            // maane ki backend ne humari scoped request ko sahi tarike se resolve
+            // nahi kiya - reject.
+            if (parsed.scope_mode !== "batch") return false;
+            const expectedNames = (expectedDcList || []).map((dc) => normalizeDcName(dc || "")).filter(Boolean).sort();
+            const gotNames = Array.isArray(parsed?.requested_dc_names)
+                ? parsed.requested_dc_names.map((dc) => normalizeDcName(dc || "")).filter(Boolean).sort()
+                : null;
+            if (!gotNames || gotNames.length !== expectedNames.length || gotNames.join("|") !== expectedNames.join("|")) return false;
+            if (parsed.period_mode !== expectedPeriodMode) return false;
+            if (String(parsed.period_value || "") !== String(expectedPeriodValue || "")) return false;
+            if (Number(parsed.requested_dc_count) !== expectedDcList.length) return false;
+            return true;
+        }
+
+        // Naye backend ke zaroori markers - agar yeh missing hain to purana
+        // (redeploy na hua) backend hai, caller silently purane unscoped
+        // path par fallback karega (api_version akela kaafi nahi maana
+        // jaata - correction #6).
+        function revenueReportHasCapabilityMarkers_(parsed) {
+            return !!parsed && typeof parsed.scope_mode === "string" && typeof parsed.period_mode === "string"
+                && typeof parsed.period_value === "string" && typeof parsed.requested_dc_count === "number";
+        }
+
+        // "capability mismatch" (purana backend) aur "genuine failure" (naya
+        // backend hi hai, par is ek request ka jawab fail/error ya
+        // galat-scope aaya) do ALAG cheezein hain (correction #6 aur #8). Ek
+        // "status: error" response me bhi naye markers nahi hote - isliye
+        // capability sirf tab decide karte hain jab response `status:
+        // "success"` ho - tabhi marker missing hone ka matlab "purana
+        // backend" hota hai. Markers maujood hon par exact-scope validation
+        // (revenueReportValidateMarkers_) fail ho jaaye, to bhi "error"
+        // (retry-able) maante hain, capability-mismatch nahi - kyunki backend
+        // to naya hi hai, bas is response ka data trust nahi kar sakte.
+        function revenueReportResponseCapability_(parsed, expectedDcList, expectedPeriodMode, expectedPeriodValue) {
+            if (!parsed || parsed.status !== "success") return "error";
+            if (!revenueReportHasCapabilityMarkers_(parsed)) return "old";
+            if (!revenueReportValidateMarkers_(parsed, expectedDcList, expectedPeriodMode, expectedPeriodValue)) return "error";
+            return "new";
+        }
+
+        // PAID - per-DC sheets, 6-DC batches, PARALLEL fetch (round-2 fix a) -
+        // existing withAppsScriptConcurrencyGate_ khud 2-at-a-time serialize
+        // karta hai. Ek batch (final retry ke baad bhi) fail ho to us batch
+        // ke DC naam collect karke throw karte hain (caller ko saaf, named
+        // error milta hai - kabhi bhi silent partial report nahi).
+        async function fetchRevenueReportPaidBatch_(dcList, mode, periodValue) {
+            if (!revenueCollectionSubmitScriptUrl) return { rows: [], capabilityMismatch: true };
+            const batches = revenueReportChunkDcList_(dcList, 6);
+            const periodParam = revenueReportPeriodParam_(mode, periodValue);
+            const expectedPeriodMode = mode === "MONTHLY" ? "month" : "date";
+            let capabilityMismatch = false;
+
+            async function runBatch(batch) {
+                const dcNamesParam = `&dc_names=${encodeURIComponent(batch.join(","))}`;
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                    try {
+                        const parsed = await withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
+                            const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getEntries${dcNamesParam}${periodParam}&t=${Date.now()}`);
+                            return await response.json();
+                        });
+                        const capability = revenueReportResponseCapability_(parsed, batch, expectedPeriodMode, periodValue);
+                        if (capability === "old") {
+                            capabilityMismatch = true;
+                            return { ok: true, rows: [] };
+                        }
+                        if (capability === "new") {
+                            const sourceRows = Array.isArray(parsed?.entries) ? parsed.entries : [];
+                            const rows = sourceRows.map(mapRevenueSheetEntry)
+                                .filter((row) => normalizeRevenueIvrs(row.ivrsNo))
+                                .map((row) => ({ ...row, reportType: "PAID" }));
+                            return { ok: true, rows };
+                        }
+                        // capability === "error" -> genuine/validation failure, neeche retry.
+                    } catch (_) {}
+                    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
+                }
+                return { ok: false, dcs: batch };
+            }
+
+            const batchResults = await Promise.all(batches.map(runBatch));
+            if (capabilityMismatch) return { rows: [], capabilityMismatch: true };
+            const failedBatches = batchResults.filter((r) => !r.ok).flatMap((r) => r.dcs);
+            if (failedBatches.length) {
+                const error = new Error(`PAID data load nahi ho paya in DC ke liye: ${failedBatches.join(", ")}`);
+                error.failedDcs = failedBatches;
+                throw error;
+            }
+            const allRows = batchResults.flatMap((r) => r.rows || []);
+            return { rows: allRows, capabilityMismatch: false };
+        }
+
+        // TD - ek hi shared sheet sabhi DC ke liye, isliye poore scope ke
+        // DC list ke saath sirf EK request (kabhi bhi per-PAID-batch nahi -
+        // correction #1). Fail hone par (final retry ke baad) poora report
+        // "incomplete" maan kar clear error throw karte hain.
+        async function fetchRevenueReportTdSingle_(dcList, mode, periodValue) {
+            if (!revenueCollectionSubmitScriptUrl) return { rows: [], capabilityMismatch: true };
+            const periodParam = revenueReportPeriodParam_(mode, periodValue);
+            const expectedPeriodMode = mode === "MONTHLY" ? "month" : "date";
+            const dcNamesParam = `&dc_names=${encodeURIComponent(dcList.join(","))}`;
+            for (let attempt = 1; attempt <= 2; attempt++) {
+                try {
+                    const parsed = await withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
+                        const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getTDEntries${dcNamesParam}${periodParam}&t=${Date.now()}`);
+                        return await response.json();
+                    });
+                    const capability = revenueReportResponseCapability_(parsed, dcList, expectedPeriodMode, periodValue);
+                    if (capability === "old") return { rows: [], capabilityMismatch: true };
+                    if (capability === "new") {
+                        const sourceRows = Array.isArray(parsed?.entries) ? parsed.entries : [];
+                        const rows = sourceRows.map(mapRevenueTdSheetEntry).filter((row) => normalizeRevenueIvrs(row.ivrsNo));
+                        return { rows, capabilityMismatch: false };
+                    }
+                    // capability === "error" -> genuine/validation failure, retry neeche.
+                } catch (_) {}
+                if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
+            }
+            const error = new Error("TD data load nahi ho paya (poora scope) - report incomplete hone se error dikhaya gaya");
+            error.tdFailed = true;
+            throw error;
+        }
+
+        // =====================================================================
+        // ISOLATED ADDITION (2026-09-17, USER-APPROVED corrections): Revenue
+        // Category reports (Category Wise / HQ-Village Wise / Target vs
+        // Achievement / Paid Consumer Count / Particular Consumer List) ke
+        // Paid/Unpaid ko naye backend "getRevenueCategoryReconciliation" action
+        // (revenue-submit-script-dc-wise.gs, isolated addition) se EXACT-DATE-
+        // capable per-consumer (DC+IVRS) aggregate se reconcile karne ke liye.
+        // Isi existing fetchRevenueReportPaidBatch_/fetchRevenueReportTdSingle_
+        // pattern (6-DC batches, revenueReportChunkDcList_, withAppsScript-
+        // ConcurrencyGate_, 2 attempt/600ms*attempt retry, scope/period marker
+        // validation) ko REUSE karta hai - koi existing helper modify nahi hua.
+        // SCOPE: sirf naye function/state, revenue-category reports ke
+        // call-sites me hi consume hote hain - baaki kisi module/report ko
+        // yeh code chhoo tak nahi raha.
+        // =====================================================================
+        const revenueCategoryReconciliationCache_ = new Map();
+        const revenueCategoryReconciliationInFlight_ = new Map();
+        const REVENUE_CATEGORY_RECONCILIATION_TTL_MS = 60000;
+
+        function revenueCategoryReconciliationDcList_(dcNames) {
+            return Array.from(new Set((dcNames || [])
+                .map((dcName) => normalizeDcName(dcName))
+                .filter(Boolean)))
+                .sort((a, b) => a.localeCompare(b));
+        }
+
+        function revenueCategoryReconciliationCacheKey_(mode, periodValue, dcNames) {
+            const normalizedMode = mode === "MONTHLY" ? "MONTHLY" : "DAILY";
+            return `${revenueCategoryReconciliationDcList_(dcNames).join(",")}|${normalizedMode}|${String(periodValue || "").trim()}`;
+        }
+
+        function revenueReconciliationPeriodParams_(mode, periodValue) {
+            const periodMode = mode === "MONTHLY" ? "month" : "date";
+            return `&period_mode=${encodeURIComponent(periodMode)}&period_value=${encodeURIComponent(periodValue || "")}`;
+        }
+
+        // USER-APPROVED correction #4: backend response ke `failed_dcs` (kisi
+        // ek DC ki PAID MASTER sheet read karte waqt error) ko kabhi bhi
+        // "silent partial" maan kar accept nahi karte - retry karte hain, aur
+        // final retry ke baad bhi fail ho to un DC ke naam ke saath saaf error
+        // throw karte hain (jaisa fetchRevenueReportPaidBatch_ already karta
+        // hai apne batch-level failures ke liye).
+        async function fetchRevenueCategoryReconciliationBatch_(dcList, mode, periodValue) {
+            if (!revenueCollectionSubmitScriptUrl || !dcList.length) return { supported: false };
+            const batches = revenueReportChunkDcList_(dcList, 6);
+            const periodParams = revenueReconciliationPeriodParams_(mode, periodValue);
+            const expectedPeriodMode = mode === "MONTHLY" ? "month" : "date";
+            let capabilityMismatch = false;
+
+            async function runBatch(batch) {
+                const dcNamesParam = `&dc_names=${encodeURIComponent(batch.join(","))}`;
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                    try {
+                        const parsed = await withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
+                            const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getRevenueCategoryReconciliation${dcNamesParam}${periodParams}&t=${Date.now()}`);
+                            return await response.json();
+                        });
+                        const capability = revenueReportResponseCapability_(parsed, batch, expectedPeriodMode, periodValue);
+                        if (capability === "old") { capabilityMismatch = true; return { ok: true, entries: [] }; }
+                        if (capability === "new") {
+                            const failedInResponse = Array.isArray(parsed.failed_dcs) ? parsed.failed_dcs.filter(Boolean) : [];
+                            if (failedInResponse.length) {
+                                if (attempt < 2) { await new Promise((resolve) => setTimeout(resolve, 600 * attempt)); continue; }
+                                return { ok: false, dcs: failedInResponse };
+                            }
+                            return {
+                                ok: true,
+                                entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+                                ambiguousEntries: Array.isArray(parsed.legacy_ambiguous_entries) ? parsed.legacy_ambiguous_entries : []
+                            };
+                        }
+                        // capability === "error" -> genuine/validation failure, retry neeche.
+                    } catch (_) {}
+                    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
+                }
+                return { ok: false, dcs: batch };
+            }
+
+            const batchResults = await Promise.all(batches.map(runBatch));
+            if (capabilityMismatch) return { supported: false };
+            const failedDcs = batchResults.filter((r) => !r.ok).flatMap((r) => r.dcs);
+            if (failedDcs.length) {
+                const error = new Error(`Revenue reconciliation data load nahi ho paya in DC ke liye: ${failedDcs.join(", ")}`);
+                error.failedDcs = failedDcs;
+                throw error;
+            }
+
+            const ambiguousEntries = batchResults.flatMap((result) => result.ambiguousEntries || []);
+            if (ambiguousEntries.length) {
+                const examples = ambiguousEntries.slice(0, 5).map((entry) => {
+                    const dcName = normalizeDcName(entry.dc_name || "") || "UNKNOWN DC";
+                    const ivrs = normalizeRevenueIvrs(entry.ivrs_no) || "UNKNOWN IVRS";
+                    return `${dcName}/${ivrs}`;
+                }).join(", ");
+                const error = new Error(`Exact Daily Paid/Unpaid report nahi ban sakti: purane multiple-payment records ki exact payment date available nahi hai (${examples}${ambiguousEntries.length > 5 ? " aadi" : ""})`);
+                error.code = "REVENUE_RECONCILIATION_AMBIGUOUS";
+                error.ambiguousEntries = ambiguousEntries;
+                throw error;
+            }
+
+            // USER-APPROVED correction #5: backend already exactly-ek-entry-per-
+            // unique-(DC+IVRS) deta hai, par yahan bhi defensively merge karte
+            // hain - agar kabhi duplicate mile to amount sum ho, PAID COUNT
+            // hamesha max 1 hi rahega (byKey Map me ek IVRS ki ek hi entry).
+            const byKey = new Map();
+            batchResults.forEach((result) => {
+                (result.entries || []).forEach((entry) => {
+                    const dcName = normalizeDcName(entry.dc_name || "");
+                    const ivrs = normalizeRevenueIvrs(entry.ivrs_no);
+                    if (!dcName || !ivrs) return;
+                    const key = `${dcName}|${ivrs}`;
+                    const amount = Number(entry.matched_paid_amount || 0);
+                    const existing = byKey.get(key);
+                    if (existing) {
+                        existing.amount += amount;
+                        if (!existing.category && entry.tariff_category) existing.category = entry.tariff_category;
+                        existing.legacyAmbiguous = existing.legacyAmbiguous || !!entry.legacy_ambiguous;
+                    } else {
+                        byKey.set(key, {
+                            amount,
+                            category: entry.tariff_category || "",
+                            legacyAmbiguous: !!entry.legacy_ambiguous
+                        });
+                    }
+                });
+            });
+            return { supported: true, byKey };
+        }
+
+        // Caller (Category Wise / HQ-Village Wise / Target vs Achievement /
+        // Top Defaulters render+download functions) is function ko report ke
+        // exact mode+filterValue maloom hote hi await karta hai, USE PEHLE
+        // buildRevenueCategorySummaryRows/buildRevenueCategoryUploadedPaidInfo
+        // (dono SYNC hain) ko call kare - taaki woh is TTL-cached, already-
+        // resolve-ho-chuke Map se seedhe (bina await ke) padh sakein, jaisa
+        // is app me warmRevenueCategoryUploadedPaidCache/revenueCategoryCache-
+        // WarmedAt ka existing pattern hai.
+        async function ensureRevenueCategoryReconciliationLoaded(mode, filterValue) {
+            const dcList = revenueCategoryReconciliationDcList_(getRevenueCategoryTargetDcs());
+            const cacheKey = revenueCategoryReconciliationCacheKey_(mode, filterValue, dcList);
+            const cached = revenueCategoryReconciliationCache_.get(cacheKey);
+            if (cached && Date.now() - cached.loadedAt < REVENUE_CATEGORY_RECONCILIATION_TTL_MS) return cached;
+            if (!dcList.length) {
+                const empty = { supported: false, byKey: new Map(), loadedAt: Date.now() };
+                revenueCategoryReconciliationCache_.set(cacheKey, empty);
+                return empty;
+            }
+            const existingPromise = revenueCategoryReconciliationInFlight_.get(cacheKey);
+            if (existingPromise) return existingPromise;
+            const loadPromise = (async () => {
+                const result = await fetchRevenueCategoryReconciliationBatch_(dcList, mode, filterValue);
+                const record = {
+                    supported: result.supported === true,
+                    byKey: result.byKey || new Map(),
+                    loadedAt: Date.now(),
+                    dcNames: dcList.slice()
+                };
+                revenueCategoryReconciliationCache_.set(cacheKey, record);
+                return record;
+            })();
+            revenueCategoryReconciliationInFlight_.set(cacheKey, loadPromise);
+            try {
+                return await loadPromise;
+            } finally {
+                if (revenueCategoryReconciliationInFlight_.get(cacheKey) === loadPromise) {
+                    revenueCategoryReconciliationInFlight_.delete(cacheKey);
+                }
+            }
+        }
+
+        // USER-APPROVED correction #8: Unique Master Consumer = Paid Consumer +
+        // Unpaid Consumer - har row (DC ya HQ) par. Mismatch mile to Excel/PDF
+        // download silently nahi niklegi.
+        function checkRevenueCategorySummaryInvariant_(rows) {
+            const mismatches = [];
+            (rows || []).forEach((row) => {
+                if (row.type === "SUB_TOTAL" || row.type === "SUBDN_TOTAL") return;
+                const uniqueMaster = Number(row.__uniqueMasterCount || 0);
+                const paidPlusUnpaid = Number(row.paidTotal || 0) + Number(row.unpaidTotal || 0);
+                if (paidPlusUnpaid !== uniqueMaster) {
+                    mismatches.push({ name: row.name, uniqueMaster, paidPlusUnpaid, diff: paidPlusUnpaid - uniqueMaster });
+                }
+            });
+            return mismatches;
+        }
+
+        // ISOLATED ADDITION (2026-09-17, USER-APPROVED condition): dedicated
+        // Revenue Category report screens (HQ-Village Wise / Target vs Achievement /
+        // Top Defaulters) ke liye - agar reconciliation backend abhi purana/
+        // unavailable hai aur legacy fallback data dikhaya jaa raha hai, to yeh
+        // ek chhota, saaf, amber "STALE/LEGACY" warning statusBox me dikhata hai
+        // (non-blocking - report data neeche normal dikhta rehta hai). isStale
+        // false ho to statusBox ko chhedta nahi (existing "hide on start"
+        // behaviour jaisa hi rehta hai, caller display:none kar chuka hota hai).
+        function showRevenueCategoryStaleLegacyWarning_(statusBox, isStale) {
+            if (!statusBox || !isStale) return;
+            statusBox.style.display = "block";
+            statusBox.style.background = "#fffbeb";
+            statusBox.style.borderColor = "#fcd34d";
+            statusBox.style.color = "#92400e";
+            statusBox.innerText = "STALE/LEGACY - totals may be inaccurate (backend update pending)";
+        }
+
+        // ROUND-3 CORRECTION: pehle jaisa design tha usme PAID ke 4 batches
+        // aur TD request SEEDHE Promise.all() me ek saath fire ho jaate the -
+        // agar backend PURANA ho (dc_names/month ignore kar deta hai, jaisa
+        // ek genuinely backward-compatible old backend karega), to yeh sabhi
+        // requests SHURU ho chuki hoti (Monthly Circle jaisi heavy scope me
+        // har PAID batch 24-DC ki poori history laut sakta tha, TD bhi
+        // unscoped poori sheet) - fir bhi CAPABILITY MISMATCH detect hone ke
+        // baad legacy fallback ek ALAG poora (unscoped) sync bhi chalata,
+        // matlab double heavy load, timeout risk, aur wahi slowness jo yeh
+        // fix rokna chahta tha (user ne sahi pakda).
+        //
+        // Fix: naya, lightweight, READ-ONLY-OF-NO-SHEET `getCapabilities`
+        // backend action (upar .gs me) - koi bhi PAID/TD request tabhi shuru
+        // hoti hai jab yeh EK chhota probe confirm kar de ki backend naya
+        // hai. Purana backend is action ko jaanta hi nahi (doGet() ke default
+        // "Script Live Hai" branch par girta hai, jo koi bhi data-sheet nahi
+        // chhoota) - is se turant, bina kisi PAID/TD request shuru kiye,
+        // capabilityMismatch:true mil jaata hai aur legacy fallback SAAF,
+        // bina kisi already-in-flight heavy request ke shuru hota hai.
+        // ROUND-4 RELIABILITY FIX (user review): `supported:true` result 5
+        // minute tak cache karna theek hai (backend deploy hone ke baad
+        // itni jaldi wapas "purana" nahi banega). Lekin `supported:false`
+        // (ya probe khud fail/timeout ho jaaye - jo network glitch se bhi ho
+        // sakta hai, zaroori nahi backend hi purana ho) ko 5 minute cache
+        // karna galat tha - ek CHHOTI temporary network hiccup bhi 5 minute
+        // tak app ko purane heavy legacy path par force kar deta. Ab
+        // `false`/error result sirf 20 second (15-30s range) cache hota hai
+        // - taaki repeated re-renders (jaise dropdown filter change) turant
+        // ek ke baad ek naye probe na dagen, lekin real recovery bhi jaldi
+        // detect ho jaaye.
+        let revenueReportCapabilityProbeCache_ = null; // { supported, checkedAt }
+        const REVENUE_REPORT_CAPABILITY_PROBE_TTL_TRUE_MS = 300000; // 5 min - naya backend confirm
+        const REVENUE_REPORT_CAPABILITY_PROBE_TTL_FALSE_MS = 20000; // 20 sec - purana/error/timeout
+        // In-flight dedupe: agar render aur Download (ya kisi filter-change se
+        // dobara render) ek hi samay par probe maang rahe hon, to sirf EK
+        // network call jaaye - baaki sabhi usi chal rahi Promise ko reuse
+        // karein (jaisa PAID/TD fetch ke liye pehle se hai).
+        let revenueReportCapabilityProbeInFlight_ = null;
+
+        async function revenueReportProbeCapability_() {
+            if (!revenueCollectionSubmitScriptUrl) return false;
+            if (revenueReportCapabilityProbeCache_) {
+                const ttl = revenueReportCapabilityProbeCache_.supported
+                    ? REVENUE_REPORT_CAPABILITY_PROBE_TTL_TRUE_MS
+                    : REVENUE_REPORT_CAPABILITY_PROBE_TTL_FALSE_MS;
+                if (Date.now() - revenueReportCapabilityProbeCache_.checkedAt < ttl) {
+                    return revenueReportCapabilityProbeCache_.supported;
+                }
+            }
+            if (revenueReportCapabilityProbeInFlight_) return revenueReportCapabilityProbeInFlight_;
+            revenueReportCapabilityProbeInFlight_ = (async () => {
+                let supported = false;
+                try {
+                    const parsed = await withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
+                        const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getCapabilities&t=${Date.now()}`);
+                        return await response.json();
+                    });
+                    supported = !!parsed && parsed.status === "success" && parsed.supports_report_scoping === true;
+                } catch (_) {
+                    supported = false;
+                }
+                revenueReportCapabilityProbeCache_ = { supported, checkedAt: Date.now() };
+                return supported;
+            })();
+            try {
+                return await revenueReportCapabilityProbeInFlight_;
+            } finally {
+                revenueReportCapabilityProbeInFlight_ = null;
+            }
+        }
+
+        // PAID (batched-parallel) aur TD (single) dono ek saath (Promise.all)
+        // chalte hain - TD ki request count kabhi bhi PAID batch count se
+        // multiply nahi hoti (correction #1), aur PAID batches khud bhi
+        // aapas me parallel hain (correction round-2/a) - PAR sirf capability
+        // probe confirm hone ke BAAD (correction round-3).
+        async function fetchRevenueReportPeriodScopedRows_(dcList, mode, periodValue) {
+            const capable = await revenueReportProbeCapability_();
+            if (!capable) return { rows: null, capabilityMismatch: true };
+            const [paidResult, tdResult] = await Promise.all([
+                fetchRevenueReportPaidBatch_(dcList, mode, periodValue),
+                fetchRevenueReportTdSingle_(dcList, mode, periodValue)
+            ]);
+            if (paidResult.capabilityMismatch || tdResult.capabilityMismatch) {
+                return { rows: null, capabilityMismatch: true };
+            }
+            return { rows: [...paidResult.rows, ...tdResult.rows], capabilityMismatch: false };
+        }
+
+        // Cache se turant (bina fetch) fresh rows dete hain agar scope+mode+
+        // period match karta ho (0-row result bhi VALID cache-hit hai, ek
+        // khaali array truthy hai isliye normal check hi kaafi hai), warna
+        // null - render ke shuru me "loading" flicker se bachne ke liye peek
+        // karne ke kaam aata hai.
+        function peekRevenueReportScopedCache_(dcList, mode, periodValue) {
+            const scopeKey = buildRevenueReportScopeKey_(dcList, mode, periodValue);
+            const entry = revenueReportScopedCacheMap_.get(scopeKey);
+            if (entry && (Date.now() - entry.loadedAt) < REVENUE_REPORT_SCOPED_CACHE_TTL_MS) {
+                return entry.rows;
+            }
+            return null;
+        }
+
+        // Cache-aware wrapper - on-screen render aur Download button DONO
+        // isi function se hokar guzarte hain (correction #7) - fresh cache
+        // hote hue Download click par dobara PAID+TD fetch nahi hoti. Round-2
+        // correction #d: agar isi scope-key ke liye ek fetch already chal
+        // rahi hai (render abhi loading hi hai), to Download (ya koi bhi
+        // doosra caller) usi in-flight Promise ko reuse karta hai - naya
+        // parallel fetch kabhi shuru nahi hota, total request count doubled
+        // nahi hota.
+        async function loadRevenueReportScopedRows_(dcList, mode, periodValue) {
+            const scopeKey = buildRevenueReportScopeKey_(dcList, mode, periodValue);
+            const cached = peekRevenueReportScopedCache_(dcList, mode, periodValue);
+            if (cached) return { rows: cached, capabilityMismatch: false, scopeKey };
+            if (revenueReportInFlightFetches_.has(scopeKey)) {
+                return revenueReportInFlightFetches_.get(scopeKey);
+            }
+            const fetchPromise = (async () => {
+                const result = await fetchRevenueReportPeriodScopedRows_(dcList, mode, periodValue);
+                if (result.capabilityMismatch) return { rows: null, capabilityMismatch: true, scopeKey };
+                revenueReportSetScopedCache_(scopeKey, result.rows);
+                return { rows: result.rows, capabilityMismatch: false, scopeKey };
+            })();
+            revenueReportInFlightFetches_.set(scopeKey, fetchPromise);
+            try {
+                return await fetchPromise;
+            } finally {
+                revenueReportInFlightFetches_.delete(scopeKey);
+            }
+        }
+
+        // scopedRows backend se already period+scope-filtered aa chuki hain -
+        // yahan sirf HQ/Type dropdown ka local filter lagta hai (jaisa
+        // getRevenueSelectedReportRows shared-cache path ke liye karta hai).
+        function getRevenueScopedSelectedReportRows_(scopedRows) {
+            return filterRevenueRowsBySelectedType(filterRevenueRowsBySelectedHq(scopedRows || []));
+        }
+
+        function getRevenueReportScopeDcList_() {
+            return activeViewLevel === "DIVISION" ? getDivisionDcNames(activeDiv) : getAllDcNames();
+        }
+
+        // Purana (pre-speed-fix) Division/Circle unscoped shared-cache path -
+        // sirf tab call hota hai jab naya backend abhi redeploy nahi hua
+        // (capability markers missing) - taaki purana backend hone par bhi
+        // report kabhi khaali/galat na dikhe, bas naye jitni fast na sahi.
+        async function renderRevenueReportDownloadLegacyScoped_(renderToken) {
             const tableBox = document.getElementById("revenue-report-table");
             if (!tableBox) return;
-            const renderToken = ++revenueReportRenderToken;
-            setRevenueReportDownloadState(false, "", true);
             const baseRows = revenueReportMode === "MONTHLY"
                 ? getRevenueCombinedFilteredEntries("MONTHLY", document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7))
                 : getRevenueCombinedFilteredEntries("DAILY", document.getElementById("revenue-report-date")?.value || getTodayIsoDate());
             populateRevenueReportHqOptions(baseRows);
             tableBox.innerHTML = renderRevenueReportHtml(getRevenueSelectedReportRows(), "Selected date/month me paid/TD entry nahi hai.");
 
-            // Is view me is scope (DC/Division/Circle) ke liye ek baar background
-            // sync ho chuka ho to DATE WISE/MONTH WISE toggle ya HQ/TYPE dropdown
-            // dobara koi network sync trigger nahi karenge - sirf upar wala local
-            // filter/re-render hi kaafi hai.
-            const scopeKey = activeDC || activeDiv || "CIRCLE";
+            const scopeKey = activeDiv || "CIRCLE";
             if (revenueReportLoadedScopeKey === scopeKey) return;
 
-            // SPEED FIX (2026-09-15, USER-REPORTED slowness): DC scope me (activeDC
-            // set) ab `scopeDc` diya jaata hai - Daily Progress jaisa hi proven
-            // pattern (poori history nahi chahiye yahan bhi, sirf DC-scope; date/
-            // month filter upar `getRevenueCombinedFilteredEntries` se local hi
-            // lagta hai, isliye scope-by-DC se koi filtering-logic nahi tootegi).
-            // Division/Circle scope me (activeDC khaali) `scopeDc` bhi khaali
-            // jaayega, matlab pehle jaisa hi poora (sabhi DC) fetch hoga - kyunki
-            // wahan sach me sabhi DC ka data chahiye, koi regression nahi.
-            const reportDownloadScopeDc = activeDC || null;
-            Promise.all([syncRevenueLiveEntriesFromSheet(3, false, reportDownloadScopeDc), syncRevenueTdEntriesFromSheet(3, false, reportDownloadScopeDc)]).then(() => {
+            Promise.all([syncRevenueLiveEntriesFromSheet(3, false, null), syncRevenueTdEntriesFromSheet(3, false, null)]).then(() => {
                 revenueReportLoadedScopeKey = scopeKey;
                 if (renderToken !== revenueReportRenderToken || !document.getElementById("revenue-report-download-view")?.classList.contains("active")) return;
                 const refreshedBaseRows = revenueReportMode === "MONTHLY"
@@ -19735,6 +20914,62 @@
                 populateRevenueReportHqOptions(refreshedBaseRows);
                 tableBox.innerHTML = renderRevenueReportHtml(getRevenueSelectedReportRows(), "Selected date/month me paid/TD entry nahi hai.");
             }).catch(() => {});
+        }
+
+        async function renderRevenueReportDownload() {
+            const tableBox = document.getElementById("revenue-report-table");
+            if (!tableBox) return;
+            const renderToken = ++revenueReportRenderToken;
+            setRevenueReportDownloadState(false, "", true);
+
+            // DC-level scope: BILKUL UNCHANGED - purana shared-cache scopeDc
+            // fast path (2026-09-15 fix) jaisa tha waisa hi rehta hai.
+            if (activeDC) {
+                const baseRows = revenueReportMode === "MONTHLY"
+                    ? getRevenueCombinedFilteredEntries("MONTHLY", document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7))
+                    : getRevenueCombinedFilteredEntries("DAILY", document.getElementById("revenue-report-date")?.value || getTodayIsoDate());
+                populateRevenueReportHqOptions(baseRows);
+                tableBox.innerHTML = renderRevenueReportHtml(getRevenueSelectedReportRows(), "Selected date/month me paid/TD entry nahi hai.");
+
+                const scopeKey = activeDC;
+                if (revenueReportLoadedScopeKey === scopeKey) return;
+
+                Promise.all([syncRevenueLiveEntriesFromSheet(3, false, activeDC), syncRevenueTdEntriesFromSheet(3, false, activeDC)]).then(() => {
+                    revenueReportLoadedScopeKey = scopeKey;
+                    if (renderToken !== revenueReportRenderToken || !document.getElementById("revenue-report-download-view")?.classList.contains("active")) return;
+                    const refreshedBaseRows = revenueReportMode === "MONTHLY"
+                        ? getRevenueCombinedFilteredEntries("MONTHLY", document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7))
+                        : getRevenueCombinedFilteredEntries("DAILY", document.getElementById("revenue-report-date")?.value || getTodayIsoDate());
+                    populateRevenueReportHqOptions(refreshedBaseRows);
+                    tableBox.innerHTML = renderRevenueReportHtml(getRevenueSelectedReportRows(), "Selected date/month me paid/TD entry nahi hai.");
+                }).catch(() => {});
+                return;
+            }
+
+            // Division/Circle scope: NAYA isolated fast path.
+            const dcList = getRevenueReportScopeDcList_();
+            const periodValue = revenueReportMode === "MONTHLY"
+                ? (document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7))
+                : (document.getElementById("revenue-report-date")?.value || getTodayIsoDate());
+            const cachedRows = peekRevenueReportScopedCache_(dcList, revenueReportMode, periodValue);
+            if (cachedRows) {
+                populateRevenueReportHqOptions(cachedRows);
+                tableBox.innerHTML = renderRevenueReportHtml(getRevenueScopedSelectedReportRows_(cachedRows), "Selected date/month me paid/TD entry nahi hai.");
+            } else {
+                tableBox.innerHTML = renderRevenueReportHtml([], "Report load ho raha hai...");
+            }
+            try {
+                const result = await loadRevenueReportScopedRows_(dcList, revenueReportMode, periodValue);
+                if (renderToken !== revenueReportRenderToken) return;
+                if (result.capabilityMismatch) {
+                    return renderRevenueReportDownloadLegacyScoped_(renderToken);
+                }
+                populateRevenueReportHqOptions(result.rows);
+                tableBox.innerHTML = renderRevenueReportHtml(getRevenueScopedSelectedReportRows_(result.rows), "Selected date/month me paid/TD entry nahi hai.");
+            } catch (error) {
+                if (renderToken !== revenueReportRenderToken) return;
+                tableBox.innerHTML = renderRevenueReportHtml([], error?.message || "Report load nahi ho payi, dobara try kijiye.");
+            }
         }
 
         function setRevenueReportDownloadState(isLoading, message = "", ok = true) {
@@ -19761,18 +20996,29 @@
             if (revenueReportDownloadInProgress) return showToast("Download process chal raha hai, kripya wait kijiye", false);
             setRevenueReportDownloadState(true, "Downloading... kripya wait kijiye", true);
             try {
-                // SPEED FIX (2026-09-15): isi screen (Report Download) ke on-screen
-                // render mein DC-scope me ab `scopeDc` diya jaata hai - agar yahan
-                // Download button bina scope ke hi purani unscoped sync call karta
-                // rahta, to render fast hone ke baad bhi Download click karte hi
-                // dobara ek POORI (sabhi-DC) fetch trigger ho jaati (kyunki shared
-                // cache ki scope-tracking DC-scoped aur unscoped fetch ko alag maanti
-                // hai) - isliye yahan bhi wahi scope diya taaki dono consistent/fast
-                // rahein. Division/Circle scope me pehle jaisa hi (poora) fetch hota
-                // hai.
-                const downloadScopeDc = activeDC || null;
-                await Promise.all([syncRevenueLiveEntriesFromSheet(3, false, downloadScopeDc), syncRevenueTdEntriesFromSheet(3, false, downloadScopeDc)]);
-                const rows = getRevenueSelectedReportRows();
+                let rows;
+                if (activeDC) {
+                    // DC-level scope: BILKUL UNCHANGED - purana shared-cache scopeDc
+                    // fast path (2026-09-15 fix) jaisa tha waisa hi rehta hai.
+                    await Promise.all([syncRevenueLiveEntriesFromSheet(3, false, activeDC), syncRevenueTdEntriesFromSheet(3, false, activeDC)]);
+                    rows = getRevenueSelectedReportRows();
+                } else {
+                    // Division/Circle scope: NAYA isolated fast path - isi cache ko
+                    // reuse karta hai jo render ne already load kiya ho (correction #7),
+                    // warna khud fetch karta hai. Capability-mismatch (purana backend)
+                    // par purane unscoped shared-cache path par silently fallback.
+                    const dcList = getRevenueReportScopeDcList_();
+                    const periodValue = revenueReportMode === "MONTHLY"
+                        ? (document.getElementById("revenue-report-month")?.value || getTodayIsoDate().slice(0, 7))
+                        : (document.getElementById("revenue-report-date")?.value || getTodayIsoDate());
+                    const result = await loadRevenueReportScopedRows_(dcList, revenueReportMode, periodValue);
+                    if (result.capabilityMismatch) {
+                        await Promise.all([syncRevenueLiveEntriesFromSheet(3, false, null), syncRevenueTdEntriesFromSheet(3, false, null)]);
+                        rows = getRevenueSelectedReportRows();
+                    } else {
+                        rows = getRevenueScopedSelectedReportRows_(result.rows);
+                    }
+                }
                 if (!rows.length) {
                     setRevenueReportDownloadState(false, "Report ke liye data nahi hai", false);
                     return showToast("Abhi report ke liye data nahi hai", false);
@@ -20380,7 +21626,7 @@
                 if (!alreadyLoaded) {
                     const targetDcs = getRevenueCategoryTargetDcs();
                     await Promise.all([
-                        ensureRevenueCategoryMasterDataLoaded(targetDcs),
+                        ensureRevenueCategoryMasterDataLoadedStrict_(targetDcs),
                         ensureRevenueCategoryRawPaymentRowsLoaded(),
                         warmRevenueCategoryUploadedPaidCache()
                     ]);
@@ -20391,6 +21637,8 @@
                 const filterValue = mode === "MONTHLY"
                     ? (document.getElementById("revenue-hq-village-month")?.value || getTodayIsoDate().slice(0, 7))
                     : (document.getElementById("revenue-hq-village-date")?.value || getTodayIsoDate());
+                const reconciliation = await ensureRevenueCategoryReconciliationLoaded(mode, filterValue);
+                if (!isRenderValid()) { if (progress) progress.stop(); return; }
                 const summaryData = buildRevenueHqVillageSummaryData(mode, filterValue);
                 revenueHqVillageTree = summaryData.tree;
                 revenueHqVillageDrillPath = [];
@@ -20401,6 +21649,7 @@
                 tableBox.innerHTML = renderRevenueHqVillageTable();
                 initRevenueHqVillageListDropdowns();
                 if (listSection) listSection.style.display = "block";
+                showRevenueCategoryStaleLegacyWarning_(statusBox, reconciliation && reconciliation.supported === false);
             } catch (error) {
                 if (progress) progress.stop();
                 if (statusBox) {
@@ -20408,7 +21657,10 @@
                     statusBox.style.background = "#fff1f2";
                     statusBox.style.borderColor = "#fda4af";
                     statusBox.style.color = "#991b1b";
-                    statusBox.innerText = "Report load nahi ho payi";
+                    // ISOLATED FIX (2026-09-17, correction #4): failed_dcs wala naam-
+                    // wala error ab yahan bhi dikhta hai (pehle generic "Report load
+                    // nahi ho payi" hi hamesha dikhta tha).
+                    statusBox.innerText = error?.message || "Report load nahi ho payi";
                 }
             }
         }
@@ -20774,7 +22026,7 @@
                 if (!alreadyLoaded) {
                     const targetDcs = getRevenueCategoryTargetDcs();
                     await Promise.all([
-                        ensureRevenueCategoryMasterDataLoaded(targetDcs),
+                        ensureRevenueCategoryMasterDataLoadedStrict_(targetDcs),
                         ensureRevenueCategoryRawPaymentRowsLoaded(),
                         warmRevenueCategoryUploadedPaidCache()
                     ]);
@@ -20785,6 +22037,8 @@
                 const filterValue = mode === "MONTHLY"
                     ? (document.getElementById("revenue-target-month")?.value || getTodayIsoDate().slice(0, 7))
                     : (document.getElementById("revenue-target-date")?.value || getTodayIsoDate());
+                const reconciliation = await ensureRevenueCategoryReconciliationLoaded(mode, filterValue);
+                if (!isRenderValid()) { if (progress) progress.stop(); return; }
                 const govtFilter = document.getElementById("revenue-target-govt")?.value || "";
                 const tree = buildRevenueHqVillagePaidUnpaidTree(mode, filterValue, govtFilter);
                 revenueTargetTree = tree;
@@ -20799,6 +22053,7 @@
                 refreshRevenueTargetViewByOptions();
                 if (summaryBox) summaryBox.innerHTML = renderRevenueTargetSummaryCardsHtml(totals);
                 tableBox.innerHTML = renderRevenueTargetTable();
+                showRevenueCategoryStaleLegacyWarning_(statusBox, reconciliation && reconciliation.supported === false);
             } catch (error) {
                 if (progress) progress.stop();
                 if (statusBox) {
@@ -20806,7 +22061,7 @@
                     statusBox.style.background = "#fff1f2";
                     statusBox.style.borderColor = "#fda4af";
                     statusBox.style.color = "#991b1b";
-                    statusBox.innerText = "Report load nahi ho payi";
+                    statusBox.innerText = error?.message || "Report load nahi ho payi";
                 }
             }
         }
@@ -21005,7 +22260,7 @@
                 if (!alreadyLoaded) {
                     const targetDcs = getRevenueCategoryTargetDcs();
                     await Promise.all([
-                        ensureRevenueCategoryMasterDataLoaded(targetDcs),
+                        ensureRevenueCategoryMasterDataLoadedStrict_(targetDcs),
                         ensureRevenueCategoryRawPaymentRowsLoaded(),
                         warmRevenueCategoryUploadedPaidCache()
                     ]);
@@ -21013,6 +22268,8 @@
                     revenueDefaultersLoadedScopeKey = scopeKey;
                 }
                 const dateValue = document.getElementById("revenue-defaulters-date")?.value || getTodayIsoDate();
+                const reconciliation = await ensureRevenueCategoryReconciliationLoaded("DAILY", dateValue);
+                if (!isRenderValid()) { if (progress) progress.stop(); return; }
                 // USER REQUEST (2026-08-13): row.pendingAmount (buildRevenueHqVillage-
                 // ConsumerRows me pehle se Net Bill - Paid, sirf positive) use karte
                 // hain, "!row.paid" filter hata diya - taaki partial payment wale
@@ -21031,9 +22288,10 @@
                 const govtSelect = document.getElementById("revenue-defaulters-govt");
                 if (govtSelect) govtSelect.value = "";
                 renderRevenueDefaultersTable();
+                showRevenueCategoryStaleLegacyWarning_(statusBox, reconciliation && reconciliation.supported === false);
             } catch (error) {
                 if (progress) progress.stop();
-                if (statusBox) statusBox.innerText = "Report load nahi ho payi";
+                if (statusBox) statusBox.innerText = error?.message || "Report load nahi ho payi";
             }
         }
 
@@ -22694,7 +23952,7 @@
         // zyada bada hota hai (localStorage jaisi tight limit nahi) - isliye
         // ab yeh CSV IndexedDB me (parsed rows ke roop me) cache karte hain,
         // taaki cache reliably bana rahe aur search hamesha fast (~1 sec) ho.
-        const meterCheckingConsumerDbName = "seoni-meter-checking-consumer-db-v1" + (STAGING_SAFE_MODE ? "-STAGING" : "");
+        const meterCheckingConsumerDbName = "seoni-meter-checking-consumer-db-v1-STAGING";
         const meterCheckingConsumerStoreName = "consumer-csv";
 
         function openMeterCheckingConsumerDb() {
