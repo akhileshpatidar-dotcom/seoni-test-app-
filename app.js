@@ -4849,6 +4849,40 @@
             return fetchUploadedPaidEntriesWithRetry_(dcName, attempts);
         }
 
+        // Optional batch form of the same read-only endpoint. Freeze Revenue
+        // uses this only for a cold Division/Circle cache: four DC per call
+        // instead of one request for every DC. If an older backend does not
+        // understand `dc_names`, return null so the proven single-DC path is
+        // used as a safe fallback.
+        const REVENUE_UPLOADED_PAID_BATCH_SIZE = 4;
+        async function fetchUploadedPaidCategoryListBatchWithRetry_(dcNames, attempts = 2) {
+            const names = Array.from(new Set((dcNames || []).map(normalizeDcName).filter(Boolean)));
+            if (!names.length) return { status: "success", entries: [] };
+            for (let attempt = 1; attempt <= attempts; attempt++) {
+                const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 90000);
+                try {
+                    const parsed = await withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
+                        const url = `${revenueCollectionSubmitScriptUrl}?action=getUploadedPaidCategoryList&dc_names=${encodeURIComponent(names.join(","))}&t=${Date.now()}`;
+                        const response = await fetch(url, controller ? { signal: controller.signal } : {});
+                        return await response.json();
+                    });
+                    const returnedNames = Array.isArray(parsed?.requested_dc_names)
+                        ? parsed.requested_dc_names.map(normalizeDcName).filter(Boolean).sort()
+                        : [];
+                    const expectedNames = names.slice().sort();
+                    const exactScope = returnedNames.length === expectedNames.length
+                        && returnedNames.every((name, index) => name === expectedNames[index]);
+                    if (parsed && parsed.status === "success" && parsed.scope_mode === "batch"
+                        && exactScope && Array.isArray(parsed.entries)) return parsed;
+                } catch (_) {} finally {
+                    clearTimeout(timer);
+                }
+                if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 800));
+            }
+            return null;
+        }
+
         // Ek saath sabhi DC ka fetch chalane (Promise.all) ki jagah, ek chhoti si
         // concurrency-limited "pool" - ek time par sirf `limit` (5) DC ka request
         // Apps Script ko jaata hai, baki queue me wait karte hain. Isse Apps Script
@@ -4885,10 +4919,7 @@
                 ? allDcNames
                 : allDcNames.filter((dcName) => now - (revenueCategoryCacheWarmedAt[dcName] || 0) > REVENUE_CATEGORY_CACHE_TTL_MS);
             if (!dcNames.length) return;
-            await runWithConcurrencyLimit_(dcNames, 5, async (dcName) => {
-                const parsed = await fetchUploadedPaidCategoryListWithRetry_(dcName);
-                if (!parsed) return;
-                const rows = Array.isArray(parsed?.entries) ? parsed.entries : (Array.isArray(parsed?.data) ? parsed.data : []);
+            const saveRowsForDc = (rows, dcName) => {
                 const localCache = getRevenueUploadedPaidCache();
                 const mergedRows = rows.map((row) => {
                     const ivrs = getRevenueUploadedPaidRowIvrs(row);
@@ -4915,6 +4946,35 @@
                 });
                 saveRevenueUploadedPaidEntriesLocalBulk(mergedRows, dcName, true);
                 revenueCategoryCacheWarmedAt[dcName] = Date.now();
+            };
+            const batches = [];
+            for (let i = 0; i < dcNames.length; i += REVENUE_UPLOADED_PAID_BATCH_SIZE) {
+                batches.push(dcNames.slice(i, i + REVENUE_UPLOADED_PAID_BATCH_SIZE));
+            }
+            await runWithConcurrencyLimit_(batches, 2, async (batchDcs) => {
+                const parsed = await fetchUploadedPaidCategoryListBatchWithRetry_(batchDcs);
+                if (parsed) {
+                    const rowsByDc = {};
+                    const rows = Array.isArray(parsed.entries) ? parsed.entries : [];
+                    rows.forEach((row) => {
+                        const resolvedDc = normalizeDcName(getRevenueUploadedPaidRowDcName(row));
+                        if (!resolvedDc) return;
+                        if (!rowsByDc[resolvedDc]) rowsByDc[resolvedDc] = [];
+                        rowsByDc[resolvedDc].push(row);
+                    });
+                    // Empty PAID MASTER bhi successful fresh result hai; us DC ki
+                    // purani local paid list hataana zaroori hai.
+                    batchDcs.forEach((dcName) => saveRowsForDc(rowsByDc[dcName] || [], dcName));
+                    return;
+                }
+                // Old/deploy-na-hua backend ya oversized batch failure: sirf isi
+                // chhote group par purana proven single-DC route use karo.
+                await runWithConcurrencyLimit_(batchDcs, 2, async (dcName) => {
+                    const single = await fetchUploadedPaidCategoryListWithRetry_(dcName);
+                    if (!single) return;
+                    const rows = Array.isArray(single?.entries) ? single.entries : (Array.isArray(single?.data) ? single.data : []);
+                    saveRowsForDc(rows, dcName);
+                });
             });
         }
 
