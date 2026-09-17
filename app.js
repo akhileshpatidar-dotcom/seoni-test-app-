@@ -44,7 +44,13 @@
             let candidate = String(rawUrl || "");
             try { candidate = decodeURIComponent(candidate); } catch (_) {}
             try {
-                return Object.values(revenueCollectionCsvUrls || {}).some((configuredUrl) => {
+                const configuredUrls = Object.values(revenueCollectionCsvUrls || {});
+                Object.values(divisionConfigs || {}).forEach((division) => {
+                    (division.dcs || []).forEach((dc) => {
+                        if (dc && dc.csvUrl) configuredUrls.push(dc.csvUrl);
+                    });
+                });
+                return configuredUrls.some((configuredUrl) => {
                     const base = String(configuredUrl || "").split("&t=")[0];
                     return !!base && candidate.includes(base);
                 });
@@ -15401,6 +15407,20 @@
             return normalizeLookupValue(dcName || "");
         }
 
+        // Revenue Master URL ka primary map kuch DC tak hi simit hai. Division
+        // configuration me jo existing per-DC csvUrl diya hai, use fallback ke
+        // roop me lene se Division report kisi valid DC (jaise ADEGAON) par
+        // bina wajah fail nahi hoti. Koi naya source/logic add nahi hota.
+        function getRevenueCollectionCsvUrl_(dcName = activeDC) {
+            const dcKey = getRevenueCollectionDcKey(dcName);
+            if (revenueCollectionCsvUrls[dcKey]) return revenueCollectionCsvUrls[dcKey];
+            for (const division of Object.values(divisionConfigs || {})) {
+                const match = (division.dcs || []).find((dc) => getRevenueCollectionDcKey(dc.name) === dcKey);
+                if (match && match.csvUrl) return match.csvUrl;
+            }
+            return "";
+        }
+
         // SEONI (T) DC ke liye request: underlying data column same rehta hai
         // (HQ NAME / VILLAGE), sirf iske Revenue reports me DISPLAY label alag
         // dikhna hai - "HQ Name" ki jagah "Name of Staff", "Village" ki jagah
@@ -15594,7 +15614,7 @@
             const dcKey = getRevenueCollectionDcKey(dcName);
             if (!forceRefresh && revenueCollectionLoadedByDc[dcKey]) return revenueCollectionRowsByDc[dcKey] || [];
 
-            const csvUrl = revenueCollectionCsvUrls[dcKey];
+            const csvUrl = getRevenueCollectionCsvUrl_(dcName);
             const cacheKey = `seoni-revenue-collection-csv-v5-${dcKey}`;
 
             if (!forceRefresh) {
