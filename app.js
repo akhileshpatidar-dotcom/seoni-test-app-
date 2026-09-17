@@ -3006,13 +3006,23 @@
         function getRevenueMasterRowsForDc(dcName) {
             const normalizedDc = normalizeDcName(dcName);
             const dcKey = getRevenueCollectionDcKey(dcName);
-            const revenueRows = revenueCollectionRowsByDc[dcKey] || [];
+            const revenueRows = (revenueCollectionRowsByDc[dcKey] || [])
+                .filter((row) => normalizeRevenueIvrs(row.ivrsNo))
+                .map((row) => ({ ...row, dcName: normalizedDc }));
             const consumerRows = getConsumerRows(dcName)
                 .map(mapRevenueConsumerRow)
                 .filter((row) => normalizeRevenueIvrs(row.ivrsNo))
                 .map((row) => ({ ...row, dcName: normalizedDc }));
+
+            // Revenue reconciliation reports ka authoritative Master wahi fresh
+            // Revenue CSV hai jo strict loader ne load kiya. Iske saath Mobile/
+            // consumer cache merge karne par report ka total navigation-history
+            // par nirbhar ho raha tha (CHHAPARA-2 me 49 extra consumers). Revenue
+            // rows available hon to unhi ko use karo; consumerRows sirf legacy/
+            // offline fallback hain jab Revenue Master bilkul available na ho.
+            const sourceRows = revenueRows.length ? revenueRows : consumerRows;
             const mergedByIvrs = new Map();
-            [...consumerRows, ...revenueRows].forEach((row) => {
+            sourceRows.forEach((row) => {
                 const ivrs = normalizeRevenueIvrs(row.ivrsNo);
                 if (!ivrs) return;
                 const existing = mergedByIvrs.get(ivrs) || {};
