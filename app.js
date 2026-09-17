@@ -3212,12 +3212,7 @@
                 await Promise.all([
                     ensureRevenueCategoryMasterDataLoaded(allDcs),
                     ensureRevenueCategoryRawPaymentRowsLoaded(),
-                    // Freeze report ko har click par 24-DC paid cache force-refresh
-                    // nahi karna chahiye. 60-second scoped cache reuse hoti hai;
-                    // isse report ka data/logic same rehta hai, sirf duplicate
-                    // network reads bachti hain. Naya data chahiye to normal app
-                    // refresh ke baad Freeze Now chalaya ja sakta hai.
-                    warmRevenueCategoryUploadedPaidCache(false)
+                    warmRevenueCategoryUploadedPaidCache(true)
                 ]);
 
                 setStatus("Non-Payee / Top Defaulters lists ban rahi hain...", false);
