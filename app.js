@@ -12597,6 +12597,11 @@
         function setShmsPendingStatus(message) {
             const node = document.getElementById("shms-pending-status");
             if (!node) return;
+            if (message === "SYNCING DATA... PLEASE WAIT") {
+                node.style.display = "block";
+                renderSyncingProgress(node, () => node.isConnected && document.getElementById("shms-pending-status") === node);
+                return;
+            }
             node.innerText = message || "";
             node.style.display = message ? "block" : "none";
         }
@@ -12753,6 +12758,11 @@
         function setShmsProgressStatus(message) {
             const node = document.getElementById("shms-progress-status");
             if (!node) return;
+            if (message === "SYNCING DATA... PLEASE WAIT") {
+                node.style.display = "block";
+                renderSyncingProgress(node, () => node.isConnected && document.getElementById("shms-progress-status") === node);
+                return;
+            }
             node.innerText = message || "";
             node.style.display = message ? "block" : "none";
         }
@@ -13540,6 +13550,11 @@
         function setShmsStatus(message) {
             const statusNode = document.getElementById("shms-load-status");
             if (!statusNode) return;
+            if (message === "SYNCING DATA... PLEASE WAIT") {
+                statusNode.style.display = "block";
+                renderSyncingProgress(statusNode, () => statusNode.isConnected && document.getElementById("shms-load-status") === statusNode);
+                return;
+            }
             statusNode.innerText = message || "";
             statusNode.style.display = message ? "block" : "none";
         }
