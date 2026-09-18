@@ -190,7 +190,7 @@
                 <button class="dashboard-btn btn-green-fix" onclick="window.open('https://billing.mpez.co.in/', '_blank')">PAY & VIEW BIJLEE BILL</button>
                 <button class="dashboard-btn btn-update-red" onclick="switchView('mobile-update')">Mobile No Update</button>
                 <button class="dashboard-btn btn-revenue-blue" onclick="switchView('revenue-collection')">Revenue Collection</button>
-                <div id="revenue-upload-freshness-ticker" class="ticker-wrap" style="display:none; margin-top:6px;"><span class="ticker-text" style="color:#ffffff;"></span></div>
+                <div id="revenue-upload-freshness-ticker" style="display:none; width:100%; max-width:360px; margin:4px auto 0; text-align:center; line-height:1.15;"><span class="ticker-text" style="color:#dc2626; font-size:0.58rem; font-weight:900;"></span></div>
                 <button id="meter-checking-dashboard-btn" class="dashboard-btn" style="display:none; background:#8b5a2b; color:#fdf6ec;" onclick="switchView('meter-checking')">Meeter Cheking</button>
                 <button class="dashboard-btn" style="background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%); color:#831843 !important;" onclick="switchView('bill-calculator')">Bijlee Bill Calculator</button>
           <button class="dashboard-btn btn-court-case" onclick="switchView('court-case')" style="display:none;">Lok Adalat Notice</button>
@@ -1468,11 +1468,6 @@
                     <div style="font-size:0.72rem; font-weight:850; color:#475569; margin-top:4px;">Normal aur AG paid file upload karein</div>
                 </div>
 
-                <div id="revenue-paid-upload-dc-status-panel" style="width:100%; max-width:360px; margin:12px auto 0; background:#ffffff; border:1.5px solid #cbd5e1; border-radius:16px; padding:10px 12px; box-shadow:0 6px 16px rgba(15,23,42,0.06);">
-                    <div style="font-size:0.72rem; font-weight:950; color:#0f766e; text-align:center; margin-bottom:6px;">LIVE DC CASH LIST STATUS</div>
-                    <div id="revenue-paid-upload-dc-status-list" style="font-size:0.66rem; font-weight:850; line-height:1.55; color:#475569; text-align:left;">Status check ho raha hai...</div>
-                </div>
-
                 <div id="revenue-admin-lock-box" style="width:100%; max-width:340px; margin:18px auto 0; background:#ffffff; border:1.5px solid #bbf7d0; border-radius:18px; padding:14px; box-shadow:0 10px 24px rgba(22,163,74,0.10);">
                     <label style="display:block; text-align:center; color:#166534; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin-bottom:8px;">Admin Password</label>
                     <input type="password" id="revenue-admin-password" class="ivrs-input" placeholder="Password" style="height:50px; border-color:#22c55e; text-align:center; font-size:1rem;" onkeydown="if(event.key==='Enter') unlockRevenuePaidUpload()">
@@ -1818,6 +1813,6 @@
         </main>
     </div>
 
-    <script src="./app.js?v=20260918-cash-status-r7"></script>
+    <script src="./app.js?v=20260918-revenue-warning-r10"></script>
 </body>
 </html>

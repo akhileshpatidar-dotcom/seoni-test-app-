@@ -18253,7 +18253,6 @@
             const lockBox = document.getElementById("revenue-admin-lock-box");
             const uploadPanel = document.getElementById("revenue-paid-upload-panel");
             const passwordInput = document.getElementById("revenue-admin-password");
-            loadRevenuePaidUploadDcStatusPanel_().catch(() => {});
             if (dcLabel) dcLabel.innerText = `DC: ${activeDC || "-"}`;
             if (passwordInput) passwordInput.value = "";
             if (revenuePaidUploadUnlocked) {
@@ -18349,11 +18348,9 @@
         // User-facing date/time display: always Indian numeric format.
         function formatIndianDateTimeDisplay_(dateValue, timeValue = "") {
             const rawDate = String(dateValue || "").trim();
-            // Uploaded Cash List dates historically came back from Sheets with
-            // day/month swapped (03/08 was returned as 08/03). Reuse the
-            // existing corrective converter before rendering the Indian format.
-            const normalized = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(rawDate)
-                ? convertUploadedDateToDDMMYYYY(rawDate).replaceAll("/", "-")
+            const datePart = rawDate.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+            const normalized = datePart
+                ? `${datePart[2].padStart(2, "0")}-${datePart[1].padStart(2, "0")}-${datePart[3]}`
                 : normalizeRevenueReportDate(rawDate);
             let dateText = normalized ? normalized : rawDate;
             if (dateText.includes("/")) dateText = dateText.replaceAll("/", "-");
@@ -18441,7 +18438,7 @@
                 }
                 const span = box.querySelector(".ticker-text");
                 if (span) {
-                    span.innerText = `⚠️ आज दिनांक ${todayDDMMYYYY} को Cash List Upload ना होने के कारण Latest Paid Consumer का Data Show नहीं होगा   ⚠️   आज दिनांक ${todayDDMMYYYY} को Cash List Upload ना होने के कारण Latest Paid Consumer का Data Show नहीं होगा`;
+                    span.innerText = "आज की Cash List Upload नहीं हुई";
                 }
                 box.style.display = "block";
             } catch (_) {
@@ -18473,25 +18470,6 @@
             } catch (_) {
                 return null;
             }
-        }
-
-        async function loadRevenuePaidUploadDcStatusPanel_() {
-            const box = document.getElementById("revenue-paid-upload-dc-status-list");
-            if (!box || !revenueCollectionSubmitScriptUrl) return;
-            const dcs = Array.from(new Set(getAllDcNames().map(normalizeDcName).filter(Boolean)));
-            if (!dcs.length) { box.innerText = "Koi DC list available nahi hai."; return; }
-            box.innerText = "Status check ho raha hai...";
-            const results = [];
-            await runWithConcurrencyLimit_(dcs, 4, async (dcName) => {
-                const meta = await fetchRevenuePaidUploadSummaryFromServer(dcName);
-                results.push({ dcName, meta });
-            });
-            results.sort((a, b) => a.dcName.localeCompare(b.dcName));
-            box.innerHTML = results.map(({ dcName, meta }) => {
-                if (!meta) return `<div style="color:#b91c1c;">${escapeHtml(dcName)} — ⚠️ DC LIVE NAHI HUI / status unavailable</div>`;
-                const date = formatIndianDateTimeDisplay_(meta.uploadedAtDisplay || "");
-                return `<div style="color:#166534;">${escapeHtml(dcName)} — ✅ ${escapeHtml(date === "-" ? "Aaj upload pending" : `Last: ${date}`)}</div>`;
-            }).join("");
         }
 
         async function refreshRevenuePaidUploadBackendStatus(dcName = activeDC) {
