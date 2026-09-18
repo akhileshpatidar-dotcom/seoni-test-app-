@@ -2528,6 +2528,15 @@
         }
 
         function addRevenueSummaryCount(group, row) {
+            // Circle/Division Daily Live-Revenue fast endpoint already returns
+            // one aggregate per DC. Do not turn it back into per-consumer rows.
+            if (row?.__liveRevenueDailySummary) {
+                group.paidCount += Number(row.paidCount || 0);
+                group.paidAmount += Number(row.paidAmount || 0);
+                group.tdCount += Number(row.tdCount || 0);
+                group.tdAmount += Number(row.tdAmount || 0);
+                return;
+            }
             if (row.reportType === "TD") {
                 group.tdCount += 1;
                 group.tdAmount += getRevenueTdAmount(row);
@@ -2833,6 +2842,10 @@
             // backend available na ho (purana/redeploy-na-hua backend - capability
             // mismatch fallback).
             if (paidInfo?.reconciled) {
+                if (paidInfo.legacyAmbiguous) {
+                    const dcLabel = row.dcName || row.dc_name || "unknown DC";
+                    throw new Error(`Legacy ambiguous payment record मिला (${dcLabel}/${ivrs}); report silently गलत नहीं बनाई गई। Cash List/payment rows ठीक करके फिर चलाएँ।`);
+                }
                 const bucketCategory = revenueCategoryList.includes(category) ? category : "OTHER";
                 if (!group.categories[bucketCategory]) group.categories[bucketCategory] = { paid: 0, unpaid: 0, paidAmount: 0, unpaidAmount: 0 };
                 const amount = Number(paidInfo.amount || 0);
@@ -4863,30 +4876,9 @@
         const revenueFreezePaidCacheWarmedAt_ = {};
         const REVENUE_FREEZE_PAID_CACHE_TTL_MS = 60000;
         async function fetchRevenueFreezePaidSummaryBatch_(dcNames, attempts = 2) {
-            const names = Array.from(new Set((dcNames || []).map(normalizeDcName).filter(Boolean)));
-            if (!names.length) return { status: "success", scope_mode: "batch", requested_dc_names: [], entries: [] };
-            for (let attempt = 1; attempt <= attempts; attempt++) {
-                const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-                const timer = setTimeout(() => { try { if (controller) controller.abort(); } catch (_) {} }, 90000);
-                try {
-                    const parsed = await withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
-                        const url = `${revenueCollectionSubmitScriptUrl}?action=getFreezePaidSummary&dc_names=${encodeURIComponent(names.join(","))}&t=${Date.now()}`;
-                        const response = await fetch(url, controller ? { signal: controller.signal } : {});
-                        return await response.json();
-                    });
-                    const returnedNames = Array.isArray(parsed?.requested_dc_names)
-                        ? parsed.requested_dc_names.map(normalizeDcName).filter(Boolean).sort()
-                        : [];
-                    const expectedNames = names.slice().sort();
-                    const exactScope = returnedNames.length === expectedNames.length
-                        && returnedNames.every((name, index) => name === expectedNames[index]);
-                    if (parsed?.status === "success" && parsed.scope_mode === "batch"
-                        && exactScope && Array.isArray(parsed.entries)) return parsed;
-                } catch (_) {} finally {
-                    clearTimeout(timer);
-                }
-                if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 800));
-            }
+            // This action is not deployed in the freeze backend. Skip the
+            // guaranteed failed request and let the caller use the proven
+            // warmRevenueCategoryUploadedPaidCache fallback immediately.
             return null;
         }
 
@@ -5717,7 +5709,7 @@
 
         function renderRevenueHqVillageStaticTableHtml(tree, colLabel) {
             const rows = tree || [];
-            let html = `<div class="summary-wrapper" style="margin-top:6px;"><div class="summary-table-header" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"><div>${colLabel}</div><div>TOTAL</div><div>PAID</div><div>UNPAID</div></div>`;
+            let html = `<div class="summary-wrapper" style="margin-top:6px;"><div class="summary-table-header" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"><div>${colLabel}</div><div>TOTAL CONSUMER</div><div>PAID</div><div>UNPAID</div></div>`;
             if (!rows.length) {
                 html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Data nahi mila.</div></div>`;
             } else {
@@ -5839,7 +5831,7 @@
         function renderRevenuePaidCountTableHtml(rows, colLabel) {
             const sorted = sortRevenuePaidCountRowsAscPct(rows);
             const cols = "1.4fr 0.85fr 0.85fr 0.7fr";
-            let html = `<div class="summary-wrapper" style="margin-top:6px;"><div class="summary-table-header" style="grid-template-columns: ${cols};"><div>${escapeHtml(colLabel)}</div><div>TOTAL</div><div>PAID</div><div>%</div></div>`;
+            let html = `<div class="summary-wrapper" style="margin-top:6px;"><div class="summary-table-header" style="grid-template-columns: ${cols};"><div>${escapeHtml(colLabel)}</div><div>TOTAL CONSUMER</div><div>PAID</div><div>%</div></div>`;
             if (!sorted.length) {
                 html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Data nahi mila.</div></div>`;
             } else {
@@ -6322,7 +6314,7 @@
                 </div>
                 <div style="font-size:0.62rem; font-weight:900; color:#1d4ed8; text-align:center; margin-top:10px;">CATEGORY WISE</div>
                 <div class="summary-wrapper" style="margin-top:6px;">
-                    <div class="summary-table-header" style="grid-template-columns: 1fr 1fr 1fr 1fr;"><div>CATEGORY</div><div>TOTAL</div><div>PAID</div><div>UNPAID</div></div>
+                    <div class="summary-table-header" style="grid-template-columns: 1fr 1fr 1fr 1fr;"><div>CATEGORY</div><div>TOTAL CONSUMER</div><div>PAID</div><div>UNPAID</div></div>
                     ${catRows || `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Category data nahi mila.</div></div>`}
                 </div>
                 <div style="font-size:0.62rem; font-weight:900; color:#1d4ed8; text-align:center; margin-top:10px;">${colLabel} WISE</div>
@@ -9607,7 +9599,7 @@
             const lastUploadAt = omvigAdminStatus?.last_upload_at || "";
             if (!lastUploadAt) return "";
             const summary = omvigAdminStatus?.last_upload_summary || "";
-            return `<div style="text-align:center; font-size:0.68rem; font-weight:700; color:#475569; margin-top:6px; border-top:1px dashed #cbd5e1; padding-top:6px;">🕒 Last Upload: ${escapeHtml(lastUploadAt)}${summary ? `<br><span style="font-weight:600; color:#64748b;">${escapeHtml(summary)}</span>` : ""}</div>`;
+            return `<div style="text-align:center; font-size:0.68rem; font-weight:700; color:#475569; margin-top:6px; border-top:1px dashed #cbd5e1; padding-top:6px;">🕒 Last Upload: ${escapeHtml(formatIndianDateTimeDisplay_(lastUploadAt))}${summary ? `<br><span style="font-weight:600; color:#64748b;">${escapeHtml(summary)}</span>` : ""}</div>`;
         }
 
         function renderOmvigAdminStatus() {
@@ -18261,6 +18253,7 @@
             const lockBox = document.getElementById("revenue-admin-lock-box");
             const uploadPanel = document.getElementById("revenue-paid-upload-panel");
             const passwordInput = document.getElementById("revenue-admin-password");
+            loadRevenuePaidUploadDcStatusPanel_().catch(() => {});
             if (dcLabel) dcLabel.innerText = `DC: ${activeDC || "-"}`;
             if (passwordInput) passwordInput.value = "";
             if (revenuePaidUploadUnlocked) {
@@ -18350,7 +18343,22 @@
             const yyyy = date.getFullYear();
             const hh = String(date.getHours()).padStart(2, "0");
             const min = String(date.getMinutes()).padStart(2, "0");
-            return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+            return `${dd}-${mm}-${yyyy} ${hh}:${min}`;
+        }
+
+        // User-facing date/time display: always Indian numeric format.
+        function formatIndianDateTimeDisplay_(dateValue, timeValue = "") {
+            const rawDate = String(dateValue || "").trim();
+            // Uploaded Cash List dates historically came back from Sheets with
+            // day/month swapped (03/08 was returned as 08/03). Reuse the
+            // existing corrective converter before rendering the Indian format.
+            const normalized = /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(rawDate)
+                ? convertUploadedDateToDDMMYYYY(rawDate).replaceAll("/", "-")
+                : normalizeRevenueReportDate(rawDate);
+            let dateText = normalized ? normalized : rawDate;
+            if (dateText.includes("/")) dateText = dateText.replaceAll("/", "-");
+            const timeText = formatRevenuePaidTime(timeValue || (rawDate.match(/\b\d{1,2}:\d{2}(?::\d{2})?\b/) || [""])[0]);
+            return dateText ? `${dateText}${timeText && timeText !== "-" ? ` ${timeText}` : ""}` : "-";
         }
 
         function renderRevenuePaidUploadSummary(meta) {
@@ -18452,7 +18460,7 @@
                 const normalRows = entries.filter((e) => normalizeLookupValue(e.source_type || "") === "NORMAL").length;
                 const agRows = entries.filter((e) => normalizeLookupValue(e.source_type || "") === "AG").length;
                 const latest = entries[entries.length - 1] || {};
-                const uploadedAtDisplay = [latest.uploaded_date, latest.uploaded_time].filter(Boolean).join(" ") || "-";
+                const uploadedAtDisplay = formatIndianDateTimeDisplay_(latest.uploaded_date, latest.uploaded_time);
                 return {
                     dcName: normalizedDc,
                     uniqueCount: entries.length,
@@ -18465,6 +18473,25 @@
             } catch (_) {
                 return null;
             }
+        }
+
+        async function loadRevenuePaidUploadDcStatusPanel_() {
+            const box = document.getElementById("revenue-paid-upload-dc-status-list");
+            if (!box || !revenueCollectionSubmitScriptUrl) return;
+            const dcs = Array.from(new Set(getAllDcNames().map(normalizeDcName).filter(Boolean)));
+            if (!dcs.length) { box.innerText = "Koi DC list available nahi hai."; return; }
+            box.innerText = "Status check ho raha hai...";
+            const results = [];
+            await runWithConcurrencyLimit_(dcs, 4, async (dcName) => {
+                const meta = await fetchRevenuePaidUploadSummaryFromServer(dcName);
+                results.push({ dcName, meta });
+            });
+            results.sort((a, b) => a.dcName.localeCompare(b.dcName));
+            box.innerHTML = results.map(({ dcName, meta }) => {
+                if (!meta) return `<div style="color:#b91c1c;">${escapeHtml(dcName)} — ⚠️ DC LIVE NAHI HUI / status unavailable</div>`;
+                const date = formatIndianDateTimeDisplay_(meta.uploadedAtDisplay || "");
+                return `<div style="color:#166534;">${escapeHtml(dcName)} — ✅ ${escapeHtml(date === "-" ? "Aaj upload pending" : `Last: ${date}`)}</div>`;
+            }).join("");
         }
 
         async function refreshRevenuePaidUploadBackendStatus(dcName = activeDC) {
@@ -19376,18 +19403,27 @@
         // chhoti list turant paa sakte hain, bina 24-DC/poori-history wali slow
         // shared sync (jo Cash Reconcile/Pending DO List/Report Download ke liye
         // zaroori hai, usko bilkul nahi chheda) par fallback kiye.
-        async function fetchRevenueLiveProgressFastRows_(dcName, dateStr, attempts = 2) {
+        async function fetchRevenueLiveProgressFastRows_(dcName, dateStr, dcNames = [], attempts = 2) {
             if (!revenueCollectionSubmitScriptUrl) return null;
-            const dcParam = dcName ? `&dc_name=${encodeURIComponent(dcName)}` : "";
+            // DC view me ek DC, Division view me sirf us Division ke DCs, aur
+            // Circle view me koi scope parameter nahi. Backend ka existing
+            // dc_names support Division ke bekaar Circle-wide sheet-read ko
+            // rokta hai; Circle behavior jaan-boojhkar unchanged hai.
+            const normalizedDcNames = Array.from(new Set((dcNames || [])
+                .map((name) => normalizeDcName(name))
+                .filter(Boolean)));
+            const scopeParam = dcName
+                ? `&dc_name=${encodeURIComponent(dcName)}`
+                : (normalizedDcNames.length ? `&dc_names=${encodeURIComponent(normalizedDcNames.join(","))}` : "");
             for (let attempt = 1; attempt <= attempts; attempt++) {
                 try {
                     const [paidParsed, tdParsed] = await Promise.all([
                         withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
-                            const paidResponse = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getEntries${dcParam}&date=${encodeURIComponent(dateStr)}&t=${Date.now()}`);
+                            const paidResponse = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getEntries${scopeParam}&date=${encodeURIComponent(dateStr)}&t=${Date.now()}`);
                             return await paidResponse.json();
                         }),
                         withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
-                            const tdResponse = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getTDEntries${dcParam}&date=${encodeURIComponent(dateStr)}&t=${Date.now()}`);
+                            const tdResponse = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getTDEntries${scopeParam}&date=${encodeURIComponent(dateStr)}&t=${Date.now()}`);
                             return await tdResponse.json();
                         })
                     ]);
@@ -19400,6 +19436,50 @@
                             .map((row) => ({ ...row, reportType: "PAID" }));
                         const tdRows = tdSourceRows.map(mapRevenueTdSheetEntry).filter((row) => normalizeRevenueIvrs(row.ivrsNo));
                         return [...paidRows, ...tdRows];
+                    }
+                } catch (_) {}
+                if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
+            }
+            return null;
+        }
+
+        // Circle/Division Daily Live-Revenue ke liye compact server aggregate.
+        // Naya backend available na ho, marker mismatch ho, ya network fail ho to
+        // null return hota hai aur neeche wala existing raw-row fast path chalti hai.
+        async function fetchRevenueLiveProgressDailySummary_(dcNames, dateStr, attempts = 2) {
+            if (!revenueCollectionSubmitScriptUrl) return null;
+            const requestedNames = Array.from(new Set((dcNames || [])
+                .map((name) => normalizeDcName(name))
+                .filter(Boolean)));
+            const expectedNames = requestedNames.length
+                ? requestedNames
+                : getAllDcNames().map((name) => normalizeDcName(name)).filter(Boolean);
+            const scopeParam = requestedNames.length
+                ? `&dc_names=${encodeURIComponent(requestedNames.join(","))}`
+                : "";
+            for (let attempt = 1; attempt <= attempts; attempt++) {
+                try {
+                    const parsed = await withAppsScriptConcurrencyGate_(revenueCollectionSubmitScriptUrl, async () => {
+                        const response = await fetch(`${revenueCollectionSubmitScriptUrl}?action=getLiveRevenueDailySummary${scopeParam}&date=${encodeURIComponent(dateStr)}&t=${Date.now()}`);
+                        return await response.json();
+                    });
+                    const returnedNames = Array.isArray(parsed?.requested_dc_names)
+                        ? parsed.requested_dc_names.map((name) => normalizeDcName(name)).filter(Boolean)
+                        : [];
+                    const exactScope = returnedNames.length === expectedNames.length
+                        && expectedNames.every((name) => returnedNames.includes(name));
+                    const expectedMode = requestedNames.length ? "batch" : "all";
+                    if (parsed?.status === "success" && parsed.scope_mode === expectedMode
+                        && parsed.period_mode === "date" && parsed.period_value === dateStr
+                        && exactScope && Array.isArray(parsed.rows)) {
+                        return parsed.rows.map((row) => ({
+                            dcName: normalizeDcName(row.dc_name || row.dcName || ""),
+                            paidCount: Number(row.paid_count || row.paidCount || 0),
+                            paidAmount: Number(row.paid_amount || row.paidAmount || 0),
+                            tdCount: Number(row.td_count || row.tdCount || 0),
+                            tdAmount: Number(row.td_amount || row.tdAmount || 0),
+                            __liveRevenueDailySummary: true
+                        })).filter((row) => row.dcName);
                     }
                 } catch (_) {}
                 if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, 600 * attempt));
@@ -19709,10 +19789,19 @@
         // ab apna-apna shared 60-second TTL rakhte hain (dekhein unki definition).
         // Ye helper dono ke fresh-hone ka combined check deta hai, taaki Live
         // Progress aur baaki reports ek hi cache-state par bharosa kar saken.
-        function isRevenueLiveAndTdDataFresh() {
+        function isRevenueLiveAndTdDataFresh(scopeDc = null) {
             const now = Date.now();
+            // Circle-scope cache (null) har view ke liye kaafi hai. Lekin ek
+            // DC-only cache ko Division/Circle me kabhi reuse nahi kar sakte;
+            // warna 60-second TTL ke andar partial data dikh sakta tha.
+            const requestedScope = scopeDc ? normalizeDcName(scopeDc) : null;
+            const liveScope = revenueLiveEntriesCachedScopeDc ? normalizeDcName(revenueLiveEntriesCachedScopeDc) : null;
+            const tdScope = revenueTdEntriesCachedScopeDc ? normalizeDcName(revenueTdEntriesCachedScopeDc) : null;
+            const liveScopeMatches = liveScope === null || (requestedScope && liveScope === requestedScope);
+            const tdScopeMatches = tdScope === null || (requestedScope && tdScope === requestedScope);
             return !!revenueLiveEntriesSyncedAt && (now - revenueLiveEntriesSyncedAt < REVENUE_LIVE_ENTRIES_SYNC_TTL_MS)
-                && !!revenueTdEntriesSyncedAt && (now - revenueTdEntriesSyncedAt < REVENUE_TD_ENTRIES_SYNC_TTL_MS);
+                && !!revenueTdEntriesSyncedAt && (now - revenueTdEntriesSyncedAt < REVENUE_TD_ENTRIES_SYNC_TTL_MS)
+                && liveScopeMatches && tdScopeMatches;
         }
         async function renderRevenueLiveProgress() {
             const tableBox = document.getElementById("revenue-live-table");
@@ -19730,7 +19819,8 @@
             // jaisi kisi bhi report ne pehle hi sync kiya ho to bhi). Yahan check kar
             // lete hain ki dono fresh hain kya - agar haan to progress-bar UI bhi
             // dikhaye bina turant re-render kar dete hain.
-            const needsSync = !isRevenueLiveAndTdDataFresh();
+            const cacheScopeDc = activeViewLevel === "DC" && activeDC ? activeDC : null;
+            const needsSync = !isRevenueLiveAndTdDataFresh(cacheScopeDc);
             if (!needsSync) {
                 const rows = getRevenueCombinedFilteredEntries("DAILY", getCurrentDateDDMMYYYY());
                 const groupedRows = buildProgressRevenueSummaryRows(rows);
@@ -19744,12 +19834,10 @@
             // PERF FIX (2026-08-20, extended 2026-09-15): DC-scope par pehle FAST,
             // isolated path try karo (sirf is DC + sirf aaj ki date) - dekhein
             // fetchRevenueLiveProgressFastRows_ ke upar wala detailed comment.
-            // SPEED FIX (2026-09-15): ab Division/Circle scope me bhi yahi fast
-            // path try karte hain - bas dc_name khaali chhodte hain (backend sabhi
-            // DC ka "aaj ka" data deta hai, poori history nahi), phir Division ke
-            // liye us chhoti (already-today-only) list ko client-side apne DC-set
-            // tak filter kar dete hain (yeh filter free hai, kyunki list pehle se
-            // hi chhoti hai). Kisi bhi scope me fast path fail ho jaaye to purani
+            // SPEED FIX (2026-09-15, refined 2026-09-18): Division me `dc_names`
+            // bhejte hain, isliye backend sirf us Division ke DC padhta hai;
+            // Circle me aaj ki date ka chhota response aata hai. Kisi bhi scope
+            // me fast path fail ho jaaye to purani
             // (poori) sync method par turant fallback - taaki behavior kabhi pehle
             // se KHARAB na ho, sirf FAST ho.
             let rows = null;
@@ -19757,7 +19845,13 @@
                 rows = await fetchRevenueLiveProgressFastRows_(activeDC, getCurrentDateDDMMYYYY());
                 if (myToken !== revenueLiveProgressToken) { progress.stop(); return; }
             } else if (activeViewLevel === "DIVISION" || activeViewLevel === "CIRCLE") {
-                const todayRows = await fetchRevenueLiveProgressFastRows_("", getCurrentDateDDMMYYYY());
+                const divisionDcNames = activeViewLevel === "DIVISION" && activeDiv
+                    ? getDivisionDcNames(activeDiv)
+                    : [];
+                // Naya compact summary endpoint pehle try hota hai. Circle me bhi
+                // raw consumer rows browser tak nahi aate; sirf per-DC totals aate hain.
+                const dailySummaryRows = await fetchRevenueLiveProgressDailySummary_(divisionDcNames, getCurrentDateDDMMYYYY());
+                const todayRows = dailySummaryRows || await fetchRevenueLiveProgressFastRows_("", getCurrentDateDDMMYYYY(), divisionDcNames);
                 if (myToken !== revenueLiveProgressToken) { progress.stop(); return; }
                 if (todayRows) {
                     if (activeViewLevel === "DIVISION" && activeDiv) {
@@ -21292,7 +21386,7 @@
 
             // Counts-only (Total -> Paid -> Unpaid): amount wise detail summary cards +
             // category table me pehle se hai, yahan sirf compact HQ/Village drill list hai.
-            let html = `<div class="summary-wrapper">${breadcrumbHtml}<div class="summary-table-header" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"><div>${colLabel}</div><div>TOTAL</div><div>PAID</div><div>UNPAID</div></div>`;
+            let html = `<div class="summary-wrapper">${breadcrumbHtml}<div class="summary-table-header" style="grid-template-columns: 1.4fr 0.85fr 0.85fr 0.85fr;"><div>${colLabel}</div><div>TOTAL CONSUMER</div><div>PAID</div><div>UNPAID</div></div>`;
 
             if (!rows || !rows.length) {
                 html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Is scope me data nahi mila.</div></div>`;
@@ -21357,7 +21451,7 @@
                 </div>
                 <div style="font-size:0.6rem; font-weight:950; color:#166534; text-align:center; margin:12px auto 0; max-width:360px; text-transform:uppercase;">Category Wise</div>
                 <div class="summary-wrapper" style="max-width:360px; margin:6px auto 0;">
-                    <div class="summary-table-header" style="grid-template-columns: 1fr 1fr 1fr 1fr;"><div>CATEGORY</div><div>TOTAL</div><div>PAID</div><div>UNPAID</div></div>
+                    <div class="summary-table-header" style="grid-template-columns: 1fr 1fr 1fr 1fr;"><div>CATEGORY</div><div>TOTAL CONSUMER</div><div>PAID</div><div>UNPAID</div></div>
                     ${catRows || `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div class="text-rose-600">Category data nahi mila.</div></div>`}
                 </div>
                 <div style="font-size:0.6rem; font-weight:950; color:#166534; text-align:center; margin:14px auto 0; max-width:360px; text-transform:uppercase;">${activeViewLevel === "DC" ? "HQ Wise" : "DC Wise"} (tap karke aage drill down karein)</div>
@@ -21496,9 +21590,19 @@
             setRevenueHqVillageDownloadState(true, `${type === "PDF" ? "PDF" : "Excel"} download ho raha hai... kripya wait kijiye`, true);
             try {
                 const headers = activeViewLevel === "DC"
-                    ? [revenueHqLabelUpper(), revenueVillageLabelUpper(), "PAID", "PAID AMT", "UNPAID", "UNPAID AMT"]
-                    : ["DC NAME", "HQ NAME", "VILLAGE", "PAID", "PAID AMT", "UNPAID", "UNPAID AMT"];
-                const rows = flatRows.map((r) => [...r.path, r.paidTotal, formatProgressReportAmount(r.paidAmountTotal), r.unpaidTotal, formatProgressReportAmount(r.unpaidAmountTotal)]);
+                    ? [revenueHqLabelUpper(), revenueVillageLabelUpper(), "TOTAL CONSUMER", "PAID", "PAID AMT", "UNPAID", "UNPAID AMT"]
+                    : ["DC NAME", "HQ NAME", "VILLAGE", "TOTAL CONSUMER", "PAID", "PAID AMT", "UNPAID", "UNPAID AMT"];
+                const rows = flatRows.map((r) => [...r.path, Number(r.paidTotal || 0) + Number(r.unpaidTotal || 0), r.paidTotal, formatProgressReportAmount(r.paidAmountTotal), r.unpaidTotal, formatProgressReportAmount(r.unpaidAmountTotal)]);
+                const grand = flatRows.reduce((acc, r) => {
+                    acc.total += Number(r.paidTotal || 0) + Number(r.unpaidTotal || 0);
+                    acc.paid += Number(r.paidTotal || 0);
+                    acc.paidAmount += Number(r.paidAmountTotal || 0);
+                    acc.unpaid += Number(r.unpaidTotal || 0);
+                    acc.unpaidAmount += Number(r.unpaidAmountTotal || 0);
+                    return acc;
+                }, { total: 0, paid: 0, paidAmount: 0, unpaid: 0, unpaidAmount: 0 });
+                const grandPath = activeViewLevel === "DC" ? ["GRAND TOTAL", ""] : ["GRAND TOTAL", "", ""];
+                rows.push([...grandPath, grand.total, grand.paid, formatProgressReportAmount(grand.paidAmount), grand.unpaid, formatProgressReportAmount(grand.unpaidAmount)]);
                 const reportTitle = getRevenueHqVillageReportTitle();
                 const scopeLine = `Scope: ${activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? `Division - ${activeDiv}` : "Circle - SEONI CIRCLE")}`;
                 const periodLine = `Period: ${getRevenueHqVillagePeriodDisplay()}`;
@@ -21880,6 +21984,9 @@
                 const colLabel = revenueTargetViewBy === "DC" ? "DC NAME" : (revenueTargetViewBy === "HQ" ? (activeViewLevel === "DC" ? revenueHqLabelUpper() : "HQ NAME") : (activeViewLevel === "DC" ? revenueVillageLabelUpper() : "VILLAGE"));
                 const headers = [colLabel, "TARGET", "ACHIEVED", "%"];
                 const rows = flatRows.map((r) => [r.name, formatProgressReportAmount(r.target), formatProgressReportAmount(r.paidAmountTotal), `${r.pct}%`]);
+                const grandTarget = flatRows.reduce((sum, r) => sum + Number(r.target || 0), 0);
+                const grandAchieved = flatRows.reduce((sum, r) => sum + Number(r.paidAmountTotal || 0), 0);
+                rows.push(["GRAND TOTAL", formatProgressReportAmount(grandTarget), formatProgressReportAmount(grandAchieved), `${getRevenueAchievementPct(grandAchieved, grandTarget)}%`]);
                 const reportTitle = getRevenueTargetReportTitle();
                 const govtFilterValue = document.getElementById("revenue-target-govt")?.value || "";
                 const govtFilterLabel = govtFilterValue === "GOVT" ? "Govt Only" : (govtFilterValue === "NONGOVT" ? "Non Govt Only" : "All (Govt + Non Govt)");
