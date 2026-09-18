@@ -5503,12 +5503,9 @@
                 const parsed = parseSummarySelection(rawVal, summaryMode);
                 const reportType = summaryMode === "MONTHLY" ? "MONTHLY" : "DAILY";
                 const filterValue = getRevenueProgressFilterValue(parsed.daily, parsed.monthly);
-                const [, , , reconciliation] = await Promise.all([
-                    ensureRevenueCategoryMasterDataLoadedStrict_(getRevenueCategoryTargetDcs()),
-                    ensureRevenueCategoryRawPaymentRowsLoaded(),
-                    warmRevenueCategoryUploadedPaidCache(),
-                    ensureRevenueCategoryReconciliationLoaded(reportType, filterValue)
-                ]);
+                const reconciliation = await prepareRevenueCategoryReportData_(
+                    getRevenueCategoryTargetDcs(), reportType, filterValue
+                );
                 const rows = buildRevenueCategorySummaryRows(reportType, filterValue);
                 // USER-APPROVED correction #8: invariant mismatch mile to Excel/PDF
                 // silently nahi niklegi - saaf error (DC/HQ naam + difference) dikhega.
@@ -6777,12 +6774,9 @@
                     // karne ki zaroorat nahi.
                     let hqVillageSummaryData = null;
                     try {
-                        const [, , , reconciliation] = await Promise.all([
-                            ensureRevenueCategoryMasterDataLoadedStrict_(getRevenueCategoryTargetDcs()),
-                            ensureRevenueCategoryRawPaymentRowsLoaded(),
-                            warmRevenueCategoryUploadedPaidCache(),
-                            ensureRevenueCategoryReconciliationLoaded(revenueMode, revenueFilterValue)
-                        ]);
+                        const reconciliation = await prepareRevenueCategoryReportData_(
+                            getRevenueCategoryTargetDcs(), revenueMode, revenueFilterValue
+                        );
                         if (isStaleSummaryRefresh()) return;
                         // ISOLATED ADDITION (2026-09-17, USER-APPROVED condition): yeh chhoti
                         // embedded quick-glance widget hai (poora dedicated report nahi) -
@@ -17679,11 +17673,13 @@
             // hoke ready nahi ho jaate, tab tak syncing bar hi dikhta rahega (1 se 99 dhire
             // dhire, 99 par pahunch ke blink), display kabhi bhi galat number nahi dikhayega.
             try {
-                const dcKey = getRevenueCollectionDcKey(activeDC);
-                const fallbackRows = revenueCollectionRowsByDc[dcKey] || getConsumerRows(activeDC).map(mapRevenueConsumerRow).filter((row) => normalizeRevenueIvrs(row.ivrsNo));
-                const [freshRows, paidSet] = await Promise.all([
-                    withTimeout(loadRevenueCollectionData(activeDC, true), 45000, []),
-                    getRevenuePendingPaidIvrsSet()
+                // Pending DO List ka paid/unpaid rule ab HQ/Village Paid-Unpaid
+                // MONTHLY report jaisa hi canonical Cash List reconciliation hai.
+                // Paid-by-Staff rows, local all-time cache, aur duplicate raw
+                // master rows ko yahan jaan-boojhkar use nahi karte.
+                const [_, paidSet] = await Promise.all([
+                    ensureRevenueCategoryMasterDataLoadedStrict_([activeDC]),
+                    getRevenuePendingCashListPaidIvrsSet_()
                 ]);
                 if (refreshToken !== revenuePendingPaidRefreshToken) { if (pendingListProgress) pendingListProgress.stop(); return; }
                 revenuePendingPaidIvrsSet = paidSet;
@@ -17693,11 +17689,11 @@
                 // bina kisi warning ke. Ab agar poora backend sync nahi ho paaya to
                 // status line me saaf warning dikhayenge, taaki number par bharosa na
                 // kiya jaaye aur user dobara try kar sake.
-                const pendingDcKey = normalizeLookupValue(activeDC || "");
-                revenuePendingPaidDataIncomplete = !revenueUploadedPaidMasterRowsCache
-                    || revenueUploadedPaidMasterRowsCache.dcKey !== pendingDcKey
-                    || !revenueUploadedPaidMasterRowsCache.backendSynced;
-                const loadedRows = freshRows.length ? freshRows : fallbackRows;
+                revenuePendingPaidDataIncomplete = false;
+                // Same DC+IVRS canonical master list jo HQ/Village report use
+                // karti hai. Isse Total = Paid + Pending invariant dono reports
+                // me same consumer universe par chalega.
+                const loadedRows = getRevenueMasterRowsForDc(activeDC);
                 revenuePendingDiag.masterRows = loadedRows.length;
                 const assignedHq = revenueMessageSelectionMode ? String(revenueMessageSession?.staff?.hq_name || "").trim() : "";
                 revenuePendingBaseRows = loadedRows.filter((row) => (
@@ -17724,11 +17720,11 @@
                 if (pendingListProgress) await pendingListProgress.finish();
                 if (refreshToken !== revenuePendingPaidRefreshToken) return;
                 renderRevenuePendingList();
-            } catch (_) {
+            } catch (error) {
                 if (pendingListProgress) pendingListProgress.stop();
                 if (statusBox) {
                     statusBox.style.display = "block";
-                    statusBox.innerHTML = "Pending list load nahi ho payi. Internet/check karke dobara try kijiye.";
+                    statusBox.innerHTML = escapeHtml(error?.message || "Pending list load nahi ho payi. Internet/check karke dobara try kijiye.");
                 }
             }
         }
@@ -17855,8 +17851,7 @@
         function isRevenuePendingIvrsPaid(ivrsNo) {
             const normalizedIvrs = normalizeRevenueIvrs(ivrsNo);
             if (!normalizedIvrs) return true;
-            return revenuePendingPaidIvrsSet.has(normalizedIvrs)
-                || !!getRevenueUploadedPaidEntryLocal(normalizedIvrs, activeDC);
+            return revenuePendingPaidIvrsSet.has(normalizedIvrs);
         }
 
         function renderRevenuePendingList() {
@@ -17888,7 +17883,7 @@
             // Fetch bahut kam/0 hai to backend/sheet me dikkat hai; agar fetch to
             // poora hai lekin fir bhi Pending zyada hai to IVRS format/matching me
             // dikkat hai.
-            const diagLine = `<div style="font-size:0.66rem; color:#64748b; margin-top:4px;">Diagnostic - Master: ${revenuePendingDiag.masterRows} | Uploaded Paid Fetched: ${revenuePendingDiag.uploadedFetched} | Live Paid Fetched: ${revenuePendingDiag.liveDcMatched} (of ${revenuePendingDiag.liveTotal} all-DC)</div>`;
+            const diagLine = `<div style="font-size:0.66rem; color:#64748b; margin-top:4px;">Diagnostic - Canonical Master: ${revenuePendingDiag.masterRows} | Cash List Paid (current month): ${revenuePendingDiag.uploadedFetched} | Paid-by-Staff: not used</div>`;
             statusBox.innerHTML = `${incompleteWarning}Pending Consumer: <strong>${rows.length}</strong> | HQ: ${escapeHtml(hqValue || "ALL")} | Village: ${escapeHtml(villageValue || "ALL")} | Category: ${escapeHtml(categoryValue || "ALL")} | Net Bill Slab: ${escapeHtml(slabValue || "ALL")} | Type: ${escapeHtml(govtLabel)} | IVRS: ${escapeHtml(ivrsSearch || "ALL")}${diagLine}`;
             listBox.innerHTML = rows.length ? `
                 <div style="display:flex; gap:10px; width:100%; margin:0 auto;">
@@ -18015,6 +18010,36 @@
             }, 80);
         }
 
+        // Pending DO List deliberately has no date/month control. Its fixed
+        // period is the current calendar month, matching the default current-
+        // month HQ/Village Paid-Unpaid report. Only Cash List reconciliation is
+        // authoritative here; Paid-by-Staff and local all-time cache are excluded.
+        async function getRevenuePendingCashListPaidIvrsSet_() {
+            const paidSet = new Set();
+            const dcName = normalizeDcName(activeDC || "");
+            const currentMonth = getTodayIsoDate().slice(0, 7);
+            const reconciliation = await ensureRevenueCategoryReconciliationLoaded("MONTHLY", currentMonth);
+            if (!reconciliation?.supported) {
+                throw new Error("Cash List reconciliation backend available nahi hai; Pending DO List ko purane mixed logic se nahi dikhaya gaya.");
+            }
+            reconciliation.byKey.forEach((info, key) => {
+                const separator = key.indexOf("|");
+                if (separator < 0) return;
+                const rowDc = key.slice(0, separator);
+                const ivrsNo = key.slice(separator + 1);
+                // Partial ho ya full: HQ/Village monthly report ki tarah ek
+                // valid positive Cash List payment consumer ko PAID banati hai.
+                if (rowDc === dcName && Number(info?.amount || 0) > 0 && ivrsNo) paidSet.add(ivrsNo);
+            });
+            revenuePendingDiag.liveTotal = 0;
+            revenuePendingDiag.liveDcMatched = 0;
+            revenuePendingDiag.uploadedFetched = paidSet.size;
+            return paidSet;
+        }
+
+        // Legacy helper retained only for backward compatibility with any old
+        // caller. Pending DO List no longer calls it because it mixed Staff and
+        // all-time Cash List data, which could not match the canonical report.
         async function getRevenuePendingPaidIvrsSet() {
             const paidSet = new Set();
             try {
@@ -20440,6 +20465,23 @@
             return record;
         }
 
+        // Fast path for every report that uses the canonical Cash List
+        // reconciliation. New backend present ho to report ko raw Cash List ka
+        // per-DC warm-up nahi chahiye: reconciliation response hi authoritative
+        // data deta hai. Old backend par existing legacy cache path hi chalti hai.
+        async function prepareRevenueCategoryReportData_(dcNames, mode, filterValue) {
+            const [_, reconciliation] = await Promise.all([
+                ensureRevenueCategoryMasterDataLoadedStrict_(dcNames),
+                ensureRevenueCategoryReconciliationLoaded(mode, filterValue)
+            ]);
+            if (reconciliation?.supported) return reconciliation;
+            await Promise.all([
+                ensureRevenueCategoryRawPaymentRowsLoaded(),
+                warmRevenueCategoryUploadedPaidCache()
+            ]);
+            return reconciliation;
+        }
+
         // USER-APPROVED correction #8: Unique Master Consumer = Paid Consumer +
         // Unpaid Consumer - har row (DC ya HQ) par. Mismatch mile to Excel/PDF
         // download silently nahi niklegi.
@@ -21350,21 +21392,20 @@
             const alreadyLoaded = revenueHqVillageLoadedScopeKey === scopeKey;
             const progress = alreadyLoaded ? null : renderSyncingProgress(tableBox, isRenderValid, "SYNCING DATA... PLEASE WAIT");
             try {
-                if (!alreadyLoaded) {
-                    const targetDcs = getRevenueCategoryTargetDcs();
-                    await Promise.all([
-                        ensureRevenueCategoryMasterDataLoadedStrict_(targetDcs),
-                        ensureRevenueCategoryRawPaymentRowsLoaded(),
-                        warmRevenueCategoryUploadedPaidCache()
-                    ]);
-                    if (!isRenderValid()) { progress.stop(); return; }
-                    revenueHqVillageLoadedScopeKey = scopeKey;
-                }
                 const mode = revenueHqVillageMode === "MONTHLY" ? "MONTHLY" : "DAILY";
                 const filterValue = mode === "MONTHLY"
                     ? (document.getElementById("revenue-hq-village-month")?.value || getTodayIsoDate().slice(0, 7))
                     : (document.getElementById("revenue-hq-village-date")?.value || getTodayIsoDate());
-                const reconciliation = await ensureRevenueCategoryReconciliationLoaded(mode, filterValue);
+                let reconciliation;
+                if (!alreadyLoaded) {
+                    reconciliation = await prepareRevenueCategoryReportData_(
+                        getRevenueCategoryTargetDcs(), mode, filterValue
+                    );
+                    if (!isRenderValid()) { progress.stop(); return; }
+                    revenueHqVillageLoadedScopeKey = scopeKey;
+                } else {
+                    reconciliation = await ensureRevenueCategoryReconciliationLoaded(mode, filterValue);
+                }
                 if (!isRenderValid()) { if (progress) progress.stop(); return; }
                 const summaryData = buildRevenueHqVillageSummaryData(mode, filterValue);
                 revenueHqVillageTree = summaryData.tree;
@@ -21750,21 +21791,20 @@
             const alreadyLoaded = revenueTargetLoadedScopeKey === scopeKey;
             const progress = alreadyLoaded ? null : renderSyncingProgress(tableBox, isRenderValid, "SYNCING DATA... PLEASE WAIT");
             try {
-                if (!alreadyLoaded) {
-                    const targetDcs = getRevenueCategoryTargetDcs();
-                    await Promise.all([
-                        ensureRevenueCategoryMasterDataLoadedStrict_(targetDcs),
-                        ensureRevenueCategoryRawPaymentRowsLoaded(),
-                        warmRevenueCategoryUploadedPaidCache()
-                    ]);
-                    if (!isRenderValid()) { progress.stop(); return; }
-                    revenueTargetLoadedScopeKey = scopeKey;
-                }
                 const mode = revenueTargetMode === "MONTHLY" ? "MONTHLY" : "DAILY";
                 const filterValue = mode === "MONTHLY"
                     ? (document.getElementById("revenue-target-month")?.value || getTodayIsoDate().slice(0, 7))
                     : (document.getElementById("revenue-target-date")?.value || getTodayIsoDate());
-                const reconciliation = await ensureRevenueCategoryReconciliationLoaded(mode, filterValue);
+                let reconciliation;
+                if (!alreadyLoaded) {
+                    reconciliation = await prepareRevenueCategoryReportData_(
+                        getRevenueCategoryTargetDcs(), mode, filterValue
+                    );
+                    if (!isRenderValid()) { progress.stop(); return; }
+                    revenueTargetLoadedScopeKey = scopeKey;
+                } else {
+                    reconciliation = await ensureRevenueCategoryReconciliationLoaded(mode, filterValue);
+                }
                 if (!isRenderValid()) { if (progress) progress.stop(); return; }
                 const govtFilter = document.getElementById("revenue-target-govt")?.value || "";
                 const tree = buildRevenueHqVillagePaidUnpaidTree(mode, filterValue, govtFilter);
@@ -21984,18 +22024,17 @@
             const alreadyLoaded = revenueDefaultersLoadedScopeKey === scopeKey;
             const progress = alreadyLoaded ? null : renderSyncingProgress(tableBox, isRenderValid, "SYNCING DATA... PLEASE WAIT");
             try {
+                const dateValue = document.getElementById("revenue-defaulters-date")?.value || getTodayIsoDate();
+                let reconciliation;
                 if (!alreadyLoaded) {
-                    const targetDcs = getRevenueCategoryTargetDcs();
-                    await Promise.all([
-                        ensureRevenueCategoryMasterDataLoadedStrict_(targetDcs),
-                        ensureRevenueCategoryRawPaymentRowsLoaded(),
-                        warmRevenueCategoryUploadedPaidCache()
-                    ]);
+                    reconciliation = await prepareRevenueCategoryReportData_(
+                        getRevenueCategoryTargetDcs(), "DAILY", dateValue
+                    );
                     if (!isRenderValid()) { progress.stop(); return; }
                     revenueDefaultersLoadedScopeKey = scopeKey;
+                } else {
+                    reconciliation = await ensureRevenueCategoryReconciliationLoaded("DAILY", dateValue);
                 }
-                const dateValue = document.getElementById("revenue-defaulters-date")?.value || getTodayIsoDate();
-                const reconciliation = await ensureRevenueCategoryReconciliationLoaded("DAILY", dateValue);
                 if (!isRenderValid()) { if (progress) progress.stop(); return; }
                 // USER REQUEST (2026-08-13): row.pendingAmount (buildRevenueHqVillage-
                 // ConsumerRows me pehle se Net Bill - Paid, sirf positive) use karte
