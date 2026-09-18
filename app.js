@@ -18399,10 +18399,12 @@
 
         async function checkRevenueUploadFreshness() {
             const box = document.getElementById("revenue-upload-freshness-ticker");
+            const inline = document.getElementById("revenue-upload-freshness-inline");
             if (!box) return;
             const dcName = activeDC;
             if (!dcName || !revenueCollectionSubmitScriptUrl) {
                 box.style.display = "none";
+                if (inline) inline.style.display = "none";
                 return;
             }
             const today = new Date();
@@ -18434,11 +18436,13 @@
                 });
                 if (uploadedToday) {
                     box.style.display = "none";
+                    if (inline) inline.style.display = "none";
                     return;
                 }
                 const span = box.querySelector(".ticker-text");
                 if (span) {
-                    span.innerText = "आज की Cash List Upload नहीं हुई";
+                    span.innerText = `⚠️ आज दिनांक ${todayDDMMYYYY} को Cash List Upload ना होने के कारण Latest Paid Consumer का Data Show नहीं होगा   ⚠️   आज दिनांक ${todayDDMMYYYY} को Cash List Upload ना होने के कारण Latest Paid Consumer का Data Show नहीं होगा`;
+                    if (inline) inline.style.display = "block";
                 }
                 box.style.display = "block";
             } catch (_) {

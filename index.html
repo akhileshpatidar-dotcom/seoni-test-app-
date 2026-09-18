@@ -189,8 +189,8 @@
             <div class="px-2 py-8 flex flex-col gap-4">
                 <button class="dashboard-btn btn-green-fix" onclick="window.open('https://billing.mpez.co.in/', '_blank')">PAY & VIEW BIJLEE BILL</button>
                 <button class="dashboard-btn btn-update-red" onclick="switchView('mobile-update')">Mobile No Update</button>
-                <button class="dashboard-btn btn-revenue-blue" onclick="switchView('revenue-collection')">Revenue Collection</button>
-                <div id="revenue-upload-freshness-ticker" style="display:none; width:100%; max-width:360px; margin:4px auto 0; text-align:center; line-height:1.15;"><span class="ticker-text" style="color:#dc2626; font-size:0.58rem; font-weight:900;"></span></div>
+                <button class="dashboard-btn btn-revenue-blue" onclick="switchView('revenue-collection')">Revenue Collection<span id="revenue-upload-freshness-inline" style="display:none; color:#fecaca; font-size:0.56rem; font-weight:900; margin-top:3px; line-height:1.1;">आज की Cash List Upload नहीं हुई</span></button>
+                <div id="revenue-upload-freshness-ticker" class="ticker-wrap" style="display:none; margin-top:6px;"><span class="ticker-text" style="color:#ffffff;"></span></div>
                 <button id="meter-checking-dashboard-btn" class="dashboard-btn" style="display:none; background:#8b5a2b; color:#fdf6ec;" onclick="switchView('meter-checking')">Meeter Cheking</button>
                 <button class="dashboard-btn" style="background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%); color:#831843 !important;" onclick="switchView('bill-calculator')">Bijlee Bill Calculator</button>
           <button class="dashboard-btn btn-court-case" onclick="switchView('court-case')" style="display:none;">Lok Adalat Notice</button>
@@ -1813,6 +1813,6 @@
         </main>
     </div>
 
-    <script src="./app.js?v=20260918-revenue-warning-r10"></script>
+    <script src="./app.js?v=20260918-revenue-warning-r11"></script>
 </body>
 </html>
