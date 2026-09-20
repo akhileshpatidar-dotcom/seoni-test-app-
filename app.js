@@ -1,14 +1,14 @@
 /**
  * =====================================================================
- * SEONI CIRCLE APP - CLIENT INTEGRATION SCRIPT (app.js)
- * Single Secure Endpoint Integration & Dynamic Form Engine
+ * SEONI CIRCLE APP - UNIFIED SINGLE API BRIDGE & DYNAMIC CALCULATOR (app.js)
+ * Master Endpoint Routing + Exact Form UI Binding + Live Reconciliation
  * =====================================================================
  */
 
-// 1. MASTER UNIFIED BACKEND ENDPOINT
-const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbxUuC0tEQneEUcofwXzRcVYTIiTUYfcSp3EabZRmFZ3INS5syV9r_YE60HcY6zkbmiuow/exec";
+// 1. SINGLE MASTER WEB APP URL (Yahan apna deploy kiya hua master URL rakhein)
+const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzUYELgmujpaBbfByy0BcjOERA8e0mslNdbH5uUw2L6L24785obmdcpcDOc53Ww/exec";
 
-// All individual script variables now map safely to the single Master Gateway
+// All individual script variables safely map to MASTER_SECURE_API_URL
 const revenueScriptUrl = MASTER_SECURE_API_URL;
 const revenueSubmitUrl = MASTER_SECURE_API_URL;
 const mobileUpdateScriptUrl = MASTER_SECURE_API_URL;
@@ -22,7 +22,7 @@ const feederReadingScriptUrl = MASTER_SECURE_API_URL;
 const freezeTrackingScriptUrl = MASTER_SECURE_API_URL;
 const meterCheckingScriptUrl = MASTER_SECURE_API_URL;
 
-// Generic Post Helper
+// Generic POST Dispatcher
 async function postMasterApi(actionName, payloadObj) {
     const payload = Object.assign({ action: actionName }, payloadObj);
     const response = await fetch(MASTER_SECURE_API_URL, {
@@ -33,7 +33,7 @@ async function postMasterApi(actionName, payloadObj) {
     return await response.json();
 }
 
-// Generic Get Helper
+// Generic GET Dispatcher
 async function getMasterApi(actionName, paramsObj) {
     const params = Object.assign({ action: actionName }, paramsObj);
     const query = new URLSearchParams(params).toString();
@@ -46,13 +46,14 @@ async function getMasterApi(actionName, paramsObj) {
 // =====================================================================
 
 function onBillCalculatorCategoryChange() {
-    const cat = document.getElementById("bc-category").value;
+    const catSelect = document.getElementById("bc-category");
     const tfWrap = document.getElementById("bc-tariffcode-wrap");
     const tfSelect = document.getElementById("bc-tariffcode");
     const fieldsDiv = document.getElementById("bc-fields");
     const resultDiv = document.getElementById("bc-result");
 
     if (resultDiv) resultDiv.innerHTML = "";
+    const cat = catSelect ? catSelect.value : "";
     if (!cat) {
         if (tfWrap) tfWrap.style.display = "none";
         if (fieldsDiv) fieldsDiv.innerHTML = "";
@@ -72,7 +73,7 @@ function onBillCalculatorCategoryChange() {
 }
 
 function renderBillCalculatorFields() {
-    const cat = document.getElementById("bc-category").value;
+    const cat = document.getElementById("bc-category") ? document.getElementById("bc-category").value : "";
     const fieldsDiv = document.getElementById("bc-fields");
     if (!fieldsDiv) return;
 
@@ -169,9 +170,50 @@ async function calculateBillEstimate() {
 }
 
 // =====================================================================
-// 3. VOLTAGE REGULATION SERVER BRIDGE
+// 3. PROGRESS REPORT & REVENUE RECONCILIATION INTEGRATION
 // =====================================================================
+async function fetchRevenueCategoryReconciliation(dcName, periodMode, periodValue, dcNamesList) {
+    try {
+        const payload = {
+            action: "getRevenueCategoryReconciliation",
+            period_mode: periodMode || "date",
+            period_value: periodValue
+        };
+        if (dcName) {
+            payload.dc_name = dcName;
+        } else if (dcNamesList && dcNamesList.length) {
+            payload.dc_names = Array.isArray(dcNamesList) ? dcNamesList.join(",") : dcNamesList;
+        }
 
+        const res = await postMasterApi("getRevenueCategoryReconciliation", payload);
+        if (res && res.status === "success" && Array.isArray(res.entries)) {
+            return res.entries;
+        }
+        return [];
+    } catch (err) {
+        console.error("Reconciliation Fetch Error:", err);
+        return [];
+    }
+}
+
+async function fetchLiveRevenueDailySummary(dateStr, dcName, dcNamesList) {
+    try {
+        const params = { action: "getLiveRevenueDailySummary", date: dateStr };
+        if (dcName) params.dc_name = dcName;
+        if (dcNamesList && dcNamesList.length) params.dc_names = Array.isArray(dcNamesList) ? dcNamesList.join(",") : dcNamesList;
+
+        const res = await postMasterApi("getLiveRevenueDailySummary", params);
+        if (res && res.status === "success" && Array.isArray(res.rows)) {
+            return res.rows;
+        }
+        return [];
+    } catch (err) {
+        console.error("Live Summary Fetch Error:", err);
+        return [];
+    }
+}
+
+// 4. VOLTAGE REGULATION SERVER BRIDGE
 async function vrCalculateAndRender() {
     const nodes = (typeof vrNodes !== "undefined") ? vrNodes : [];
     const lineType = document.getElementById("vr-line-type") ? document.getElementById("vr-line-type").value : "33kv";
@@ -180,12 +222,7 @@ async function vrCalculateAndRender() {
     if (!nodes || nodes.length < 2) return;
 
     try {
-        const res = await postMasterApi("calculateVR", {
-            line_type: lineType,
-            conductor: conductor,
-            nodes: nodes
-        });
-
+        const res = await postMasterApi("calculateVR", { line_type: lineType, conductor: conductor, nodes: nodes });
         if (res.status === "success") {
             const tableBody = document.getElementById("vr-section-rows");
             if (tableBody) {
