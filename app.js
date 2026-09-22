@@ -2917,7 +2917,24 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 }
                 return;
             }
-            if (!revenueCategoryList.includes(category)) return;
+            // ISOLATED FIX (2026-09-22, USER-REPORTED): legacy (non-reconciled)
+            // path me pehle "category revenueCategoryList (LV1-LV5) me nahi hai to
+            // consumer ko bilkul chhod do (return)" tha - is wajah se aisa consumer
+            // group.__uniqueMasterCount me gin liya jaata tha (upar hamesha count
+            // hota hai) lekin paidTotal/unpaidTotal me kabhi nahi - isliye download
+            // ke waqt "Paid+Unpaid Unique Master Consumer se match nahi kar raha"
+            // wala invariant-mismatch error aata tha un DC ke liye jinke Master
+            // Consumer list me kisi consumer ki tariff category khaali/anjaani ho.
+            // Fix: reconciled path (upar) jaisa hi - anjaani/khaali category ko
+            // "OTHER" bucket me daalte hain (LV1-LV5 column layout bilkul unchanged
+            // rehta hai, sirf internal totals me consumer count hota hai) - ab
+            // consumer kabhi silently drop nahi hota, invariant hamesha match
+            // karega. Payment-matching business rules (LV5/AG vs normal check,
+            // partial-payment remainder logic) bilkul unchanged - sirf jahan
+            // consumer ki apni category se bucket likha jaata hai wahi "OTHER"
+            // fallback use karte hain.
+            const bucketCategory = revenueCategoryList.includes(category) ? category : "OTHER";
+            if (!group.categories[bucketCategory]) group.categories[bucketCategory] = { paid: 0, unpaid: 0, paidAmount: 0, unpaidAmount: 0 };
             const paidCountKey = `${normalizeRevenueUploadedPaidInfoSourceSignature(paidInfo)}|${ivrs}`;
             if (paidInfo && paidCountedIvrsSet?.has(paidCountKey)) return;
             const sourceCategoryPaidInfos = getRevenueCategoryPaidInfosBySourceCategory(paidInfo);
@@ -2933,8 +2950,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 paidCountedIvrsSet?.add(paidCountKey);
                 const remainingAfterPaid = dueAmount - paidThisConsumer;
                 if (remainingAfterPaid > 0) {
-                    group.categories[category].unpaid += 1;
-                    group.categories[category].unpaidAmount += remainingAfterPaid;
+                    group.categories[bucketCategory].unpaid += 1;
+                    group.categories[bucketCategory].unpaidAmount += remainingAfterPaid;
                     group.unpaidTotal += 1;
                     group.unpaidAmountTotal += remainingAfterPaid;
                 }
@@ -2945,23 +2962,23 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (legacyPaidInfo) {
                 const paidAmount = parseRevenuePaidAmount(legacyPaidInfo.amount || 0) || dueAmount;
                 const paidCount = Math.max(1, Number(legacyPaidInfo.count || legacyPaidInfo.payment_count || legacyPaidInfo.paymentCount || 1));
-                group.categories[category].paid += paidCount;
-                group.categories[category].paidAmount += paidAmount;
+                group.categories[bucketCategory].paid += paidCount;
+                group.categories[bucketCategory].paidAmount += paidAmount;
                 group.paidTotal += paidCount;
                 group.paidAmountTotal += paidAmount;
                 paidCountedIvrsSet?.add(paidCountKey);
                 const remainingAfterPaid = dueAmount - paidAmount;
                 if (remainingAfterPaid > 0) {
-                    group.categories[category].unpaid += 1;
-                    group.categories[category].unpaidAmount += remainingAfterPaid;
+                    group.categories[bucketCategory].unpaid += 1;
+                    group.categories[bucketCategory].unpaidAmount += remainingAfterPaid;
                     group.unpaidTotal += 1;
                     group.unpaidAmountTotal += remainingAfterPaid;
                 }
                 return;
             }
 
-            group.categories[category].unpaid += 1;
-            group.categories[category].unpaidAmount += dueAmount;
+            group.categories[bucketCategory].unpaid += 1;
+            group.categories[bucketCategory].unpaidAmount += dueAmount;
             group.unpaidTotal += 1;
             group.unpaidAmountTotal += dueAmount;
         }
