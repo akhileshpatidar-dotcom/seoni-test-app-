@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="hi" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image To Excel Converter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Hind:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', 'Hind', sans-serif; background-color: #0b1329; color: #f1f5f9; }
+        [contenteditable="true"]:focus { outline: 2px solid #fb7185; outline-offset: -2px; background: rgba(251,113,133,0.08); }
+        #dataPreviewTable.merged-grid-table { border-collapse: collapse; }
+        #dataPreviewTable.merged-grid-table td { border: 1px solid #334155; vertical-align: middle; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-950 text-slate-100 antialiased">
+    <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8 flex items-center justify-between flex-wrap gap-2">
+            <div class="flex items-center space-x-3">
+                <div class="p-2.5 bg-rose-500 rounded-xl text-white shadow-lg">
+                    <span class="text-2xl leading-none">📷</span>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-white tracking-wide">Image To Excel Converter</h1>
+                    <p class="text-xs text-slate-400">Photo/Screenshot se Table Scan • Header Color • Column Remove • Colored Excel Export</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+                <button id="exportExcelBtn" onclick="exportScannedExcel()" disabled class="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg transition duration-150 flex items-center gap-2">
+                    <span class="text-lg leading-none">⬇️</span>
+                    <span>Download Excel (.xlsx)</span>
+                </button>
+                <button id="exportPdfBtn" onclick="exportScannedPdf()" disabled class="bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 text-white font-bold py-2.5 px-5 rounded-xl shadow-lg transition duration-150 flex items-center gap-2">
+                    <span class="text-lg leading-none">📄</span>
+                    <span>Download PDF (.pdf)</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-6 w-full">
+        <div class="lg:col-span-4 space-y-5">
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
+                <h2 class="text-sm font-bold text-rose-400 flex items-center gap-2">
+                    <span class="text-lg leading-none">🖼️</span> Step 1: Upload Image
+                </h2>
+                <div id="dropZone" onclick="document.getElementById('imageInput').click()" class="border-2 border-dashed border-slate-700 hover:border-rose-500 bg-slate-950/60 transition-all rounded-xl p-5 text-center cursor-pointer space-y-2">
+                    <input type="file" id="imageInput" accept="image/*" class="hidden" onchange="handleImageSelect(event)">
+                    <div class="inline-flex p-3 bg-slate-800 text-rose-400 rounded-full">
+                        <span class="text-2xl leading-none">📷</span>
+                    </div>
+                    <p class="text-xs font-semibold text-slate-200" id="imageNameDisplay">यहाँ क्लिक करें - Excel/Table का Photo या Screenshot चुनें</p>
+                    <p class="text-[11px] text-slate-400">Digital screenshot par best result milta hai. Kagaz/register ki photo bhi chalegi, lekin usme kuch data galat/idhar-udhar aa sakta hai - scan hone ke baad table me sudhaar (edit) kar sakte hain.</p>
+                    <p class="text-[11px] text-amber-400 font-semibold">AI Vision se scan hota hai (jaise ChatGPT/Gemini karta hai) - toolbar/ribbon apne aap ignore ho jaata hai. Merged/multi-level header wali table (jaise "YEAR wise" report) me merge structure bhi wahi rehta hai. Fir bhi, sirf table wala hissa rakhein to result aur behtar milega.</p>
+                </div>
+                <img id="imagePreviewThumb" class="hidden w-full rounded-xl border border-slate-800 max-h-40 object-contain bg-slate-950" alt="Preview">
+                <button id="scanBtn" onclick="startOcrScan()" disabled class="w-full bg-rose-500 hover:bg-rose-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold py-2.5 rounded-xl shadow flex items-center justify-center gap-2 text-xs">
+                    <span class="leading-none">🔍</span> Scan Image (OCR)
+                </button>
+                <div id="ocrProgressWrap" class="hidden space-y-1.5">
+                    <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                        <div id="ocrProgressFill" class="h-full bg-rose-500 transition-all duration-200" style="width:2%"></div>
+                    </div>
+                    <p id="ocrProgressText" class="text-[10px] font-semibold text-slate-400 text-center">Scanning...</p>
+                </div>
+            </div>
+
+            <div id="mergedModeNotice" class="hidden bg-slate-900 border border-blue-500/50 rounded-2xl p-5 space-y-2 shadow-xl">
+                <h2 class="text-sm font-bold text-blue-400 flex items-center gap-2">
+                    <span class="text-lg leading-none">🧩</span> Merged Layout Detected
+                </h2>
+                <p class="text-[11px] text-slate-400 leading-relaxed">Is image me merged/multi-level cells hain (jaise section title bar, multi-row header, merged total row). Isliye Header Row aur Column Remove options yahan available nahi hain - table ka poora merge-structure jaisa image me hai waisa hi rakh kar direct export hoga.</p>
+            </div>
+
+            <div id="headerRowCard" class="hidden bg-slate-900 border border-amber-500/50 rounded-2xl p-5 space-y-3 shadow-xl">
+                <h2 class="text-sm font-bold text-amber-400 flex items-center gap-2">
+                    <span class="text-lg leading-none">📋</span> Step 2: Header Row
+                </h2>
+                <label class="block text-xs font-semibold text-slate-400">Header kis row me hai? (Default: Row 1)</label>
+                <input type="number" id="headerRowInput" value="1" min="1" max="50" onchange="reprocessScannedRows()" class="w-full bg-slate-950 border border-amber-500/50 rounded-lg p-2 text-xs text-slate-200 font-bold text-center">
+            </div>
+
+            <div id="columnsCard" class="hidden bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl">
+                <h2 class="text-sm font-bold text-blue-400 flex items-center gap-2">
+                    <span class="text-lg leading-none">🚫</span> Step 3: Column Remove
+                </h2>
+                <p class="text-[10px] text-slate-400">Jo column export me NAHI chahiye, uska check hataiye.</p>
+                <div id="columnCheckboxList" class="space-y-1.5 text-xs max-h-52 overflow-y-auto pr-1"></div>
+            </div>
+
+            <div id="styleCard" class="hidden bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3.5 shadow-xl">
+                <h2 class="text-sm font-bold text-rose-400 flex items-center gap-2">
+                    <span class="text-lg leading-none">🎨</span> Step 4: Header Color
+                </h2>
+                <select id="headerColorStyle" onchange="renderPreview()" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-200">
+                    <option value="ROSE" selected>Light Red / Rose (#F43F5E)</option>
+                    <option value="EMERALD">Emerald Dark Green (#107C41)</option>
+                    <option value="NAVY">Classic Navy Blue (#1F4E78)</option>
+                    <option value="CHARCOAL">Charcoal Dark (#2D3748)</option>
+                    <option value="MAROON">Deep Maroon (#800020)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="lg:col-span-8 flex flex-col space-y-4">
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center shadow">
+                    <p class="text-[10px] text-slate-400 uppercase font-semibold">Rows Detected</p>
+                    <p id="statTotalRows" class="text-lg font-bold text-white mt-1">0</p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center shadow">
+                    <p class="text-[10px] text-slate-400 uppercase font-semibold">Columns Detected</p>
+                    <p id="statTotalCols" class="text-lg font-bold text-rose-400 mt-1">0</p>
+                </div>
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center shadow col-span-2 sm:col-span-1">
+                    <p class="text-[10px] text-slate-400 uppercase font-semibold">OCR Confidence</p>
+                    <p id="statConfidence" class="text-lg font-bold text-blue-400 mt-1">-</p>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl flex-grow flex flex-col shadow-2xl overflow-hidden min-h-[500px]">
+                <div class="bg-slate-950 border-b border-slate-800 px-4 py-3 flex justify-between items-center flex-wrap gap-2">
+                    <span class="text-xs font-bold text-rose-400">Scanned Preview (galat text ho to seedhe cell par click karke edit kar sakte hain)</span>
+                    <span id="previewRecordCount" class="text-[11px] text-slate-400">Koi image scan nahi hui</span>
+                </div>
+                <div id="tabContentData" class="flex-grow p-4 overflow-auto">
+                    <div id="emptyState" class="h-full flex flex-col items-center justify-center text-slate-500 py-20 text-center px-6">
+                        <span class="text-4xl mb-3 opacity-40 leading-none block">🖼️</span>
+                        <p class="text-sm">Image upload karke "Scan Image" dabaiye - yahan Live Preview dikhega</p>
+                    </div>
+                    <div id="dataPreviewTableWrapper" class="hidden overflow-x-auto">
+                        <table id="dataPreviewTable" class="w-full text-left text-xs border-collapse"></table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Backend (Google Apps Script) URL - same backend jo baaki poori app use karti
+        // hai. Yahan par ek naya action "scanTableImage" call hota hai jo Google
+        // Gemini Vision AI se image seedhe "padhta" hai (jaise GPT/ChatGPT karta hai) -
+        // isliye ab pixel-level OCR guessing ki jagah AI khud table samajh kar
+        // structured grid (rows/cols + merged cell spans) deta hai, jo kaafi zyada
+        // accurate hai.
+        const IMAGE_TO_EXCEL_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzaimPwzUYELgmujpaBbfByy0BcjOERA8e0mslNdbH5uUw2L6L24785obmdcpcDOc53Ww/exec";
+
+        let selectedImageFile = null;
+
+        // ===== SIMPLE (non-merged) table mode - bilkul purana, pehle-se-verified
+        // pipeline, bina kisi change ke. Jab bhi scan ki hui image me koi merged
+        // cell nahi milta (rowSpan/colSpan sab 1x1), yahi purana flow chalta hai -
+        // Header Row select, Column Remove sab pehle jaisa hi kaam karte hain.
+        let rawScannedRows = [];      // row 0 = headers, baaki data rows
+        let detectedHeaders = [];
+        let cleanedDataRows = [];
+        let includedColumnIdx = [];   // kaunse column index export me shaamil rahenge
+
+        // ===== MERGED-LAYOUT mode - jab image me merged/spanning cells hon (jaise
+        // multi-level header, full-width section title bar, merged total row) -
+        // tab is naye grid-based model se poora merge-structure preserve karke
+        // hi export hota hai. Header Row select / Column Remove yahan disable
+        // rehte hain kyunki merged grid me unka koi sahi matlab nahi banta.
+        let isMergedMode = false;
+        let mergedGridCells = [];     // [{row,col,rowSpan,colSpan,text,header}]
+        let mergedTotalRows = 0;
+        let mergedTotalCols = 0;
+
+        const THEME_PALETTES = {
+            ROSE: { hex: "F43F5E" },
+            EMERALD: { hex: "107C41" },
+            NAVY: { hex: "1F4E78" },
+            CHARCOAL: { hex: "2D3748" },
+            MAROON: { hex: "800020" }
+        };
+
+        function handleImageSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            selectedImageFile = file;
+            document.getElementById('imageNameDisplay').textContent = file.name;
+            const thumb = document.getElementById('imagePreviewThumb');
+            thumb.src = URL.createObjectURL(file);
+            thumb.classList.remove('hidden');
+            document.getElementById('scanBtn').disabled = false;
+        }
+
+        // Bade photo (jaise mobile camera se 4-5 MB ki photo) ko chhote/compressed
+        // JPEG me convert karte hain - isse upload fast hota hai aur backend/Vision AI
+        // ko bhejna bhi asaan rehta hai. Original file jaisi hi dikhti hai, bas size
+        // kam ho jaati hai.
+        function resizeImageToJpegDataUrl(file, maxDim) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => {
+                    let { width, height } = img;
+                    if (width > maxDim || height > maxDim) {
+                        const scale = maxDim / Math.max(width, height);
+                        width = Math.round(width * scale);
+                        height = Math.round(height * scale);
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, width, height);
+                    ctx.drawImage(img, 0, 0, width, height);
+                    resolve(canvas.toDataURL('image/jpeg', 0.88));
+                };
+                img.onerror = () => reject(new Error('Image load nahi ho payi'));
+                img.src = URL.createObjectURL(file);
+            });
+        }
+
+        // Backend se mile raw cells ko normalize karte hain (number coercion, min 1
+        // span) aur invalid/out-of-range span ko grid size ke andar clip kar dete
+        // hain, taaki ek galat AI response se poora preview/export crash na ho.
+        function normalizeGridCell(raw, totalRows, totalCols) {
+            const row = Math.max(0, Math.min(totalRows - 1, Number(raw.row) || 0));
+            const col = Math.max(0, Math.min(totalCols - 1, Number(raw.col) || 0));
+            let rowSpan = Math.max(1, Number(raw.rowSpan) || 1);
+            let colSpan = Math.max(1, Number(raw.colSpan) || 1);
+            rowSpan = Math.min(rowSpan, totalRows - row);
+            colSpan = Math.min(colSpan, totalCols - col);
+            return {
+                row: row,
+                col: col,
+                rowSpan: rowSpan,
+                colSpan: colSpan,
+                text: String(raw.text === null || raw.text === undefined ? "" : raw.text),
+                header: !!raw.header
+            };
+        }
+
+        // Safety net: AI ne agar grid ka koi position cover hi nahi kiya (gap chhoot
+        // gaya), to use ek khaali 1x1 cell se bhar dete hain, taaki preview/export
+        // kabhi bhi kisi missing position ki wajah se tootne na paaye.
+        function fillGridGaps(cells, totalRows, totalCols) {
+            const occupied = Array.from({ length: totalRows }, () => new Array(totalCols).fill(false));
+            const kept = [];
+            cells.forEach((cell) => {
+                if (occupied[cell.row][cell.col]) return; // overlap - pehla hi rakhte hain
+                for (let r = cell.row; r < cell.row + cell.rowSpan; r++) {
+                    for (let c = cell.col; c < cell.col + cell.colSpan; c++) {
+                        occupied[r][c] = true;
+                    }
+                }
+                kept.push(cell);
+            });
+            for (let r = 0; r < totalRows; r++) {
+                for (let c = 0; c < totalCols; c++) {
+                    if (!occupied[r][c]) {
+                        kept.push({ row: r, col: c, rowSpan: 1, colSpan: 1, text: "", header: false });
+                        occupied[r][c] = true;
+                    }
+                }
+            }
+            return kept;
+        }
+
+        // Simple (no-merge) grid ko purane rawScannedRows (array-of-arrays) format
+        // me convert karte hain, taaki neeche ka pura purana, verified pipeline
+        // (Header Row select, Column Remove, export) bina kisi change ke chal sake.
+        function gridCellsToRows(cells, totalRows, totalCols) {
+            const lookup = new Map();
+            cells.forEach((cell) => lookup.set(cell.row + "_" + cell.col, cell));
+            const rows = [];
+            for (let r = 0; r < totalRows; r++) {
+                const row = [];
+                for (let c = 0; c < totalCols; c++) {
+                    const cell = lookup.get(r + "_" + c);
+                    row.push(cell ? cell.text : "");
+                }
+                rows.push(row);
+            }
+            return rows;
+        }
+
+        async function startOcrScan() {
+            if (!selectedImageFile) return;
+            const scanBtn = document.getElementById('scanBtn');
+            const progressWrap = document.getElementById('ocrProgressWrap');
+            const progressFill = document.getElementById('ocrProgressFill');
+            const progressText = document.getElementById('ocrProgressText');
+            scanBtn.disabled = true;
+            progressWrap.classList.remove('hidden');
+            progressFill.style.width = '15%';
+            progressText.textContent = 'Image taiyaar ho rahi hai...';
+
+            try {
+                const dataUrl = await resizeImageToJpegDataUrl(selectedImageFile, 1800);
+                const base64Image = dataUrl.split(',')[1];
+
+                progressFill.style.width = '35%';
+                progressText.textContent = 'AI table padh raha hai (thoda time lagega)...';
+
+                const response = await fetch(IMAGE_TO_EXCEL_SCRIPT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+                    body: JSON.stringify({
+                        action: 'scanTableImage',
+                        image_base64: base64Image,
+                        mime_type: 'image/jpeg'
+                    })
+                });
+                progressFill.style.width = '85%';
+                const responseText = await response.text();
+                let parsed = {};
+                try { parsed = JSON.parse(responseText || '{}'); } catch (_) { parsed = {}; }
+
+                if (!parsed || parsed.status !== 'success') {
+                    throw new Error(parsed && parsed.message ? parsed.message : ('Server error (HTTP ' + response.status + ')'));
+                }
+
+                const totalRows = Number(parsed.totalRows) || 0;
+                const totalCols = Number(parsed.totalCols) || 0;
+                const rawCells = Array.isArray(parsed.cells) ? parsed.cells : [];
+
+                document.getElementById('statConfidence').textContent = 'AI Vision';
+
+                if (!totalRows || !totalCols || !rawCells.length) {
+                    progressText.textContent = 'Koi table data nahi mila - saaf image try kijiye';
+                    return;
+                }
+
+                const normalized = rawCells.map((c) => normalizeGridCell(c, totalRows, totalCols));
+                const cells = fillGridGaps(normalized, totalRows, totalCols);
+                const hasMerges = cells.some((c) => c.rowSpan > 1 || c.colSpan > 1);
+
+                if (hasMerges) {
+                    isMergedMode = true;
+                    mergedTotalRows = totalRows;
+                    mergedTotalCols = totalCols;
+                    mergedGridCells = cells;
+
+                    document.getElementById('mergedModeNotice').classList.remove('hidden');
+                    document.getElementById('headerRowCard').classList.add('hidden');
+                    document.getElementById('columnsCard').classList.add('hidden');
+                    const anyHeader = cells.some((c) => c.header);
+                    document.getElementById('styleCard').classList.toggle('hidden', !anyHeader);
+
+                    renderMergedGridPreview();
+                    document.getElementById('exportExcelBtn').disabled = false;
+                    document.getElementById('exportPdfBtn').disabled = false;
+                } else {
+                    isMergedMode = false;
+                    document.getElementById('mergedModeNotice').classList.add('hidden');
+                    rawScannedRows = gridCellsToRows(cells, totalRows, totalCols);
+                    document.getElementById('headerRowCard').classList.remove('hidden');
+                    document.getElementById('headerRowInput').value = 1;
+                    reprocessScannedRows();
+                }
+
+                progressFill.style.width = '100%';
+                progressText.textContent = 'Scan complete!';
+            } catch (error) {
+                progressText.textContent = 'Scan fail ho gaya: ' + (error && error.message ? error.message : 'unknown error');
+            } finally {
+                scanBtn.disabled = false;
+            }
+        }
+
+        // ===== SIMPLE MODE (bilkul purana pipeline - koi behavior change nahi) =====
+
+        function reprocessScannedRows() {
+            if (!rawScannedRows.length) return;
+            const headerRowNumber = parseInt(document.getElementById('headerRowInput').value) || 1;
+            const headerRowIdx = Math.max(0, headerRowNumber - 1);
+            const maxCols = rawScannedRows.reduce((max, r) => Math.max(max, r.length), 0);
+            const padRow = (r) => {
+                const copy = r.slice(0, maxCols);
+                while (copy.length < maxCols) copy.push("");
+                return copy;
+            };
+            const paddedRows = rawScannedRows.map(padRow);
+
+            detectedHeaders = (paddedRows[headerRowIdx] || []).map((h, idx) => String(h).trim() || `Col_${idx + 1}`);
+            cleanedDataRows = paddedRows.slice(headerRowIdx + 1);
+
+            if (!includedColumnIdx.length || includedColumnIdx.length !== detectedHeaders.length) {
+                includedColumnIdx = detectedHeaders.map((_, idx) => idx);
+            }
+
+            document.getElementById('statTotalRows').textContent = cleanedDataRows.length.toLocaleString('en-IN');
+            document.getElementById('statTotalCols').textContent = detectedHeaders.length;
+            document.getElementById('previewRecordCount').textContent = `${cleanedDataRows.length.toLocaleString('en-IN')} Rows Scanned`;
+
+            renderColumnCheckboxes();
+            renderScannedPreview();
+            document.getElementById('columnsCard').classList.remove('hidden');
+            document.getElementById('styleCard').classList.remove('hidden');
+            document.getElementById('exportExcelBtn').disabled = false;
+            document.getElementById('exportPdfBtn').disabled = false;
+        }
+
+        function renderColumnCheckboxes() {
+            const box = document.getElementById('columnCheckboxList');
+            box.innerHTML = detectedHeaders.map((h, idx) => `
+                <label class="flex items-center space-x-2 cursor-pointer bg-slate-950/60 p-1.5 rounded-lg border border-slate-800">
+                    <input type="checkbox" ${includedColumnIdx.includes(idx) ? 'checked' : ''} onchange="toggleColumn(${idx}, this.checked)" class="w-3.5 h-3.5 text-rose-500 rounded bg-slate-900 border-slate-700">
+                    <span class="text-slate-200 font-medium truncate">${escapeHtmlLocal(h)}</span>
+                </label>
+            `).join("");
+        }
+
+        function toggleColumn(idx, checked) {
+            if (checked) {
+                if (!includedColumnIdx.includes(idx)) includedColumnIdx.push(idx);
+            } else {
+                includedColumnIdx = includedColumnIdx.filter((i) => i !== idx);
+            }
+            includedColumnIdx.sort((a, b) => a - b);
+            renderScannedPreview();
+        }
+
+        function escapeHtmlLocal(value) {
+            return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+
+        // Header-color select ek hi hai, dono modes me use hoti hai - isliye yeh
+        // dispatcher current mode ke hisaab se sahi renderer ko call karta hai.
+        function renderPreview() {
+            if (isMergedMode) {
+                renderMergedGridPreview();
+            } else {
+                renderScannedPreview();
+            }
+        }
+
+        function renderScannedPreview() {
+            const table = document.getElementById('dataPreviewTable');
+            table.classList.remove('merged-grid-table');
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('dataPreviewTableWrapper').classList.remove('hidden');
+
+            const visibleHeaders = includedColumnIdx.map((idx) => detectedHeaders[idx]);
+            let html = `<thead><tr class="bg-rose-500 text-white font-bold">` +
+                visibleHeaders.map((h) => `<th class="p-2.5 whitespace-nowrap">${escapeHtmlLocal(h)}</th>`).join('') + `</tr></thead><tbody>` +
+                cleanedDataRows.slice(0, 200).map((r, rIdx) => `<tr class="${rIdx % 2 === 0 ? 'bg-slate-900/50' : 'bg-slate-900/90'} border-b border-slate-800/60">` +
+                    includedColumnIdx.map((cIdx) => `<td class="p-2 whitespace-nowrap" contenteditable="true" onblur="editScannedCell(${rIdx}, ${cIdx}, this.innerText)">${escapeHtmlLocal(r[cIdx] ?? '')}</td>`).join('') + `</tr>`).join('') + `</tbody>`;
+            table.innerHTML = html;
+        }
+
+        function editScannedCell(rowIdx, colIdx, newValue) {
+            if (!cleanedDataRows[rowIdx]) return;
+            cleanedDataRows[rowIdx][colIdx] = String(newValue || "").trim();
+        }
+
+        // ===== MERGED-LAYOUT MODE (naya) =====
+
+        function renderMergedGridPreview() {
+            const table = document.getElementById('dataPreviewTable');
+            table.classList.add('merged-grid-table');
+            document.getElementById('emptyState').classList.add('hidden');
+            document.getElementById('dataPreviewTableWrapper').classList.remove('hidden');
+
+            const themeKey = document.getElementById('headerColorStyle') ? document.getElementById('headerColorStyle').value : 'ROSE';
+            const themeObj = THEME_PALETTES[themeKey] || THEME_PALETTES.ROSE;
+
+            const lookup = new Map();
+            mergedGridCells.forEach((cell) => lookup.set(cell.row + "_" + cell.col, cell));
+            const occupied = Array.from({ length: mergedTotalRows }, () => new Array(mergedTotalCols).fill(false));
+
+            let html = '<tbody>';
+            for (let r = 0; r < mergedTotalRows; r++) {
+                html += '<tr>';
+                for (let c = 0; c < mergedTotalCols; c++) {
+                    if (occupied[r][c]) continue;
+                    const cell = lookup.get(r + "_" + c);
+                    if (!cell) continue;
+                    for (let rr = r; rr < r + cell.rowSpan; rr++) {
+                        for (let cc = c; cc < c + cell.colSpan; cc++) {
+                            occupied[rr][cc] = true;
+                        }
+                    }
+                    const bandClass = r % 2 === 0 ? 'bg-slate-900/50' : 'bg-slate-900/90';
+                    const cellStyle = cell.header
+                        ? `background:#${themeObj.hex}; color:#ffffff; font-weight:700; text-align:center;`
+                        : '';
+                    html += `<td class="p-2 text-xs whitespace-nowrap ${cell.header ? '' : bandClass}" style="${cellStyle}" rowspan="${cell.rowSpan}" colspan="${cell.colSpan}" contenteditable="true" onblur="editMergedCell(${r}, ${c}, this.innerText)">${escapeHtmlLocal(cell.text)}</td>`;
+                }
+                html += '</tr>';
+            }
+            html += '</tbody>';
+            table.innerHTML = html;
+
+            document.getElementById('statTotalRows').textContent = mergedTotalRows.toLocaleString('en-IN');
+            document.getElementById('statTotalCols').textContent = mergedTotalCols;
+            document.getElementById('previewRecordCount').textContent = `${mergedTotalRows} x ${mergedTotalCols} Merged Grid Scanned`;
+        }
+
+        function editMergedCell(row, col, newValue) {
+            const cell = mergedGridCells.find((c) => c.row === row && c.col === col);
+            if (!cell) return;
+            cell.text = String(newValue || "").trim();
+        }
+
+        // ===== EXPORT (dono modes ke liye dispatcher - buttons yahi call karte hain) =====
+
+        async function exportScannedExcel() {
+            if (isMergedMode) {
+                return exportMergedGridExcel();
+            }
+            // Sirf headers hi ho (koi data row na ho, jaise khaali/blank format ka
+            // scan) tab bhi download hona chahiye - isliye yahan detectedHeaders
+            // check karte hain, cleanedDataRows nahi (data rows 0 bhi ho sakti hain).
+            if (!detectedHeaders.length) return;
+            const themeKey = document.getElementById('headerColorStyle').value;
+            const themeObj = THEME_PALETTES[themeKey] || THEME_PALETTES.ROSE;
+
+            const visibleHeaders = includedColumnIdx.map((idx) => detectedHeaders[idx]);
+            const visibleRows = cleanedDataRows.map((r) => includedColumnIdx.map((idx) => r[idx] ?? ""));
+            const fullDataMatrix = [visibleHeaders, ...visibleRows];
+
+            const wsData = XLSX.utils.aoa_to_sheet(fullDataMatrix);
+
+            const colWidths = visibleHeaders.map((headerText, colIdx) => {
+                let maxLen = String(headerText || '').length;
+                visibleRows.slice(0, 200).forEach((row) => {
+                    const cellLen = String(row[colIdx] || '').length;
+                    if (cellLen > maxLen) maxLen = cellLen;
+                });
+                return { wch: Math.min(Math.max(maxLen + 5, 14), 50) };
+            });
+            wsData['!cols'] = colWidths;
+
+            const range = XLSX.utils.decode_range(wsData['!ref']);
+            wsData['!autofilter'] = { ref: `A1:${XLSX.utils.encode_col(range.e.c)}1` };
+            wsData['!views'] = [{ state: 'frozen', xSplit: 0, ySplit: 1 }];
+
+            for (let R = range.s.r; R <= range.e.r; ++R) {
+                for (let C = range.s.c; C <= range.e.c; ++C) {
+                    const addr = XLSX.utils.encode_cell({ r: R, c: C });
+                    if (!wsData[addr]) wsData[addr] = { t: 's', v: '' };
+                    const cell = wsData[addr];
+                    cell.s = cell.s || {};
+                    if (R === 0) {
+                        cell.s.fill = { patternType: "solid", fgColor: { rgb: themeObj.hex } };
+                        cell.s.font = { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } };
+                        cell.s.alignment = { horizontal: "center", vertical: "center" };
+                    } else {
+                        cell.s.font = { name: "Calibri", sz: 10 };
+                        if (R % 2 === 0) cell.s.fill = { patternType: "solid", fgColor: { rgb: "F8FAFC" } };
+                    }
+                    cell.s.border = { top: { style: "thin", color: { rgb: "000000" } }, bottom: { style: "thin", color: { rgb: "000000" } }, left: { style: "thin", color: { rgb: "000000" } }, right: { style: "thin", color: { rgb: "000000" } } };
+                }
+            }
+
+            // PRINT SETUP - landscape, saare columns ek page ki width me fit ho jaayen
+            // (fitToWidth:1), lekin rows jitni bhi hon utne bhi pages ban sakte hain
+            // (fitToHeight:0 = height par koi limit nahi). Header row (row 1) har
+            // printed page ke top par repeat hoga (Print Titles), taaki 2nd/3rd page
+            // par bhi column headers dikhein.
+            wsData['!margins'] = { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 };
+
+            const wb = XLSX.utils.book_new();
+            const sheetName = "Scanned Data";
+            XLSX.utils.book_append_sheet(wb, wsData, sheetName);
+            wb.Workbook = wb.Workbook || {};
+            wb.Workbook.Names = wb.Workbook.Names || [];
+            wb.Workbook.Names.push({ Name: "_xlnm.Print_Titles", Sheet: 0, Ref: `'${sheetName}'!$1:$1` });
+
+            const fileName = `Image_To_Excel_${new Date().toISOString().slice(0,10)}.xlsx`;
+
+            // xlsx-js-style library khud "page setup" (orientation/fit-to-width) aur
+            // "freeze panes" ko file me likhta nahi hai (library ki hi limitation hai),
+            // isliye XLSX se pehle ek normal file banwa kar, uske andar ki XML ko
+            // seedhe patch karte hain (JSZip se) taaki Excel me landscape + "fit to 1
+            // page wide" + header-row-freeze sab reliably kaam karein.
+            try {
+                const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+                const zip = await JSZip.loadAsync(wbout);
+                const sheetPath = "xl/worksheets/sheet1.xml";
+                const sheetFile = zip.file(sheetPath);
+                if (sheetFile) {
+                    let sheetXml = await sheetFile.async("string");
+                    // fitToPage flag (sheetPr) - "worksheet" opening tag ke turant baad
+                    sheetXml = sheetXml.replace(/(<worksheet[^>]*>)/, '$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+                    // header row freeze - pehli sheetView ke andar ek "pane" daal dete hain
+                    sheetXml = sheetXml.replace(
+                        /<sheetView([^>]*)\/>/,
+                        '<sheetView$1><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView>'
+                    );
+                    // landscape + fit-to-width print setup - pageMargins ke turant baad
+                    if (sheetXml.indexOf("<pageMargins") > -1) {
+                        sheetXml = sheetXml.replace(/(<pageMargins[^>]*\/>)/, '$1<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>');
+                    } else {
+                        sheetXml = sheetXml.replace(/(<\/sheetData>)/, '$1<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>');
+                    }
+                    zip.file(sheetPath, sheetXml);
+                }
+                const outBlob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+                const downloadUrl = URL.createObjectURL(outBlob);
+                const link = document.createElement("a");
+                link.href = downloadUrl;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(downloadUrl), 4000);
+            } catch (error) {
+                // Kuch bhi galat ho jaaye to bhi user khaali haath na rahe - purane
+                // (bina patch wale) tarike se hi file de dete hain.
+                XLSX.writeFile(wb, fileName);
+            }
+        }
+
+        function hexToRgbLocal(hex) {
+            const clean = String(hex || "").replace("#", "");
+            const num = parseInt(clean, 16);
+            return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+        }
+
+        // PDF EXPORT - Excel jaisi hi settings: landscape orientation, saare columns
+        // ek page ki width me fit (autoTable khud column width ko available page
+        // width ke hisaab se adjust karta hai), har cell par border (theme:'grid'),
+        // aur header row har printed page ke top par automatically repeat hoti hai.
+        function exportScannedPdf() {
+            if (isMergedMode) {
+                return exportMergedGridPdf();
+            }
+            if (!detectedHeaders.length) return;
+            if (!window.jspdf || !window.jspdf.jsPDF) {
+                alert("PDF library load nahi ho payi - internet connection check kijiye aur page reload kijiye.");
+                return;
+            }
+            const themeKey = document.getElementById('headerColorStyle').value;
+            const themeObj = THEME_PALETTES[themeKey] || THEME_PALETTES.ROSE;
+            const headerRgb = hexToRgbLocal(themeObj.hex);
+
+            const visibleHeaders = includedColumnIdx.map((idx) => detectedHeaders[idx]);
+            const visibleRows = cleanedDataRows.map((r) => includedColumnIdx.map((idx) => String(r[idx] ?? "")));
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+
+            doc.autoTable({
+                head: [visibleHeaders],
+                body: visibleRows,
+                theme: "grid",
+                styles: {
+                    font: "helvetica",
+                    fontSize: 8,
+                    cellPadding: 4,
+                    lineWidth: 0.5,
+                    lineColor: [0, 0, 0],
+                    overflow: "linebreak",
+                    valign: "middle"
+                },
+                headStyles: {
+                    fillColor: headerRgb,
+                    textColor: [255, 255, 255],
+                    fontStyle: "bold",
+                    halign: "center",
+                    lineWidth: 0.5,
+                    lineColor: [0, 0, 0]
+                },
+                alternateRowStyles: { fillColor: [248, 250, 252] },
+                margin: { top: 24, left: 18, right: 18, bottom: 18 },
+                tableWidth: "auto",
+                showHead: "everyPage",
+                horizontalPageBreak: false
+            });
+
+            const fileName = `Image_To_Excel_${new Date().toISOString().slice(0,10)}.pdf`;
+            doc.save(fileName);
+        }
+
+        // ===== MERGED-LAYOUT EXPORTS (naya - poora rowspan/colspan structure
+        // exact wahi Excel merges (!merges) aur PDF (autoTable rowSpan/colSpan)
+        // me reproduce karte hain jaisa scanned image me tha). =====
+
+        async function exportMergedGridExcel() {
+            if (!mergedGridCells.length) return;
+            const themeKey = document.getElementById('headerColorStyle') ? document.getElementById('headerColorStyle').value : 'ROSE';
+            const themeObj = THEME_PALETTES[themeKey] || THEME_PALETTES.ROSE;
+
+            const wsData = {};
+            const merges = [];
+            let maxR = 0;
+            let maxC = 0;
+
+            mergedGridCells.forEach((cell) => {
+                const addr = XLSX.utils.encode_cell({ r: cell.row, c: cell.col });
+                wsData[addr] = { t: 's', v: cell.text || '', s: {} };
+                wsData[addr].s.font = cell.header
+                    ? { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } }
+                    : { name: "Calibri", sz: 10 };
+                if (cell.header) {
+                    wsData[addr].s.fill = { patternType: "solid", fgColor: { rgb: themeObj.hex } };
+                }
+                wsData[addr].s.alignment = { horizontal: "center", vertical: "center", wrapText: true };
+                wsData[addr].s.border = {
+                    top: { style: "thin", color: { rgb: "000000" } },
+                    bottom: { style: "thin", color: { rgb: "000000" } },
+                    left: { style: "thin", color: { rgb: "000000" } },
+                    right: { style: "thin", color: { rgb: "000000" } }
+                };
+                if (cell.rowSpan > 1 || cell.colSpan > 1) {
+                    merges.push({
+                        s: { r: cell.row, c: cell.col },
+                        e: { r: cell.row + cell.rowSpan - 1, c: cell.col + cell.colSpan - 1 }
+                    });
+                }
+                maxR = Math.max(maxR, cell.row + cell.rowSpan - 1);
+                maxC = Math.max(maxC, cell.col + cell.colSpan - 1);
+            });
+
+            wsData['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxR, c: maxC } });
+            wsData['!merges'] = merges;
+            wsData['!cols'] = Array.from({ length: maxC + 1 }, () => ({ wch: 16 }));
+            wsData['!margins'] = { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 };
+
+            const wb = XLSX.utils.book_new();
+            const sheetName = "Scanned Data";
+            XLSX.utils.book_append_sheet(wb, wsData, sheetName);
+
+            const fileName = `Image_To_Excel_${new Date().toISOString().slice(0,10)}.xlsx`;
+
+            try {
+                const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+                const zip = await JSZip.loadAsync(wbout);
+                const sheetPath = "xl/worksheets/sheet1.xml";
+                const sheetFile = zip.file(sheetPath);
+                if (sheetFile) {
+                    let sheetXml = await sheetFile.async("string");
+                    sheetXml = sheetXml.replace(/(<worksheet[^>]*>)/, '$1<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>');
+                    if (sheetXml.indexOf("<pageMargins") > -1) {
+                        sheetXml = sheetXml.replace(/(<pageMargins[^>]*\/>)/, '$1<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>');
+                    } else {
+                        sheetXml = sheetXml.replace(/(<\/sheetData>)/, '$1<pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/>');
+                    }
+                    zip.file(sheetPath, sheetXml);
+                }
+                const outBlob = await zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+                const downloadUrl = URL.createObjectURL(outBlob);
+                const link = document.createElement("a");
+                link.href = downloadUrl;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(downloadUrl), 4000);
+            } catch (error) {
+                XLSX.writeFile(wb, fileName);
+            }
+        }
+
+        function exportMergedGridPdf() {
+            if (!mergedGridCells.length) return;
+            if (!window.jspdf || !window.jspdf.jsPDF) {
+                alert("PDF library load nahi ho payi - internet connection check kijiye aur page reload kijiye.");
+                return;
+            }
+            const themeKey = document.getElementById('headerColorStyle') ? document.getElementById('headerColorStyle').value : 'ROSE';
+            const themeObj = THEME_PALETTES[themeKey] || THEME_PALETTES.ROSE;
+            const headerRgb = hexToRgbLocal(themeObj.hex);
+
+            const lookup = new Map();
+            mergedGridCells.forEach((cell) => lookup.set(cell.row + "_" + cell.col, cell));
+            const occupied = Array.from({ length: mergedTotalRows }, () => new Array(mergedTotalCols).fill(false));
+
+            const body = [];
+            for (let r = 0; r < mergedTotalRows; r++) {
+                const rowArr = [];
+                for (let c = 0; c < mergedTotalCols; c++) {
+                    if (occupied[r][c]) continue;
+                    const cell = lookup.get(r + "_" + c);
+                    if (!cell) continue;
+                    for (let rr = r; rr < r + cell.rowSpan; rr++) {
+                        for (let cc = c; cc < c + cell.colSpan; cc++) {
+                            occupied[rr][cc] = true;
+                        }
+                    }
+                    const cellDef = { content: cell.text || '' };
+                    if (cell.rowSpan > 1) cellDef.rowSpan = cell.rowSpan;
+                    if (cell.colSpan > 1) cellDef.colSpan = cell.colSpan;
+                    if (cell.header) {
+                        cellDef.styles = { fillColor: headerRgb, textColor: [255, 255, 255], fontStyle: 'bold', halign: 'center' };
+                    }
+                    rowArr.push(cellDef);
+                }
+                body.push(rowArr);
+            }
+
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+
+            doc.autoTable({
+                body: body,
+                theme: "grid",
+                styles: {
+                    font: "helvetica",
+                    fontSize: 7,
+                    cellPadding: 3,
+                    lineWidth: 0.5,
+                    lineColor: [0, 0, 0],
+                    overflow: "linebreak",
+                    valign: "middle",
+                    halign: "center"
+                },
+                margin: { top: 24, left: 18, right: 18, bottom: 18 },
+                tableWidth: "auto",
+                horizontalPageBreak: false
+            });
+
+            const fileName = `Image_To_Excel_${new Date().toISOString().slice(0,10)}.pdf`;
+            doc.save(fileName);
+        }
+    </script>
+</body>
+</html>
