@@ -1755,12 +1755,15 @@
                     <input id="revenue-message-register-division" class="ivrs-input" readonly style="height:46px; text-align:center; background:#f1f5f9; border-color:#cbd5e1; font-size:0.86rem;">
                     <label style="display:block; color:#475569; font-size:0.68rem; font-weight:950; margin:9px 0 5px;">DC NAME</label>
                     <input id="revenue-message-register-dc" class="ivrs-input" readonly style="height:46px; text-align:center; background:#f1f5f9; border-color:#cbd5e1; font-size:0.86rem;">
-                    <label style="display:block; color:#475569; font-size:0.68rem; font-weight:950; margin:9px 0 5px;">HQ NAME</label>
-                    <select id="revenue-message-register-hq" class="ivrs-input" style="height:48px; border-color:#60a5fa; font-size:0.82rem;"><option value="">Select HQ Name</option></select>
                     <label style="display:block; color:#475569; font-size:0.68rem; font-weight:950; margin:9px 0 5px;">DESIGNATION</label>
-                    <select id="revenue-message-register-role" class="ivrs-input" style="height:48px; border-color:#60a5fa; font-size:0.82rem;">
+                    <select id="revenue-message-register-role" class="ivrs-input" onchange="toggleRevenueMessageRegistrationHq(this.value)" style="height:48px; border-color:#60a5fa; font-size:0.82rem;">
                         <option value="">Select Designation</option><option>AE</option><option>JE</option><option>LINE STAFF</option><option>OPERATOR</option><option>TA</option><option>METER READER</option>
                     </select>
+                    <div id="revenue-message-register-hq-wrap">
+                        <label style="display:block; color:#475569; font-size:0.68rem; font-weight:950; margin:9px 0 5px;">HQ NAME</label>
+                        <select id="revenue-message-register-hq" class="ivrs-input" style="height:48px; border-color:#60a5fa; font-size:0.82rem;"><option value="">Select HQ Name</option></select>
+                    </div>
+                    <div id="revenue-message-register-all-hq-note" style="display:none; margin-top:8px; color:#047857; font-size:0.68rem; font-weight:900; text-align:center;">ALL HQ access will be enabled for this DC.</div>
                     <input id="revenue-message-register-name" class="ivrs-input" maxlength="80" placeholder="Full Name" style="height:48px; margin-top:10px; border-color:#60a5fa; text-align:center; font-size:0.86rem;">
                     <input id="revenue-message-register-mobile" type="tel" inputmode="numeric" maxlength="10" class="ivrs-input" placeholder="Mobile Number" style="height:48px; margin-top:10px; border-color:#60a5fa; text-align:center; font-size:0.9rem;" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,10)">
                     <input id="revenue-message-register-pin" type="password" inputmode="numeric" maxlength="6" class="ivrs-input" placeholder="New 6-Digit PIN" style="height:48px; margin-top:10px; border-color:#60a5fa; text-align:center; font-size:0.9rem;" oninput="this.value=this.value.replace(/[^0-9]/g,'').slice(0,6)">
