@@ -155,15 +155,15 @@
                 <div class="color-dot" style="background-color: #3b82f6;" onclick="changeTheme('#3b82f6')"></div>
                 <div class="color-dot" style="background-color: #ef4444;" onclick="changeTheme('#ef4444')"></div>
             </div>
-            <div class="home-division-list">
-                <div class="list-item home-division-card home-division-card-seoni" onclick="showDivision('DIVISION SEONI', 'bg-blue-grad')">
+            <div class="flex flex-col px-4">
+                <div class="list-item home-legacy-division-card bg-blue-grad" onclick="showDivision('DIVISION SEONI', 'bg-blue-grad')" style="margin-bottom:28px;">
                     <span class="home-card-icon" aria-hidden="true">⚡</span>
-                    <span class="home-card-copy"><span class="item-title">Seoni</span><span class="item-subtitle">Division</span></span>
+                    <div class="item-title">Seoni</div><div class="item-subtitle">Division</div>
                     <span class="home-card-chevron" aria-hidden="true">›</span>
                 </div>
-                <div class="list-item home-division-card home-division-card-lakhnadon" onclick="showDivision('DIVISION LAKHNADON', 'bg-orange-grad')">
+                <div class="list-item home-legacy-division-card bg-orange-grad" onclick="showDivision('DIVISION LAKHNADON', 'bg-orange-grad')">
                     <span class="home-card-icon" aria-hidden="true">⚡</span>
-                    <span class="home-card-copy"><span class="item-title">Lakhnadon</span><span class="item-subtitle">Division</span></span>
+                    <div class="item-title">Lakhnadon</div><div class="item-subtitle">Division</div>
                     <span class="home-card-chevron" aria-hidden="true">›</span>
                 </div>
             </div>
@@ -171,20 +171,23 @@
             <div class="home-utility-art" aria-hidden="true">
                 <svg viewBox="0 0 720 210" preserveAspectRatio="xMidYMax meet" role="presentation">
                     <defs>
-                        <linearGradient id="homeSky" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#f8fdff"/><stop offset="1" stop-color="#dff7f3"/></linearGradient>
-                        <linearGradient id="homeHill" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#65c89a"/><stop offset="1" stop-color="#198754"/></linearGradient>
+                        <linearGradient id="substationSky" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#f8fdff"/><stop offset="1" stop-color="#dff7f3"/></linearGradient>
+                        <linearGradient id="substationGround" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#83d2a2"/><stop offset="1" stop-color="#238b62"/></linearGradient>
                     </defs>
-                    <rect width="720" height="210" fill="url(#homeSky)"/>
-                    <path d="M0 154 Q105 93 224 151 T442 139 T720 146 V210 H0Z" fill="url(#homeHill)" opacity=".88"/>
-                    <path d="M0 178 Q125 125 255 170 T495 159 T720 174 V210 H0Z" fill="#116b55" opacity=".72"/>
-                    <g fill="none" stroke="#496b75" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M150 180 L194 35 L238 180 M168 120 H220 M160 92 H228 M154 66 H234 M176 145 H212"/>
-                        <path d="M523 180 L561 46 L599 180 M537 123 H585 M531 95 H591 M526 69 H596 M545 147 H577"/>
-                        <path d="M194 35 C300 80 415 70 561 46 M168 120 C290 145 419 127 537 123 M220 92 C316 115 446 103 591 95"/>
+                    <rect width="720" height="210" fill="url(#substationSky)"/>
+                    <path d="M0 162 Q125 105 258 158 T500 150 T720 160 V210 H0Z" fill="url(#substationGround)" opacity=".88"/>
+                    <path d="M0 184 Q170 137 330 180 T720 177 V210 H0Z" fill="#146b50" opacity=".65"/>
+                    <g fill="none" stroke="#526d78" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M78 172V105m0 0-22 20m22-20 22 20m-34-7h24m-29-16h34"/>
+                        <path d="M640 174V99m0 0-24 22m24-22 24 22m-37-7h26m-32-16h38"/>
+                        <path d="M78 105 C172 83 242 92 315 107 M640 99 C565 84 503 92 429 107"/>
                     </g>
-                    <g fill="#6b8790" stroke="#496b75" stroke-width="2"><rect x="332" y="151" width="66" height="38" rx="4"/><rect x="343" y="143" width="44" height="12" rx="3"/><path d="M345 151v-12m18 12v-12m18 12v-12"/></g>
-                    <path d="M363 158 l8 10 -7 0 5 10 -12 -13 7 0z" fill="#f6c945"/>
-                    <g stroke="#2d765d" stroke-width="3" stroke-linecap="round"><path d="M81 193v-38m0 9-15-10m15 10 15-10"/><path d="M84 155q-17-18-28 0m24-7q18-19 29 1"/></g>
+                    <g stroke="#475f69" stroke-width="2" fill="none"><path d="M190 174V88m0 0-22 18m22-18 22 18m-36-7h28m-34-15h40"/><path d="M285 174V80m0 0-22 18m22-18 22 18m-36-7h28m-34-15h40"/><path d="M438 174V80m0 0-22 18m22-18 22 18m-36-7h28m-34-15h40"/><path d="M533 174V88m0 0-22 18m22-18 22 18m-36-7h28m-34-15h40"/></g>
+                    <g fill="#647d86" stroke="#405762" stroke-width="2"><rect x="230" y="125" width="260" height="54" rx="5"/><rect x="252" y="111" width="54" height="14" rx="2"/><rect x="341" y="111" width="54" height="14" rx="2"/><rect x="430" y="111" width="38" height="14" rx="2"/><path d="M258 111v-11m16 11v-11m16 11v-11m59 11v-11m16 11v-11m16 11v-11m47 11v-11m15 11v-11"/></g>
+                    <g stroke="#405762" stroke-width="2" fill="#9fb5bd"><rect x="306" y="144" width="54" height="35" rx="2"/><rect x="382" y="144" width="54" height="35" rx="2"/></g>
+                    <g fill="#f5c542"><path d="M331 148l9 11h-7l5 12-13-15h7z"/><path d="M407 148l9 11h-7l5 12-13-15h7z"/></g>
+                    <g stroke="#405762" stroke-width="2" fill="#dbe8eb"><rect x="101" y="163" width="74" height="26" rx="3"/><path d="M112 163v-19h52v19M122 144v-8m16 8v-8m16 8v-8"/><path d="M112 176h52"/></g>
+                    <path d="M0 190H720" stroke="#3d6656" stroke-width="3"/>
                 </svg>
             </div>
             <div class="home-footer">© MPPKVVCL Seoni Circle | 24x7 Helpline: 1912</div>

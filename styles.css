@@ -879,3 +879,11 @@
   #home-view .home-utility-art { min-height: 90px; }
   #home-view .home-utility-art svg { min-height: 90px; }
 }
+
+
+/* HOME-REFERENCE-UI-REVERT-CARDS-2026-10-02 */
+#home-view .home-legacy-division-card { position: relative; min-height: 92px; padding: 12px 52px 12px 30px; border-radius: 0; clip-path: polygon(0% 0%, 92% 0%, 100% 50%, 92% 100%, 0% 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; box-shadow: none; filter: drop-shadow(0 4px 6px rgba(0,0,0,.1)); }
+#home-view .home-legacy-division-card .home-card-icon { position: absolute; left: 18px; top: 50%; width: auto; transform: translateY(-50%); font-size: 1.45rem; line-height: 1; color: #fff; }
+#home-view .home-legacy-division-card .home-card-chevron { position: absolute; right: 18px; top: 50%; transform: translateY(-54%); font-size: 2rem; line-height: 1; font-weight: 300; color: #fff; }
+#home-view .home-legacy-division-card .item-title { font-size: 1.3rem; line-height: 1.15; }
+#home-view .home-legacy-division-card .item-subtitle { font-size: .9rem; line-height: 1.15; }
