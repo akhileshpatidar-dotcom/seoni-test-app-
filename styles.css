@@ -851,3 +851,31 @@
            tab yeh halka pulse dikhata hai taaki "atka hua" na lage, kaam chal raha hai jaisa lage */
         @keyframes syncProgressPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         .sync-progress-pulse { animation: syncProgressPulse 1.1s ease-in-out infinite; }
+
+
+/* HOME-REFERENCE-UI-2026-10-02 */
+#home-view { padding-top: 8px; }
+#home-view .welcome-box { margin-top: 18px; margin-bottom: 4px; }
+#home-view .welcome-text { font-size: 2.35rem; letter-spacing: 4px; }
+#home-view .dots-container { margin-bottom: 24px; }
+#home-view .home-division-list { width: 100%; display: flex; flex-direction: column; gap: 16px; padding: 0 2px; }
+#home-view .home-division-card { width: 100%; min-height: 100px; margin: 0; padding: 16px 18px; border-radius: 16px; clip-path: none; display: flex; flex-direction: row; align-items: center; justify-content: flex-start; text-align: left; color: #ffffff !important; filter: none; box-shadow: 0 9px 18px rgba(15,23,42,.18); transition: transform .15s ease, box-shadow .15s ease; }
+#home-view .home-division-card:active { transform: scale(.985); box-shadow: 0 5px 12px rgba(15,23,42,.16); }
+#home-view .home-division-card-seoni { background: linear-gradient(110deg, #2563eb 0%, #1d4ed8 100%) !important; }
+#home-view .home-division-card-lakhnadon { background: linear-gradient(110deg, #f59e0b 0%, #e87805 100%) !important; }
+#home-view .home-card-icon { width: 48px; flex: 0 0 48px; font-size: 2.05rem; line-height: 1; text-align: left; color: #ffffff; filter: drop-shadow(0 2px 2px rgba(0,0,0,.12)); }
+#home-view .home-card-copy { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+#home-view .home-card-copy .item-title { font-size: 1.3rem; line-height: 1.15; font-weight: 950; }
+#home-view .home-card-copy .item-subtitle { font-size: .9rem; line-height: 1.15; font-weight: 600; opacity: .96; }
+#home-view .home-card-chevron { flex: 0 0 24px; font-size: 2.25rem; line-height: 1; font-weight: 300; text-align: right; }
+#home-view .home-utility-art { flex: 1 1 auto; min-height: 128px; width: calc(100% + 32px); margin: 10px -16px 0; display: flex; align-items: flex-end; overflow: hidden; }
+#home-view .home-utility-art svg { display: block; width: 100%; height: 100%; min-height: 128px; }
+#home-view .home-footer { flex: 0 0 auto; margin: 0 -16px; padding: 8px 8px calc(8px + env(safe-area-inset-bottom,0px)); background: #f8fafc; border-top: 1px solid #e2e8f0; color: #64748b; text-align: center; font-size: .58rem; font-weight: 700; letter-spacing: .01em; }
+@media (max-height: 680px) {
+  #home-view .welcome-box { margin-top: 8px; }
+  #home-view .welcome-text { font-size: 2rem; }
+  #home-view .dots-container { margin-bottom: 14px; }
+  #home-view .home-division-card { min-height: 82px; padding: 12px 16px; }
+  #home-view .home-utility-art { min-height: 90px; }
+  #home-view .home-utility-art svg { min-height: 90px; }
+}
