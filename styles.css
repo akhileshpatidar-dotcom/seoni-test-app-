@@ -987,18 +987,26 @@
    base watermark visible underneath, unchanged. Band moves bottom<->top and
    back continuously (ease-in-out + alternate). */
 #home-view .home-logo-watermark { position: relative; }
-#home-view .home-logo-watermark-shine {
-  position: absolute;
+/* 2026-10-03c FIX: the overlay is still a plain <img> inside .home-logo-watermark,
+   so the pre-existing "#home-view .home-logo-watermark img" rules (base sizing,
+   opacity .09/.10, blur, the soft-pulse animation) ALSO match it by tag name and
+   have higher specificity (element+class) than a class-only selector - they were
+   silently overriding opacity/filter/animation back to the same faint/blurred/
+   pulsing state as the base image, which is why the sweep was invisible live.
+   Fix: select by "img.home-logo-watermark-shine" (element+class, beats plain
+   "... img") and add !important on every property those older rules also set. */
+#home-view .home-logo-watermark img.home-logo-watermark-shine {
+  position: absolute !important;
   inset: 0;
   margin: auto;
-  z-index: 1;
-  display: block;
-  width: min(300px, 66%);
-  max-height: 72%;
-  height: auto;
-  object-fit: contain;
-  opacity: 1;
-  filter: none;
+  z-index: 2;
+  display: block !important;
+  width: min(300px, 66%) !important;
+  max-height: 72% !important;
+  height: auto !important;
+  object-fit: contain !important;
+  opacity: 1 !important;
+  filter: none !important;
   pointer-events: none;
   -webkit-mask-image: linear-gradient(180deg, transparent 0%, transparent 47%, rgba(255,255,255,.95) 50%, transparent 53%, transparent 100%);
   mask-image: linear-gradient(180deg, transparent 0%, transparent 47%, rgba(255,255,255,.95) 50%, transparent 53%, transparent 100%);
@@ -1008,7 +1016,7 @@
   mask-repeat: no-repeat;
   -webkit-mask-position: 0% 0%;
   mask-position: 0% 0%;
-  animation: homeWatermarkShineSweep 4.5s ease-in-out infinite alternate;
+  animation: homeWatermarkShineSweep 4.5s ease-in-out infinite alternate !important;
   will-change: mask-position;
 }
 @keyframes homeWatermarkShineSweep {
@@ -1016,5 +1024,5 @@
   100% { -webkit-mask-position: 0% 100%; mask-position: 0% 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  #home-view .home-logo-watermark-shine { display: none; }
+  #home-view .home-logo-watermark img.home-logo-watermark-shine { display: none !important; }
 }
