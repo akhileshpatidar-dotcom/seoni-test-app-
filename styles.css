@@ -974,3 +974,47 @@
 @media (prefers-reduced-motion: reduce) {
   #home-view .home-logo-watermark img { animation: none; }
 }
+
+
+/* HOME-WATERMARK-MOVING-SHINE-STRIP-2026-10-03b (USER REQUEST) - isolated/additive,
+   does NOT touch the base watermark img or the soft-pulse block above. Adds a
+   second, identical copy of the same logo image as a stacked overlay layer,
+   full opacity / no blur, then masks it down to a thin horizontal band using
+   a CSS gradient mask (mask-size taller than the element + animated
+   mask-position = the classic "sweep" technique). Wherever that thin band
+   currently is, the sharp overlay shows through (so that strip looks clear);
+   everywhere else the mask hides the overlay, leaving the normal faint/blurred
+   base watermark visible underneath, unchanged. Band moves bottom<->top and
+   back continuously (ease-in-out + alternate). */
+#home-view .home-logo-watermark { position: relative; }
+#home-view .home-logo-watermark-shine {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  z-index: 1;
+  display: block;
+  width: min(300px, 66%);
+  max-height: 72%;
+  height: auto;
+  object-fit: contain;
+  opacity: 1;
+  filter: none;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, transparent 47%, rgba(255,255,255,.95) 50%, transparent 53%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, transparent 47%, rgba(255,255,255,.95) 50%, transparent 53%, transparent 100%);
+  -webkit-mask-size: 100% 320%;
+  mask-size: 100% 320%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: 0% 0%;
+  mask-position: 0% 0%;
+  animation: homeWatermarkShineSweep 4.5s ease-in-out infinite alternate;
+  will-change: mask-position;
+}
+@keyframes homeWatermarkShineSweep {
+  0% { -webkit-mask-position: 0% 0%; mask-position: 0% 0%; }
+  100% { -webkit-mask-position: 0% 100%; mask-position: 0% 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #home-view .home-logo-watermark-shine { display: none; }
+}
