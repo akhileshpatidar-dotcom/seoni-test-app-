@@ -954,7 +954,7 @@
 /* HOME-LOGO-ONLY-MOBILE-FIT-2026-10-02 */
 #home-view .home-utility-art { background: #ffffff !important; flex: 1 1 auto !important; min-height: 0 !important; }
 #home-view .home-logo-watermark { flex: 1 1 auto !important; min-height: 0 !important; display: flex !important; align-items: center !important; justify-content: center !important; }
-#home-view .home-logo-watermark img { width: min(300px, 66%) !important; max-height: 72% !important; height: auto !important; opacity: .09 !important; filter: blur(1.4px) !important; }
+#home-view .home-logo-watermark img { width: min(300px, 66%) !important; max-height: 72% !important; height: auto !important; opacity: .09; filter: blur(1.4px); }
 #home-view .home-substation-art { display: none !important; }
 @media (max-width: 800px) {
   html, body, body.sc-has-tabbar, .app-shell { background: #ffffff !important; }
