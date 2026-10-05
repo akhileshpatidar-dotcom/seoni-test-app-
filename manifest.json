@@ -1,7 +1,7 @@
 {
   "name": "Seoni Circle App",
   "short_name": "Seoni Circle",
-  "description": "Seoni Circle App — Madhya Pradesh Electricity Department field staff ke liye revenue collection, meter reading aur stock management app.",
+  "description": "Seoni Circle App — revenue collection, meter reading and stock management app for Madhya Pradesh Electricity Department field staff.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
