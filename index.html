@@ -140,6 +140,7 @@
                     <button id="freeze-admin-header-menu-item" type="button" class="header-menu-item" onclick="openFreezeAdmin()" style="display:none; background:#ecfeff; color:#0e7490; border:1.5px solid #67e8f9;">🔒 ADMIN FREEZE CONTROL</button>
                     <button id="data-health-header-menu-item" type="button" class="header-menu-item" onclick="openDataHealth()" style="display:none; background:#f0fdf4; color:#15803d; border:1.5px solid #86efac;">🩺 DATA HEALTH REPORT</button>
                     <button id="omvig-admin-header-menu-item" type="button" class="header-menu-item" onclick="openOmvigAdmin()" style="display:none; background:#dc2626; color:#ffffff; border:1.5px solid #dc2626; font-weight:950;">🔒 ADMIN O&amp;M/VIG UPLOAD</button>
+                    <button id="divmaster-admin-header-menu-item" type="button" class="header-menu-item" onclick="openDivisionMasterAdmin()" style="display:none; background:#b91c1c; color:#ffffff; border:1.5px solid #b91c1c; font-weight:950;">🔒 ADMIN DIVISION MASTER UPLOAD</button>
                     <button type="button" class="header-menu-item meter-checking-header-menu-item live-progress-menu-item" onclick="openMeterCheckingLiveProgress()" style="display:none;">⏱️ Live Progress</button>
                     <button type="button" class="header-menu-item meter-checking-header-menu-item" onclick="openMeterCheckingReport()" style="display:none; background:#ef4444; color:#ffffff; border:1.5px solid #ef4444;">📄 Download Report</button>
                     <button type="button" class="header-menu-item vr-header-menu-item" onclick="openVrSavedMapsMenu()" style="display:none;">🗺️ Saved Feeder Maps</button>
@@ -427,11 +428,11 @@
                     <div id="staff-admin-result" style="display:none; margin-top:12px; border:1.5px solid #bfdbfe; border-radius:15px; padding:12px; background:#eff6ff; color:#334155; font-size:0.74rem; font-weight:850; line-height:1.6;"></div>
                     <div id="staff-admin-actions" style="display:none; margin-top:12px;">
                         <button onclick="performStaffAdminAction('RESET_REGISTRATION')" style="width:100%; height:50px; border:none; border-radius:14px; background:#7c3aed; color:#fff; font-size:0.84rem; font-weight:950;">RESET REGISTRATION (RE-REGISTER)</button>
-                        <div style="margin:6px 2px 12px; font-size:0.62rem; font-weight:800; color:#64748b; line-height:1.45;">Use this when the staff forgot the PIN, cannot log in, or sees "already registered". Then ask the staff to Register again with the same mobile number and a new PIN.</div>
-                        <button onclick="performStaffAdminAction('RESET_DEVICE')" style="width:100%; height:46px; border:none; border-radius:14px; background:#0ea5e9; color:#fff; font-size:0.8rem; font-weight:950;">RESET DEVICE</button>
-                        <button onclick="performStaffAdminAction('RESET_PIN')" style="width:100%; height:46px; margin-top:8px; border:none; border-radius:14px; background:#f59e0b; color:#fff; font-size:0.8rem; font-weight:950;">RESET / FORGOT PIN</button>
-                        <button onclick="performStaffAdminAction('UNLOCK_ACCOUNT')" style="width:100%; height:46px; margin-top:8px; border:none; border-radius:14px; background:#16a34a; color:#fff; font-size:0.8rem; font-weight:950;">UNLOCK ACCOUNT</button>
-                        <button onclick="performStaffAdminAction('DEACTIVATE_ACCOUNT')" style="width:100%; height:46px; margin-top:8px; border:none; border-radius:14px; background:#dc2626; color:#fff; font-size:0.8rem; font-weight:950;">DEACTIVATE ACCOUNT</button>
+                        <div style="margin:8px 2px 4px; font-size:0.62rem; font-weight:800; color:#64748b; line-height:1.45;">Use this when the staff forgot the PIN, cannot log in, or sees "already registered". Then ask the staff to Register again with the same mobile number and a new PIN.</div>
+                        <div style="display:flex; gap:8px; margin-top:12px;">
+                            <button onclick="performStaffAdminAction('ACTIVATE_ACCOUNT')" style="flex:1; height:44px; border:none; border-radius:14px; background:#16a34a; color:#fff; font-size:0.74rem; font-weight:950;">ACTIVATE</button>
+                            <button onclick="performStaffAdminAction('DEACTIVATE_ACCOUNT')" style="flex:1; height:44px; border:none; border-radius:14px; background:#dc2626; color:#fff; font-size:0.74rem; font-weight:950;">DEACTIVATE</button>
+                        </div>
                     </div>
                     <div id="staff-admin-status" style="display:none; margin-top:12px; border-radius:14px; padding:12px; font-size:0.74rem; font-weight:900; line-height:1.5; text-align:center;"></div>
                 </div>
@@ -1575,6 +1576,38 @@
                     <button id="division-paid-upload-btn" onclick="uploadDivisionPaidFiles()" style="width:100%; height:50px; margin-top:14px; border:none; border-radius:16px; background:#000; color:#fff; font-size:0.86rem; font-weight:950; text-transform:uppercase;">UPLOAD DIVISION CASH LIST</button>
                     <div id="division-paid-upload-status" style="display:none; margin-top:12px; border-radius:14px; padding:12px; font-size:0.72rem; font-weight:850; line-height:1.45;"></div>
                     <div id="division-paid-upload-table" style="margin-top:10px;"></div>
+                </div>
+            </div>
+        </main>
+
+        
+        <main id="division-master-upload-view" class="view">
+            <div class="search-panel" style="padding-top:20px;">
+                <div style="width:100%; max-width:360px; background:#eef2ff; border:1.5px solid #a5b4fc; border-radius:18px; padding:14px; text-align:center;">
+                    <div id="divmaster-div" style="font-size:0.9rem; font-weight:950; color:#1d4ed8; text-transform:uppercase; margin-bottom:4px;">Select Division</div>
+                    <div style="font-size:0.95rem; font-weight:950; color:#3730a3; text-transform:uppercase;">Division Master Upload</div>
+                    <div style="font-size:0.7rem; font-weight:850; color:#475569; margin-top:4px;">One master file of the whole Division - it is split DC-wise and replaces the old master of each DC</div>
+                </div>
+                <div id="divmaster-lock-box" style="width:100%; max-width:340px; margin:18px auto 0; background:#ffffff; border:1.5px solid #c7d2fe; border-radius:18px; padding:14px;">
+                    <label style="display:block; text-align:center; color:#3730a3; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin-bottom:8px;">Division Master Password</label>
+                    <input type="password" id="divmaster-password" class="ivrs-input" placeholder="Password" style="height:50px; border-color:#6366f1; text-align:center; font-size:1rem;" onkeydown="if(event.key==='Enter') unlockDivisionMasterUpload()">
+                    <button onclick="unlockDivisionMasterUpload()" style="width:100%; height:48px; margin-top:10px; border:none; border-radius:15px; background:#4338ca; color:#fff; font-size:0.88rem; font-weight:950; text-transform:uppercase;">Unlock</button>
+                </div>
+                <div id="divmaster-panel" style="display:none; width:100%; max-width:360px; margin:16px auto 0; background:#ffffff; border:1.5px solid #c7d2fe; border-radius:18px; padding:14px;">
+                    <input type="hidden" id="divmaster-division" value="">
+                    <div id="divmaster-choose" style="display:flex; gap:8px; margin-bottom:12px;">
+                        <button id="divmaster-btn-SEONI" type="button" onclick="chooseDivMasterDivision('SEONI')" style="flex:1; height:50px; border:none; border-radius:14px; background:#1d4ed8; color:#fff; font-size:0.74rem; font-weight:950; text-transform:uppercase;">Division Seoni</button>
+                        <button id="divmaster-btn-LAKHNADON" type="button" onclick="chooseDivMasterDivision('LAKHNADON')" style="flex:1; height:50px; border:none; border-radius:14px; background:#7c3aed; color:#fff; font-size:0.74rem; font-weight:950; text-transform:uppercase;">Division Lakhnadon</button>
+                    </div>
+                    <button id="divmaster-change-btn" type="button" onclick="changeDivMasterDivision()" style="display:none; width:100%; height:36px; margin-bottom:12px; border:1.5px solid #a5b4fc; border-radius:12px; background:#eef2ff; color:#3730a3; font-size:0.7rem; font-weight:950; text-transform:uppercase;">Change Division</button>
+                    <label style="display:block; color:#3730a3; font-size:0.72rem; font-weight:950; text-transform:uppercase; margin-bottom:6px;">Division Master File (12 columns)</label>
+                    <input id="divmaster-file" type="file" accept=".xlsx,.xls,.csv" style="width:100%; border:1.5px dashed #a5b4fc; border-radius:14px; padding:10px; font-size:0.72rem; font-weight:800; color:#334155;">
+                    <button id="divmaster-check-btn" onclick="checkDivisionMasterFile()" style="width:100%; height:50px; margin-top:14px; border:none; border-radius:16px; background:#4338ca; color:#fff; font-size:0.86rem; font-weight:950; text-transform:uppercase;">1. CHECK FILE</button>
+                    <div id="divmaster-status" style="display:none; margin-top:12px; border-radius:14px; padding:12px; font-size:0.72rem; font-weight:850; line-height:1.45;"></div>
+                    <div id="divmaster-preview" style="margin-top:10px;"></div>
+                    <button id="divmaster-upload-btn" onclick="uploadDivisionMaster()" style="display:none; width:100%; height:50px; margin-top:12px; border:none; border-radius:16px; background:#000; color:#fff; font-size:0.86rem; font-weight:950; text-transform:uppercase;">2. UPLOAD TO DIVISION MASTER</button>
+                    <div style="margin-top:16px; font-size:0.66rem; font-weight:950; color:#3730a3; text-transform:uppercase;">Current status of each DC</div>
+                    <div id="divmaster-state" style="margin-top:6px;"></div>
                 </div>
             </div>
         </main>
