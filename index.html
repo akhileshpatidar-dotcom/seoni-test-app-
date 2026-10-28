@@ -21,10 +21,15 @@
     <script>
     (function () {
         function ld(src, cb) { var s = document.createElement("script"); s.src = src; s.onload = cb; s.onerror = cb; document.head.appendChild(s); }
-        ld("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", function () {
-            ld("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js");
-        });
-        ld("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+        // 2026-10-28: app poori khul jaane (load) ke baad hi laate hain - taaki app.js ko network/CPU poora mile.
+        function go() {
+            ld("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js", function () {
+                ld("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js");
+            });
+            ld("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+        }
+        if (document.readyState === "complete") setTimeout(go, 800);
+        else window.addEventListener("load", function () { setTimeout(go, 800); });
     })();
     </script>
     <link rel="stylesheet" href="./styles.css">
