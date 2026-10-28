@@ -145,7 +145,6 @@
                     <button id="panchnama-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openPanchnamaToolAdminUpload()" style="display:none; background:#fff7ed; color:#9a3412; border:1.5px solid #fdba74;">🔒 ADMIN PANCHNAMA TEMPLATE</button>
                     <button id="arrange-excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openArrangeExcelToolAdminUpload()" style="display:none; background:#f0fdf4; color:#14532d; border:1.5px solid #86efac;">🔒 ADMIN ARRANGE EXCEL FILE</button>
                     <button id="image-to-excel-tool-admin-header-menu-item" type="button" class="header-menu-item" onclick="openImageToExcelToolAdminUpload()" style="display:none; background:#fff1f2; color:#9f1239; border:1.5px solid #fda4af;">🔒 ADMIN IMAGE TO EXCEL CONVERTER</button>
-                    <button id="freeze-admin-header-menu-item" type="button" class="header-menu-item" onclick="openFreezeAdmin()" style="display:none; background:#ecfeff; color:#0e7490; border:1.5px solid #67e8f9;">🔒 ADMIN FREEZE CONTROL</button>
                     <button id="data-health-header-menu-item" type="button" class="header-menu-item" onclick="openDataHealth()" style="display:none; background:#f0fdf4; color:#15803d; border:1.5px solid #86efac;">🩺 DATA HEALTH REPORT</button>
                     <button id="omvig-admin-header-menu-item" type="button" class="header-menu-item" onclick="openOmvigAdmin()" style="display:none; background:#eef2ff; color:#3730a3; border:1.5px solid #a5b4fc;">🔒 ADMIN O&amp;M/VIG UPLOAD</button>
                     <button id="divmaster-admin-header-menu-item" type="button" class="header-menu-item" onclick="openDivisionMasterAdmin()" style="display:none; background:#b91c1c; color:#ffffff; border:1.5px solid #b91c1c; font-weight:950;">🔒 ADMIN DIVISION MASTER UPLOAD</button>
@@ -340,22 +339,6 @@
                 </label>
                 <div id="panchnama-tool-upload-filename" style="font-size:0.62rem; font-weight:800; color:#1d4ed8; text-align:center; margin-top:10px;"></div>
                 <div id="panchnama-tool-upload-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
-            </div>
-        </main>
-
-        <main id="freeze-admin-view" class="view">
-            <div class="search-panel" style="padding-top:18px;">
-                <div style="width:100%; max-width:360px; background:#ecfeff; border:1.5px solid #67e8f9; border-radius:18px; padding:16px; text-align:center; margin-bottom:16px;">
-                    <div style="font-size:0.85rem; font-weight:950; color:#0e7490;">REVENUE FREEZE CONTROL</div>
-                    <div style="font-size:0.62rem; font-weight:800; color:#0891b2; margin-top:6px; line-height:1.6;">When "Freeze Now" is pressed, the complete current lists of Non-Payee 3M/6M, Since Connection and Top 20/50 Defaulters (all DCs) will be saved as a permanent snapshot. This list will never change on its own - the "Revenue Freeze Report" in Revenue &gt; Daily Progress is compared against it.</div>
-                </div>
-                <button class="dashboard-btn" style="width:100%; max-width:360px; background:linear-gradient(135deg,#22d3ee 0%,#0891b2 100%); color:#ffffff !important;" onclick="runRevenueFreezeNow()">🧊 Freeze Now (All DC)</button>
-                <div id="freeze-admin-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
-                <button class="dashboard-btn" style="width:100%; max-width:360px; margin-top:12px; background:linear-gradient(135deg,#34d399 0%,#059669 100%); color:#ffffff !important;" onclick="loadFreezeAddDcCandidates()">➕ Add DC to Freeze / Freeze Again</button>
-                <div id="freeze-add-dc-box" style="display:none; width:100%; max-width:360px; margin:10px auto 0; background:#ffffff; border:1.5px solid #6ee7b7; border-radius:16px; padding:12px;"></div>
-                <div id="freeze-add-dc-status" style="display:none; margin-top:10px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center; white-space:pre-line;"></div>
-                <div style="font-size:0.68rem; font-weight:900; color:#0e7490; text-align:center; margin-top:18px;">EXISTING FREEZES</div>
-                <div id="freeze-admin-list" style="width:100%; max-width:400px; margin:8px auto 0;"></div>
             </div>
         </main>
 
