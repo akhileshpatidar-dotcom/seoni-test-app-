@@ -130,7 +130,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         const vehicleReadingListStorageKey = "seoni_vehicle_reading_list_v1";
         const vehicleReadingCsvUrl = "https://docs.google.com/spreadsheets/d/1osWQoSwAPk6XbkkdlaNNswHXAp8AJMX-k2PmxG_opU8/export?format=csv&gid=1288084519";
         const vehicleReadingSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbyqG_i3xzySgBJETTnmEo5WhZV_51eaXex_0-vIWhmCqdWNF0Y2Uar6wZPdgjDPBVmi/exec";
-        const vehicleReadingVehicles = ["407- MP22ZB6089", "BOLERO- MP22ZC1591", "407- MP22G4316", "CAMPER- MP22G4342"];
+        const vehicleReadingVehicles = ["407- MP22ZB6089", "BOLERO- MP22ZC1591", "407- MP22ZL8832", "CAMPER- MP22G4342"];
         const revenueCollectionSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbzaimPwzUYELgmujpaBbfByy0BcjOERA8e0mslNdbH5uUw2L6L24785obmdcpcDOc53Ww/exec";
         const revenueOfflineQueueStorageKey = "seoni-revenue-offline-submit-queue-v1";
         // Meeter Cheking (2026-09-10 addition) - abhi sirf SEONI (T) DC ke liye live hai.
@@ -231,6 +231,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // me bhi Govt / Non Govt filter ("" = both). Local rebuild from already-loaded master data.
         let progressCategoryGovtFilter = "";
         let progressStaffTypeFilter = "";
+        let progressStaffHq = ""; // UPDATE 132: HQ (DC level) / DC (Division, Circle) filter, same as 3-dots report
         let progressStaffView = ""; // UPDATE 126 (2026-10-29): "" = Summary, "LIST" = Consumer List (same filter, same download)
         let progressStaffTdStatus = ""; // UPDATE 125 (2026-10-29): TD by Staff -> "" all / "PAID" paid after TD / "UNPAID" still pending (Live Revenue progress report)
         // USER REQUEST (2026-09-09): "Paid Count Summary" - 8th Revenue dropdown
@@ -8074,6 +8075,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             progressStaffTypeFilter = "";
             progressStaffTdStatus = "";
             progressStaffView = "";
+            progressStaffHq = "";
             progressPaidCountFilter = "";
             progressPaidCountGovtFilter = "";
             progressPaidCountPaymentFilter = "";
@@ -8183,6 +8185,13 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             progressStaffTdStatus = ["PAID", "UNPAID"].includes(value) ? value : "";
             scProgressStaffRecompute_();
         }
+        function setProgressStaffHq(value) {
+            progressStaffHq = String(value || "");
+            scProgressStaffRecompute_();
+        }
+        function scProgressStaffHqLabel_() {
+            return progressStaffHq ? `${activeViewLevel === "DC" ? revenueHqLabel() : "DC"}: ${progressStaffHq}` : (activeViewLevel === "DC" ? `${revenueHqLabel()} Filter: ${revenueHqAllLabel()}` : (activeViewLevel === "DIVISION" ? "DC Filter: All DC" : "Division/DC Filter: All"));
+        }
         function setProgressStaffView(value) {
             progressStaffView = value === "LIST" ? "LIST" : "";
             const body = document.getElementById("progress-revenue-body");
@@ -8224,15 +8233,21 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const periodLabel = isMonth ? `Month: ${formatRevenueMonthYear(bd.filterValue)}` : `Date: ${normalizeRevenueReportDate(bd.filterValue)}`;
             const baseTitle = isMonth ? "Revenue Collection Month Report" : "Revenue Collection Date Report";
             const typeLabel = scProgressStaffTdLabel_();
-            const fileSuffix = (progressStaffTypeFilter ? `-${progressStaffTypeFilter.toLowerCase()}` : "") + (progressStaffTdStatus ? `-${progressStaffTdStatus.toLowerCase()}` : "");
-            downloadRevenueRowsReport(fmt === "PDF" ? "PDF" : "EXCEL", rows, `${baseTitle} - ${typeLabel}`, `revenue-list-${isMonth ? "month" : "date"}-${String(bd.filterValue || "").replace(/[\\/:*?"<>|]+/g, "_")}${fileSuffix}.csv`, getRevenueReportMeta(`${baseTitle} - ${typeLabel}`, periodLabel, `Type: ${typeLabel}`));
+            const fileSuffix = (progressStaffHq ? "-" + String(progressStaffHq).replace(/[^A-Za-z0-9]+/g, "_") : "") + (progressStaffTypeFilter ? `-${progressStaffTypeFilter.toLowerCase()}` : "") + (progressStaffTdStatus ? `-${progressStaffTdStatus.toLowerCase()}` : "");
+            downloadRevenueRowsReport(fmt === "PDF" ? "PDF" : "EXCEL", rows, `${baseTitle} - ${typeLabel}`, `revenue-list-${isMonth ? "month" : "date"}-${String(bd.filterValue || "").replace(/[\\/:*?"<>|]+/g, "_")}${fileSuffix}.csv`, getRevenueReportMeta(`${baseTitle} - ${typeLabel}`, periodLabel, `Type: ${typeLabel}${progressStaffHq ? " | " + scProgressStaffHqLabel_() : ""}`));
         }
         function scProgressStaffTdLabel_() {
             if (progressStaffTypeFilter !== "TD") return progressStaffTypeFilter === "PAID" ? "Paid by Staff" : "Paid + TD Both";
             return progressStaffTdStatus === "PAID" ? "TD by Staff - Paid after TD" : (progressStaffTdStatus === "UNPAID" ? "TD by Staff - Unpaid (pending)" : "TD by Staff");
         }
         function scProgressStaffEntries_(mode, filterValue) {
-            const entries = getRevenueCombinedFilteredEntries(mode, filterValue);
+            let entries = getRevenueCombinedFilteredEntries(mode, filterValue);
+            if (progressStaffHq) {
+                const hqKey = normalizeLookupValue(progressStaffHq);
+                const fld = activeViewLevel === "DC" ? "hqName" : "dcName";
+                if (entries.some((r) => normalizeLookupValue(r[fld] || "") === hqKey)) entries = entries.filter((r) => normalizeLookupValue(r[fld] || "") === hqKey);
+                else progressStaffHq = "";
+            }
             if (progressStaffTypeFilter !== "TD" || !progressStaffTdStatus) return entries;
             return entries.filter((row) => {
                 if (row.reportType !== "TD") return true;
@@ -8271,12 +8286,19 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const headerCells = [`<div>${colLabel}</div>`];
             if (showPaid) headerCells.push(`<div>PAID</div>`, `<div>PAID AMT (LAKH)</div>`);
             if (showTd) headerCells.push(`<div>LINE TD</div>`, `<div>TD AMT (LAKH)</div>`);
-            const viewSelectHtml = `<select onchange="setProgressStaffView(this.value)" style="width:100%; max-width:360px; height:38px; margin:0 auto 8px; display:block; border:1.5px solid #1d4ed8; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#1d4ed8; background:#ffffff;">
-                    <option value="" ${progressStaffView === "" ? "selected" : ""}>View: Summary</option>
-                    <option value="LIST" ${progressStaffView === "LIST" ? "selected" : ""}>View: Consumer List</option>
+            const hqField = activeViewLevel === "DC" ? "hqName" : "dcName";
+            const hqAllText = activeViewLevel === "DC" ? `All ${revenueHqLabel()}` : "All DC";
+            let hqOptions = [];
+            try {
+                const bdSel = lastRevenueProgressBoxData;
+                if (bdSel && bdSel.mode) hqOptions = getRevenueUniqueValues(getRevenueCombinedFilteredEntries(bdSel.mode, bdSel.filterValue), hqField);
+            } catch (_) { hqOptions = []; }
+            const hqSelectHtml = `<select onchange="setProgressStaffHq(this.value)" style="width:100%; max-width:360px; height:38px; margin:0 auto 8px; display:block; border:1.5px solid #1d4ed8; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#1d4ed8; background:#ffffff;">
+                    <option value="">${escapeHtml(hqAllText)}</option>
+                    ${hqOptions.map((n) => `<option value="${escapeHtml(n)}" ${normalizeLookupValue(n) === normalizeLookupValue(progressStaffHq) ? "selected" : ""}>${escapeHtml(n)}</option>`).join("")}
                 </select>`;
             let html = `
-                ${viewSelectHtml}
+                ${hqSelectHtml}
                 <select onchange="setProgressStaffTypeFilter(this.value)" style="width:100%; max-width:360px; height:38px; margin:0 auto 8px; display:block; border:1.5px solid #0f766e; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#0f766e; background:#ffffff;">
                     <option value="" ${progressStaffTypeFilter === "" ? "selected" : ""}>Paid + TD Both</option>
                     <option value="PAID" ${progressStaffTypeFilter === "PAID" ? "selected" : ""}>Paid by Staff</option>
@@ -8310,19 +8332,19 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 <div class="btn-export-row">
                     <button class="btn-unique btn-excel-unique" onclick="doExport('XLS')">
                         <svg width="18" height="18" fill="white" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16h-8v-2h8v2zm0-4h-8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                        Excel Report
+                        Summary Excel
                     </button>
                     <button class="btn-unique btn-pdf-unique" onclick="doExport('PDF')">
                         <svg width="18" height="18" fill="white" viewBox="0 0 24 24"><path d="M20 2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-8.5 7.5c0 .83-.67 1.5-1.5 1.5H9v2H7.5V7H10c.83 0 1.5.67 1.5 1.5v1zm5 2c0 .83-.67 1.5-1.5 1.5h-2.5V7H15c.83 0 1.5.67 1.5 1.5v3zm4-3H19v1h1.5V11H19v2h-1.5V7h3v1.5zM9 9.5h1v-1H9v1zM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm10 5.5h1v-3h-1v3z"/></svg>
-                        PDF Report
+                        Summary PDF
                     </button>
+                </div>
+                <div class="btn-export-row" style="margin-top:8px;">
+                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressStaffList_('XLS')">List Excel</button>
+                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressStaffList_('PDF')">List PDF</button>
                 </div>
                 <div id="progress-summary-download-status" style="display:none; text-align:center; font-weight:900; border-radius:16px; padding:10px 12px; width:100%; margin-top:12px;"></div>
             </div>`;
-            if (progressStaffView === "LIST") { // UPDATE 126: selects upar jaise hi, neeche summary table ki jagah consumer list
-                const cut = html.indexOf('<div class="summary-wrapper">');
-                if (cut > 0) return html.slice(0, cut) + scProgressStaffListHtml_();
-            }
             return html;
         }
 
@@ -10352,7 +10374,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const revenueColLabel = getRevenueProgressColumnLabel();
                 const revenueTotals = getRevenueProgressTotals(uiListSummary);
                 const revenueScopeLabel = activeViewLevel === "DC" ? `DC: ${activeDC}` : (activeViewLevel === "DIVISION" ? `Division: ${activeDiv}` : "Circle: SEONI CIRCLE");
-                const revenueFilterLabel = activeViewLevel === "DC" ? `${revenueHqLabel()} Filter: ${revenueHqAllLabel()}` : (activeViewLevel === "DIVISION" ? "DC Filter: All DC" : "Division/DC Filter: All");
+                const revenueFilterLabel = scProgressStaffHqLabel_();
                 const showPaid = progressStaffTypeFilter !== "TD";
                 const showTd = progressStaffTypeFilter !== "PAID";
                 const typeLabel = scProgressStaffTdLabel_();
