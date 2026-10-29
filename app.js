@@ -8204,7 +8204,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             let rows = scProgressStaffEntries_(bd.mode, bd.filterValue);
             if (progressStaffTypeFilter === "TD") rows = rows.filter((r) => r.reportType === "TD");
             else if (progressStaffTypeFilter === "PAID") rows = rows.filter((r) => r.reportType !== "TD");
-            return rows;
+            // UPDATE 133: list DC wise, uske andar HQ wise (DC level par sirf HQ wise); har HQ ke andar purana order (latest pehle).
+            const cmp = (a, b) => String(a || "").localeCompare(String(b || ""));
+            return rows.map((r, i) => ({ r, i })).sort((x, y) => (activeViewLevel === "DC" ? 0 : cmp(x.r.dcName, y.r.dcName)) || cmp(x.r.hqName, y.r.hqName) || (x.i - y.i)).map((o) => o.r);
         }
         function scProgressStaffListHtml_() {
             const rows = scProgressStaffListRows_();
