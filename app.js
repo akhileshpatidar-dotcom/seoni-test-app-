@@ -231,6 +231,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // me bhi Govt / Non Govt filter ("" = both). Local rebuild from already-loaded master data.
         let progressCategoryGovtFilter = "";
         let progressStaffTypeFilter = "";
+        let progressStaffView = ""; // UPDATE 126 (2026-10-29): "" = Summary, "LIST" = Consumer List (same filter, same download)
         let progressStaffTdStatus = ""; // UPDATE 125 (2026-10-29): TD by Staff -> "" all / "PAID" paid after TD / "UNPAID" still pending (Live Revenue progress report)
         // USER REQUEST (2026-09-09): "Paid Count Summary" - 8th Revenue dropdown
         // report. DC level: dropdown holds HQ names ("" = ALL HQ, shows HQ-wise
@@ -8072,6 +8073,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             progressCategoryGovtFilter = "";
             progressStaffTypeFilter = "";
             progressStaffTdStatus = "";
+            progressStaffView = "";
             progressPaidCountFilter = "";
             progressPaidCountGovtFilter = "";
             progressPaidCountPaymentFilter = "";
@@ -8181,6 +8183,50 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             progressStaffTdStatus = ["PAID", "UNPAID"].includes(value) ? value : "";
             scProgressStaffRecompute_();
         }
+        function setProgressStaffView(value) {
+            progressStaffView = value === "LIST" ? "LIST" : "";
+            const body = document.getElementById("progress-revenue-body");
+            if (body) body.innerHTML = renderProgressRevenueBodyInner();
+        }
+        // UPDATE 126: jo filter (Paid / TD / Paid after TD / Unpaid) laga hai, wahi consumer list screen par (pehli 25) aur download me (poori).
+        function scProgressStaffListRows_() {
+            const bd = lastRevenueProgressBoxData;
+            if (!bd || !bd.mode) return [];
+            let rows = scProgressStaffEntries_(bd.mode, bd.filterValue);
+            if (progressStaffTypeFilter === "TD") rows = rows.filter((r) => r.reportType === "TD");
+            else if (progressStaffTypeFilter === "PAID") rows = rows.filter((r) => r.reportType !== "TD");
+            return rows;
+        }
+        function scProgressStaffListHtml_() {
+            const rows = scProgressStaffListRows_();
+            const amtOf = (r) => (r.reportType === "TD" ? Number(getRevenueTdAmount(r) || 0) : Number(parseRevenuePaidAmount(r.paidAmount) || 0));
+            const total = rows.reduce((sum, r) => sum + amtOf(r), 0);
+            const th = "border:1px solid #93c5fd; padding:4px; background:#dbeafe; color:#1e3a8a;";
+            const td = "border:1px solid #bfdbfe; padding:4px; word-break:break-word;";
+            const show = rows.slice(0, 25);
+            const body = show.map((r) => `<tr><td style="${td}">${escapeHtml(r.ivrsNo || "-")}</td><td style="${td} text-align:left;">${escapeHtml(r.consumerName || "-")}</td><td style="${td}">${escapeHtml(activeViewLevel === "DC" ? (r.hqName || "-") : (r.dcName || "-"))}</td><td style="${td}">${r.reportType === "TD" ? "TD" : "PAID"}</td><td style="${td}">${escapeHtml(formatRevenueAmount(amtOf(r)))}</td><td style="${td}">${escapeHtml(r.reportType === "TD" ? (r.tdDate || "-") : (r.paidDate || "-"))}</td></tr>`).join("");
+            const table = rows.length ? `<div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:0.56rem; font-weight:850; color:#0f172a; text-align:center;"><thead><tr><th style="${th}">IVRS</th><th style="${th}">NAME</th><th style="${th}">${activeViewLevel === "DC" ? escapeHtml(revenueHqLabelUpper()) : "DC"}</th><th style="${th}">TYPE</th><th style="${th}">AMOUNT</th><th style="${th}">DATE</th></tr></thead><tbody>${body}</tbody></table></div>${rows.length > show.length ? `<div style="font-size:0.62rem; font-weight:900; color:#475569; text-align:center; margin-top:6px;">Showing first ${show.length} of ${rows.length}. Download for the full list.</div>` : ""}` : scEmptyState_("No consumer found for this selection.");
+            return `<div class="summary-wrapper" style="padding:8px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; text-align:center; margin-bottom:8px;">
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:12px; padding:8px; font-size:0.7rem; font-weight:950; color:#1e3a8a;">Consumers: ${rows.length}</div>
+                    <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:12px; padding:8px; font-size:0.7rem; font-weight:950; color:#065f46;">Amount: ${escapeHtml(formatRevenueAmount(total))}</div>
+                </div>${table}</div>
+                <div class="summary-footer"><div class="btn-export-row">
+                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressStaffList_('XLS')">Excel List</button>
+                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressStaffList_('PDF')">PDF List</button>
+                </div></div>`;
+        }
+        function downloadProgressStaffList_(fmt) {
+            const bd = lastRevenueProgressBoxData;
+            const rows = scProgressStaffListRows_();
+            if (!bd || !rows.length) return showToast("No data available for the report right now", false);
+            const isMonth = bd.mode === "MONTHLY";
+            const periodLabel = isMonth ? `Month: ${formatRevenueMonthYear(bd.filterValue)}` : `Date: ${normalizeRevenueReportDate(bd.filterValue)}`;
+            const baseTitle = isMonth ? "Revenue Collection Month Report" : "Revenue Collection Date Report";
+            const typeLabel = scProgressStaffTdLabel_();
+            const fileSuffix = (progressStaffTypeFilter ? `-${progressStaffTypeFilter.toLowerCase()}` : "") + (progressStaffTdStatus ? `-${progressStaffTdStatus.toLowerCase()}` : "");
+            downloadRevenueRowsReport(fmt === "PDF" ? "PDF" : "EXCEL", rows, `${baseTitle} - ${typeLabel}`, `revenue-list-${isMonth ? "month" : "date"}-${String(bd.filterValue || "").replace(/[\\/:*?"<>|]+/g, "_")}${fileSuffix}.csv`, getRevenueReportMeta(`${baseTitle} - ${typeLabel}`, periodLabel, `Type: ${typeLabel}`));
+        }
         function scProgressStaffTdLabel_() {
             if (progressStaffTypeFilter !== "TD") return progressStaffTypeFilter === "PAID" ? "Paid by Staff" : "Paid + TD Both";
             return progressStaffTdStatus === "PAID" ? "TD by Staff - Paid after TD" : (progressStaffTdStatus === "UNPAID" ? "TD by Staff - Unpaid (pending)" : "TD by Staff");
@@ -8225,7 +8271,12 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const headerCells = [`<div>${colLabel}</div>`];
             if (showPaid) headerCells.push(`<div>PAID</div>`, `<div>PAID AMT (LAKH)</div>`);
             if (showTd) headerCells.push(`<div>LINE TD</div>`, `<div>TD AMT (LAKH)</div>`);
+            const viewSelectHtml = `<select onchange="setProgressStaffView(this.value)" style="width:100%; max-width:360px; height:38px; margin:0 auto 8px; display:block; border:1.5px solid #1d4ed8; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#1d4ed8; background:#ffffff;">
+                    <option value="" ${progressStaffView === "" ? "selected" : ""}>View: Summary</option>
+                    <option value="LIST" ${progressStaffView === "LIST" ? "selected" : ""}>View: Consumer List</option>
+                </select>`;
             let html = `
+                ${viewSelectHtml}
                 <select onchange="setProgressStaffTypeFilter(this.value)" style="width:100%; max-width:360px; height:38px; margin:0 auto 8px; display:block; border:1.5px solid #0f766e; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#0f766e; background:#ffffff;">
                     <option value="" ${progressStaffTypeFilter === "" ? "selected" : ""}>Paid + TD Both</option>
                     <option value="PAID" ${progressStaffTypeFilter === "PAID" ? "selected" : ""}>Paid by Staff</option>
@@ -8268,6 +8319,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 </div>
                 <div id="progress-summary-download-status" style="display:none; text-align:center; font-weight:900; border-radius:16px; padding:10px 12px; width:100%; margin-top:12px;"></div>
             </div>`;
+            if (progressStaffView === "LIST") { // UPDATE 126: selects upar jaise hi, neeche summary table ki jagah consumer list
+                const cut = html.indexOf('<div class="summary-wrapper">');
+                if (cut > 0) return html.slice(0, cut) + scProgressStaffListHtml_();
+            }
             return html;
         }
 
