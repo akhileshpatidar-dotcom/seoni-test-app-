@@ -231,6 +231,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // me bhi Govt / Non Govt filter ("" = both). Local rebuild from already-loaded master data.
         let progressCategoryGovtFilter = "";
         let progressStaffTypeFilter = "";
+        let progressStaffTdStatus = ""; // UPDATE 125 (2026-10-29): TD by Staff -> "" all / "PAID" paid after TD / "UNPAID" still pending (Live Revenue progress report)
         // USER REQUEST (2026-09-09): "Paid Count Summary" - 8th Revenue dropdown
         // report. DC level: dropdown holds HQ names ("" = ALL HQ, shows HQ-wise
         // summary; specific HQ shows that HQ's village-wise list). Division/Circle
@@ -8070,6 +8071,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             progressTargetGovtFilter = "";
             progressCategoryGovtFilter = "";
             progressStaffTypeFilter = "";
+            progressStaffTdStatus = "";
             progressPaidCountFilter = "";
             progressPaidCountGovtFilter = "";
             progressPaidCountPaymentFilter = "";
@@ -8164,9 +8166,50 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // ab dropdown se select hone par hi dikhta hai - baaki 3 report type isi jagah
         // (usi #progress-revenue-body me) unke apne render se replace ho jate hain.
         function setProgressStaffTypeFilter(value) {
+            const hadTdStatus = !!progressStaffTdStatus;
             progressStaffTypeFilter = ["PAID", "TD"].includes(value) ? value : "";
+            if (progressStaffTypeFilter !== "TD") progressStaffTdStatus = "";
+            if (hadTdStatus) { scProgressStaffRecompute_(); return; }
             const body = document.getElementById("progress-revenue-body");
             if (body) body.innerHTML = renderProgressRevenueBodyInner();
+        }
+
+        // UPDATE 125 (2026-10-29, USER REQUEST): Live Revenue progress report (Circle/Division/DC) me "TD by Staff" ke neeche
+        // 3-dots "Paid by Staff Date/Month" jaisa dropdown - All TD / Paid after TD / Unpaid (still pending).
+        // Rule wahi (scTdIsPaid_): NGB cash list ya (pichhle mahine ke TD me) master ki Last Payment Date.
+        function setProgressStaffTdStatus(value) {
+            progressStaffTdStatus = ["PAID", "UNPAID"].includes(value) ? value : "";
+            scProgressStaffRecompute_();
+        }
+        function scProgressStaffTdLabel_() {
+            if (progressStaffTypeFilter !== "TD") return progressStaffTypeFilter === "PAID" ? "Paid by Staff" : "Paid + TD Both";
+            return progressStaffTdStatus === "PAID" ? "TD by Staff - Paid after TD" : (progressStaffTdStatus === "UNPAID" ? "TD by Staff - Unpaid (pending)" : "TD by Staff");
+        }
+        function scProgressStaffEntries_(mode, filterValue) {
+            const entries = getRevenueCombinedFilteredEntries(mode, filterValue);
+            if (progressStaffTypeFilter !== "TD" || !progressStaffTdStatus) return entries;
+            return entries.filter((row) => {
+                if (row.reportType !== "TD") return true;
+                const paid = scTdIsPaid_(row);
+                return progressStaffTdStatus === "PAID" ? paid : !paid;
+            });
+        }
+        let scProgStaffTdToken_ = 0;
+        async function scProgressStaffRecompute_() {
+            const my = ++scProgStaffTdToken_;
+            const body = document.getElementById("progress-revenue-body");
+            const bd = lastRevenueProgressBoxData;
+            if (!bd || !bd.mode) { if (body) body.innerHTML = renderProgressRevenueBodyInner(); return; }
+            if (progressStaffTypeFilter === "TD" && progressStaffTdStatus) {
+                if (body) body.innerHTML = `<div style="text-align:center; font-size:0.74rem; font-weight:950; color:#0f766e; padding:18px 8px;">SYNCING DATA... PLEASE WAIT</div>`;
+                try { await scRevTdEnsureMaster_(); } catch (_) {}
+                if (my !== scProgStaffTdToken_) return;
+            }
+            const rows = buildProgressRevenueSummaryRows(scProgressStaffEntries_(bd.mode, bd.filterValue));
+            uiListSummary = rows;
+            lastRevenueProgressStaffData = { rows, label: (lastRevenueProgressStaffData && lastRevenueProgressStaffData.label) || "" };
+            const body2 = document.getElementById("progress-revenue-body");
+            if (body2) body2.innerHTML = renderProgressRevenueBodyInner();
         }
 
         // Paid by Staff aur TD by Staff dono ka data ek hi jagah (rows me paidCount/
@@ -8188,6 +8231,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     <option value="PAID" ${progressStaffTypeFilter === "PAID" ? "selected" : ""}>Paid by Staff</option>
                     <option value="TD" ${progressStaffTypeFilter === "TD" ? "selected" : ""}>TD by Staff</option>
                 </select>
+                ${progressStaffTypeFilter === "TD" ? `<select onchange="setProgressStaffTdStatus(this.value)" style="width:100%; max-width:360px; height:38px; margin:0 auto 8px; display:block; border:1.5px solid #0f766e; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#0f766e; background:#ffffff;">
+                    <option value="" ${progressStaffTdStatus === "" ? "selected" : ""}>All TD (Paid + Unpaid)</option>
+                    <option value="PAID" ${progressStaffTdStatus === "PAID" ? "selected" : ""}>TD - Paid after TD</option>
+                    <option value="UNPAID" ${progressStaffTdStatus === "UNPAID" ? "selected" : ""}>TD - Unpaid (still pending)</option>
+                </select>` : ""}
                 <div class="summary-wrapper"><div class="summary-table-header" style="grid-template-columns: ${gridCols};">${headerCells.join("")}</div>`;
 
             if (!rows.length) {
@@ -9525,7 +9573,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
                     const revenueMode = summaryMode === "MONTHLY" ? "MONTHLY" : "DAILY";
                     const revenueFilterValue = getRevenueProgressFilterValue(dStr, mStr);
-                    uiListSummary = buildProgressRevenueSummaryRows(getRevenueCombinedFilteredEntries(revenueMode, revenueFilterValue));
+                    if (progressStaffTypeFilter === "TD" && progressStaffTdStatus) { try { await scRevTdEnsureMaster_(); } catch (_) {} if (isStaleSummaryRefresh()) return; } // UPDATE 125
+                    uiListSummary = buildProgressRevenueSummaryRows(scProgressStaffEntries_(revenueMode, revenueFilterValue));
                     const revenueTotals = getRevenueProgressTotals(uiListSummary);
                     grandTC = revenueTotals.paidCount + revenueTotals.tdCount;
                     grandTU = revenueTotals.paidAmount + revenueTotals.tdAmount;
@@ -10251,7 +10300,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const revenueFilterLabel = activeViewLevel === "DC" ? `${revenueHqLabel()} Filter: ${revenueHqAllLabel()}` : (activeViewLevel === "DIVISION" ? "DC Filter: All DC" : "Division/DC Filter: All");
                 const showPaid = progressStaffTypeFilter !== "TD";
                 const showTd = progressStaffTypeFilter !== "PAID";
-                const typeLabel = progressStaffTypeFilter === "PAID" ? "Paid by Staff" : (progressStaffTypeFilter === "TD" ? "TD by Staff" : "Paid + TD Both");
+                const typeLabel = scProgressStaffTdLabel_();
                 const revenueReportTitle = `${levelT} ${reportType} PROGRESS REPORT`;
                 const revenueGeneratedAt = `${getCurrentDateDDMMYYYY()} ${getCurrentTimeHHMM()}`;
                 const csvSafe = (value) => {
@@ -10289,7 +10338,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     csv += revenueGrandTotalValues().map(csvSafe).join(",");
                     const link = document.createElement("a");
                     link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-                    link.download = `Revenue_Report_${levelT}_${reportType}${progressStaffTypeFilter ? "_" + progressStaffTypeFilter : ""}.csv`;
+                    link.download = `Revenue_Report_${levelT}_${reportType}${progressStaffTypeFilter ? "_" + progressStaffTypeFilter : ""}${progressStaffTdStatus ? "_" + progressStaffTdStatus : ""}.csv`;
                     link.click();
                 } else {
                     const { jsPDF } = window.jspdf;
@@ -10316,7 +10365,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                             }
                         }
                     });
-                savePdfDocumentForDevice(doc, `Revenue_Report_${levelT}_${reportType}${progressStaffTypeFilter ? "_" + progressStaffTypeFilter : ""}.pdf`);
+                savePdfDocumentForDevice(doc, `Revenue_Report_${levelT}_${reportType}${progressStaffTypeFilter ? "_" + progressStaffTypeFilter : ""}${progressStaffTdStatus ? "_" + progressStaffTdStatus : ""}.pdf`);
                 }
                 downloadCompleted = true;
                 setTimeout(() => setProgressSummaryDownloadState(false, `${downloadTypeLabel} downloaded`), 500);
