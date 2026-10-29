@@ -26877,6 +26877,22 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return String(v).trim();
         }
         // File padho: header kisi bhi row (pehli 30 me) par ho, columns aage-peeche ho sakte hain (naam se); 12 column zaroori.
+        // UPDATE 127 (2026-10-29, USER REQUEST): galat data (jaise HQ NAME me HQ ki jagah EZ0220... jaisa consumer/service number) upload se PEHLE warning.
+        // Upload rokta nahi, sirf saaf dikhata hai + upload par extra confirm.
+        function scDivMasterBadRows_(rows) {
+            const hqIdx = SC_DIVMASTER_COLS_.findIndex((c) => c.name === "HQ NAME");
+            const bad = [];
+            (rows || []).forEach((r) => {
+                const hq = String(r[hqIdx] ?? "").trim();
+                if (hq && /\d{6,}/.test(hq)) bad.push({ iv: String(r[0] ?? ""), village: String(r[SC_DIVMASTER_COLS_.findIndex((c) => c.name === "VILLAGE")] ?? ""), hq });
+            });
+            return bad;
+        }
+        function scDivMasterBadHtml_(bad) {
+            if (!bad || !bad.length) return "";
+            const list = bad.slice(0, 12).map((b) => `<div>${escapeHtml(b.iv)} | ${escapeHtml(b.village || "-")} | HQ NAME = ${escapeHtml(b.hq)}</div>`).join("");
+            return `<div style="margin-top:8px; background:#fff1f2; border:1.5px solid #fda4af; border-radius:12px; padding:8px; font-size:0.62rem; font-weight:900; color:#991b1b; line-height:1.45;">WARNING: ${bad.length} rows have a number/code in HQ NAME instead of an HQ name. In reports each such code will show as a separate HQ. Please correct the file before uploading.<div style="margin-top:4px; font-weight:850;">${list}${bad.length > 12 ? `<div>... and ${bad.length - 12} more</div>` : ""}</div></div>`;
+        }
         function scDivMasterReadFile_(buffer) {
             const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
             let best = null;
@@ -27005,7 +27021,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     p.prefixes = Array.from(new Set(p.rows.map((r) => String(r[0]).slice(0, 4))));
                     p.before = (() => { try { return getRevenueMasterRowsForDc(p.dc).length; } catch (_) { return 0; } })();
                 });
-                scDivMasterCtx_ = { division, key, plan, unassigned, fileName: file.name, wrongDivision, invalidCount, dupCount, total: parsed.rows.length };
+                scDivMasterCtx_ = { division, key, plan, unassigned, fileName: file.name, wrongDivision, invalidCount, dupCount, total: parsed.rows.length, badHq: scDivMasterBadRows_(parsed.rows) };
                 renderDivMasterPlan_();
                 const withRows = plan.filter((p) => p.rows.length).length;
                 if (!parsed.rows.length) {
@@ -27013,7 +27029,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 } else if (!withRows) {
                     setDivMasterStatus_("No row could be matched to any DC of this Division. Please check that this is the correct Division file.", false);
                 } else {
-                    setDivMasterStatus_(`File checked: ${parsed.rows.length} rows, ${withRows} DC will be replaced. Please check the table, then press UPLOAD.`, true);
+                    const badN_ = (scDivMasterCtx_.badHq || []).length;
+                    setDivMasterStatus_(badN_ ? `File checked: ${parsed.rows.length} rows. WARNING: ${badN_} rows have wrong HQ NAME (see below). Correct the file first, or upload only if you accept this.` : `File checked: ${parsed.rows.length} rows, ${withRows} DC will be replaced. Please check the table, then press UPLOAD.`, !badN_);
                     if (upBtn) upBtn.style.display = "block";
                 }
             } catch (error) {
@@ -27042,7 +27059,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const un = ctx.unassigned.length;
             const notes = [
                 un ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:6px;">${un} rows could not be assigned to a DC${ctx.wrongDivision ? ` (${ctx.wrongDivision} belong to another Division)` : ""}${ctx.invalidCount ? ` (${ctx.invalidCount} with invalid IVRS)` : ""} - they will be saved in the UNASSIGNED tab, not in any DC.</div>` : "",
-                ctx.dupCount ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:4px;">${ctx.dupCount} duplicate IVRS rows found in the file.</div>` : ""
+                ctx.dupCount ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:4px;">${ctx.dupCount} duplicate IVRS rows found in the file.</div>` : "",
+                scDivMasterBadHtml_(ctx.badHq)
             ].join("");
             setDivMasterPreview_(`<div style="font-size:0.66rem; font-weight:950; color:#312e81; margin-bottom:6px;">${escapeHtml(ctx.fileName)} - ${ctx.total} rows</div>${head}${rows}${notes}`);
         }
@@ -27121,7 +27139,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (!divisionMasterPassword_) { showToast("Please enter the password again", false); initDivisionMasterUpload(); return; }
             const todo = ctx.plan.filter((p) => p.rows.length);
             if (!todo.length) return showToast("Nothing to upload", false);
-            if (!window.confirm(`Replace the master of ${todo.length} DC of ${ctx.division} with this file?\n\nThe old data of each DC is kept in its BK- tab.`)) return;
+            const badWarn_ = (ctx.badHq || []).length ? `\n\nWARNING: ${ctx.badHq.length} rows have a number/code in HQ NAME instead of an HQ name.` : "";
+            if (!window.confirm(`Replace the master of ${todo.length} DC of ${ctx.division} with this file?\n\nThe old data of each DC is kept in its BK- tab.${badWarn_}`)) return;
             divisionMasterBusy_ = true;
             const btn = document.getElementById("divmaster-upload-btn");
             const checkBtn = document.getElementById("divmaster-check-btn");
@@ -27209,7 +27228,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const notes = [
                 ctx.unassigned ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:6px;">${ctx.unassigned} rows could not be assigned to a DC of this Division (IVRS prefix not known${ctx.wrongDivision ? `; ${ctx.wrongDivision} belong to another Division` : ""}) - they will NOT be added.</div>` : "",
                 ctx.invalid ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:4px;">${ctx.invalid} rows with invalid IVRS (not 10 digits) - will NOT be added.</div>` : "",
-                ctx.dup ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:4px;">${ctx.dup} duplicate IVRS rows inside the file - only one is used.</div>` : ""
+                ctx.dup ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:4px;">${ctx.dup} duplicate IVRS rows inside the file - only one is used.</div>` : "",
+                scDivMasterBadHtml_(ctx.badHq)
             ].join("");
             setDivAddPreview_(`<div style="font-size:0.66rem; font-weight:950; color:#14532d; margin-bottom:6px;">${escapeHtml(ctx.fileName)} - ${ctx.total} rows</div>${head}${rows || `<div style="font-size:0.62rem; font-weight:850; color:#64748b; padding:6px 0;">No new consumer found in this file.</div>`}${notes}`);
         }
@@ -27286,14 +27306,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     planByDc[dc].rows.push(row);
                 });
                 plan.forEach((p) => { p.prefixes = Array.from(new Set(p.rows.map((r) => String(r[0]).slice(0, 4)))); });
-                scDivAddCtx_ = { division, key, plan, fileName: file.name, total: parsed.rows.length, invalid, dup, unassigned, wrongDivision };
+                scDivAddCtx_ = { division, key, plan, fileName: file.name, total: parsed.rows.length, invalid, dup, unassigned, wrongDivision, badHq: scDivMasterBadRows_(plan.flatMap((p) => p.rows)) };
                 renderDivAddPlan_();
                 const addable = plan.filter((p) => p.rows.length && !p.blocked);
                 const totalNew = addable.reduce((sum, p) => sum + p.rows.length, 0);
                 if (!parsed.rows.length) setDivAddStatus_("The file has no data rows.", false);
                 else if (!totalNew) setDivAddStatus_("No new consumer found. All consumers of this file are already in the Division Master (or could not be assigned).", false);
                 else {
-                    setDivAddStatus_(`File checked: ${totalNew} new consumers for ${addable.length} DC. Old data is not changed. Press ADD to continue.`, true);
+                    const badA_ = (scDivAddCtx_.badHq || []).length;
+                    setDivAddStatus_(badA_ ? `File checked: ${totalNew} new consumers. WARNING: ${badA_} of them have wrong HQ NAME (see below). Correct the file first, or add only if you accept this.` : `File checked: ${totalNew} new consumers for ${addable.length} DC. Old data is not changed. Press ADD to continue.`, !badA_);
                     if (upBtn) upBtn.style.display = "block";
                 }
             } catch (error) {
@@ -27337,7 +27358,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const todo = ctx.plan.filter((p) => p.rows.length && !p.blocked);
             if (!todo.length) return showToast("Nothing to add", false);
             const totalNew = todo.reduce((sum, p) => sum + p.rows.length, 0);
-            if (!window.confirm(`Add ${totalNew} new consumers to ${todo.length} DC of ${ctx.division}?\n\nExisting consumers are not changed.`)) return;
+            const badWarnA_ = (ctx.badHq || []).length ? `\n\nWARNING: ${ctx.badHq.length} rows have a number/code in HQ NAME instead of an HQ name.` : "";
+            if (!window.confirm(`Add ${totalNew} new consumers to ${todo.length} DC of ${ctx.division}?\n\nExisting consumers are not changed.${badWarnA_}`)) return;
             divisionMasterBusy_ = true;
             const btn = document.getElementById("divmaster-add-upload-btn");
             const checkBtn = document.getElementById("divmaster-add-check-btn");
@@ -27384,6 +27406,52 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             } finally {
                 divisionMasterBusy_ = false;
                 renderDivAddPlan_();
+            }
+        }
+
+        // UPDATE 128 (2026-10-29): HQ CHECK - har DC ke HQ naam + consumer count; number/code wale ya bahut kam consumer wale HQ laal (spelling galti ka shak).
+        async function checkDivisionHq() {
+            const box = document.getElementById("divmaster-hq-result");
+            const btn = document.getElementById("divmaster-hq-check-btn");
+            if (!box) return;
+            if (divisionMasterBusy_) return showToast("Please wait, work in progress", false);
+            const key = scDivMasterKey_();
+            const division = key ? "DIVISION " + key : "";
+            const dcs = getDivisionDcNames(division).map(normalizeDcName);
+            if (!dcs.length) return showToast("Please select the Division first", false);
+            divisionMasterBusy_ = true;
+            if (btn) { btn.disabled = true; btn.textContent = "CHECKING... PLEASE WAIT"; }
+            box.innerHTML = `<div style="font-size:0.7rem; font-weight:900; color:#475569;">Reading DC masters...</div>`;
+            try {
+                await scDivMasterRefresh_().catch(() => false);
+                await ensureRevenueCategoryMasterDataLoaded(dcs);
+                let html = "";
+                let suspectTotal = 0;
+                dcs.forEach((dc) => {
+                    let rows = [];
+                    try { rows = getRevenueMasterRowsForDc(dc); } catch (_) {}
+                    const map = new Map();
+                    rows.forEach((r) => {
+                        const hq = String(r.hqName ?? r["HQ NAME"] ?? "").trim().toUpperCase() || "(BLANK)";
+                        const e = map.get(hq) || { n: 0, iv: "" };
+                        e.n++; if (!e.iv) e.iv = r.ivrsNo || "";
+                        map.set(hq, e);
+                    });
+                    const list = Array.from(map.entries()).sort((a, b) => b[1].n - a[1].n);
+                    const suspect = list.filter(([hq, e]) => hq === "(BLANK)" || /\d{6,}/.test(hq) || e.n <= 5);
+                    suspectTotal += suspect.length;
+                    const chips = list.map(([hq, e]) => {
+                        const bad = suspect.some((x) => x[0] === hq);
+                        return `<span style="display:inline-block; margin:2px 3px 2px 0; padding:2px 7px; border-radius:10px; font-size:0.58rem; font-weight:900; background:${bad ? "#fee2e2" : "#e0f2fe"}; color:${bad ? "#991b1b" : "#075985"}; border:1px solid ${bad ? "#fca5a5" : "#bae6fd"};">${escapeHtml(hq)} (${e.n})${bad && e.iv ? ` - e.g. ${escapeHtml(e.iv)}` : ""}</span>`;
+                    }).join("");
+                    html += `<div style="padding:6px 0; border-bottom:1px solid #fed7aa;"><div style="font-size:0.66rem; font-weight:950; color:#7c2d12;">${escapeHtml(dc)} - ${rows.length} consumers, ${list.length} HQ${suspect.length ? ` - <span style="color:#b91c1c;">${suspect.length} to check</span>` : ` - <span style="color:#15803d;">OK</span>`}</div><div style="margin-top:3px;">${rows.length ? chips : `<span style="font-size:0.6rem; color:#64748b;">No master data</span>`}</div></div>`;
+                });
+                box.innerHTML = `<div style="font-size:0.7rem; font-weight:950; color:${suspectTotal ? "#b91c1c" : "#15803d"}; margin-bottom:6px;">${suspectTotal ? `${suspectTotal} HQ names need checking (red).` : "All HQ names look fine."} Red = number/code, blank, or 5 or fewer consumers.</div>${html}`;
+            } catch (error) {
+                box.innerHTML = `<div style="font-size:0.7rem; font-weight:900; color:#b91c1c;">${escapeHtml(error?.message || "Could not check")}</div>`;
+            } finally {
+                divisionMasterBusy_ = false;
+                if (btn) { btn.disabled = false; btn.textContent = "CHECK HQ NAMES"; }
             }
         }
 
