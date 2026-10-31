@@ -330,6 +330,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         let revenuePendingPaidIvrsSet = new Set();
         let revenuePendingPaidRefreshToken = 0;
         let revenuePendingPaidDataIncomplete = false;
+        let revenuePendingPaidAmtMap = new Map(); // UPDATE 135: IVRS -> is mahine ka countable Cash List paid amount (part payment ka balance nikalne ke liye)
         // Deep-diagnostic counters (user ne SEONI (T) me galat Pending count report
         // kiya, timeout badhane ke baad bhi theek nahi hua - isliye ab yahan asli
         // numbers (kitne uploaded-paid fetch hue, kitne live-paid fetch hue, kitne
@@ -24877,6 +24878,43 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             });
         }
 
+        // UPDATE 135 (2026-10-31, USER REQUEST): Pending DO List me jinhone sirf PART payment kiya hai (Cash List payment < Net Bill)
+        // woh bhi dikhen, bacha hua (balance) amount ke saath. Poora jama karne wala pehle jaisa list se hat jaata hai.
+        // Revenue Message Center ki list (getRevenuePendingFilteredRows) jaan-boojh kar nahi badli.
+        function scPendingBalanceOf_(row) {
+            const ivrsNo = normalizeRevenueIvrs(row.ivrsNo);
+            const net = getRevenuePendingNetBillAmount(row);
+            const paid = Number(revenuePendingPaidAmtMap.get(ivrsNo) || 0);
+            return { net, paid, balance: Math.max(0, net - paid), part: paid > 0 && net - paid > 1 };
+        }
+        function getRevenuePendingFilteredRowsWithPart_() {
+            const hqValue = document.getElementById("revenue-pending-hq")?.value || "";
+            const villageValue = document.getElementById("revenue-pending-village")?.value || "";
+            const categoryValue = document.getElementById("revenue-pending-category")?.value || "";
+            const slabValue = document.getElementById("revenue-pending-arrears-slab")?.value || "";
+            const govtValue = document.getElementById("revenue-pending-govt")?.value || "";
+            const ivrsSearch = normalizeRevenueIvrs(document.getElementById("revenue-pending-ivrs-search")?.value || "");
+            const out = [];
+            revenuePendingBaseRows.forEach((row) => {
+                const ivrsNo = normalizeRevenueIvrs(row.ivrsNo);
+                if (!ivrsNo || !(getRevenuePendingNetBillAmount(row) > 0)) return;
+                if (ivrsSearch && !ivrsNo.includes(ivrsSearch)) return;
+                if (hqValue && normalizeLookupValue(row.hqName) !== normalizeLookupValue(hqValue)) return;
+                if (villageValue && normalizeLookupValue(row.village) !== normalizeLookupValue(villageValue)) return;
+                if (categoryValue && normalizeLookupValue(row.tariffCategory) !== normalizeLookupValue(categoryValue)) return;
+                if (!isRevenuePendingNetBillInSlab(row, slabValue)) return;
+                if (govtValue && (govtValue === "GOVT" ? !row.govtFlag : !!row.govtFlag)) return;
+                const b = scPendingBalanceOf_(row);
+                if (isRevenuePendingIvrsPaid(ivrsNo) && !b.part) return; // poora jama - list se hatao
+                out.push({ ...row, _paidAmt: b.paid, _balance: b.balance, _part: b.part });
+            });
+            return out.sort((a, b) => {
+                const nameCompare = String(a.consumerName || "").trim().localeCompare(String(b.consumerName || "").trim(), "en", { sensitivity: "base", numeric: true });
+                if (nameCompare !== 0) return nameCompare;
+                return normalizeRevenueIvrs(a.ivrsNo).localeCompare(normalizeRevenueIvrs(b.ivrsNo), "en", { numeric: true });
+            });
+        }
+
         function isRevenuePendingIvrsPaid(ivrsNo) {
             const normalizedIvrs = normalizeRevenueIvrs(ivrsNo);
             if (!normalizedIvrs) return true;
@@ -24895,7 +24933,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const ivrsSearch = normalizeRevenueIvrs(document.getElementById("revenue-pending-ivrs-search")?.value || "");
             if (!statusBox || !listBox) return;
 
-            const allFilteredRows_ = getRevenuePendingFilteredRows();
+            const allFilteredRows_ = revenueMessageSelectionMode ? getRevenuePendingFilteredRows() : getRevenuePendingFilteredRowsWithPart_(); // UPDATE 135
             if (revenueMessageSelectionMode) {
                 renderRevenueMessagePendingSelection(allFilteredRows_, statusBox, listBox);
                 return;
@@ -24919,7 +24957,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // poora hai lekin fir bhi Pending zyada hai to IVRS format/matching me
             // dikkat hai.
             const diagLine = `<div style="font-size:0.66rem; color:#64748b; margin-top:4px;">Diagnostic - Canonical Master: ${revenuePendingDiag.masterRows} | Cash List Paid (current month): ${revenuePendingDiag.uploadedFetched} | Paid-by-Staff: not used</div>`;
-            statusBox.innerHTML = `${incompleteWarning}Pending Consumer: <strong>${rows.length}</strong> | HQ: ${escapeHtml(hqValue || "ALL")} | Village: ${escapeHtml(villageValue || "ALL")} | Category: ${escapeHtml(categoryValue || "ALL")} | Net Bill Slab: ${escapeHtml(slabValue || "ALL")} | Type: ${escapeHtml(govtLabel)} | TD Filter: ${escapeHtml(tdLabel_)} | IVRS: ${escapeHtml(ivrsSearch || "ALL")}<div style="font-size:0.72rem; font-weight:950; color:#dc2626; margin-top:4px;">Line TD done (in this list): ${tdDoneCount_} | Pending (No Action): ${rows.length - tdDoneCount_}</div>${diagLine}`;
+            statusBox.innerHTML = `${incompleteWarning}Pending Consumer: <strong>${rows.length}</strong>${rows.some((r) => r._part) ? ` (incl. ${rows.filter((r) => r._part).length} part-paid, balance amount pending)` : ""} | HQ: ${escapeHtml(hqValue || "ALL")} | Village: ${escapeHtml(villageValue || "ALL")} | Category: ${escapeHtml(categoryValue || "ALL")} | Net Bill Slab: ${escapeHtml(slabValue || "ALL")} | Type: ${escapeHtml(govtLabel)} | TD Filter: ${escapeHtml(tdLabel_)} | IVRS: ${escapeHtml(ivrsSearch || "ALL")}<div style="font-size:0.72rem; font-weight:950; color:#dc2626; margin-top:4px;">Line TD done (in this list): ${tdDoneCount_} | Pending (No Action): ${rows.length - tdDoneCount_}</div>${diagLine}`;
             listBox.innerHTML = rows.length ? `
                 <div style="display:flex; gap:10px; width:100%; margin:0 auto;">
                     <button id="revenue-pending-pdf-btn" onclick="downloadRevenuePendingList('PDF')" style="flex:1; height:44px; border:none; border-radius:14px; background:#ef4444; color:#ffffff; font-size:0.78rem; font-weight:950;">PDF</button>
@@ -24933,7 +24971,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         function getRevenuePendingExportHeaders() {
-            return ["S.NO", "IVRS NO", "CONSUMER NAME", "FATHER NAME", revenueVillageLabelUpper(), revenueHqLabelUpper(), "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO", "ARREARS", "NET BILL", "TD DATE / TIME"];
+            return ["S.NO", "IVRS NO", "CONSUMER NAME", "FATHER NAME", revenueVillageLabelUpper(), revenueHqLabelUpper(), "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO", "ARREARS", "NET BILL", "PAID (CASH LIST)", "BALANCE AMOUNT", "TD DATE / TIME"];
         }
 
         function getRevenuePendingExportRows(rows) {
@@ -24949,6 +24987,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 row.mobileNo || "",
                 row.arrears || "",
                 row.netBill || "",
+                row._part ? Math.round(row._paidAmt) : "",
+                row._part ? Math.round(row._balance) : (row.netBill || ""),
                 getRevenuePendingTdText_(tdMap_.get(normalizeRevenueIvrs(row.ivrsNo)))
             ]);
         }
@@ -24970,7 +25010,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
         function downloadRevenuePendingList(type) {
             if (revenuePendingDownloadInProgress) return showToast("Download in progress, please wait", false);
-            const rows = applyRevenuePendingTdFilter_(getRevenuePendingFilteredRows()); // USER REQUEST (2026-09-24): TD filter bhi
+            const rows = applyRevenuePendingTdFilter_(getRevenuePendingFilteredRowsWithPart_()); // USER REQUEST (2026-09-24): TD filter bhi; UPDATE 135: part-paid bhi
             if (!rows.length) return showToast("No data in the pending list", false);
             const headers = getRevenuePendingExportHeaders();
             const exportRows = getRevenuePendingExportRows(rows);
@@ -25046,6 +25086,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // authoritative here; Paid-by-Staff and local all-time cache are excluded.
         async function getRevenuePendingCashListPaidIvrsSet_() {
             const paidSet = new Set();
+            const paidAmtMap_ = new Map(); // UPDATE 135
             const dcName = normalizeDcName(activeDC || "");
             const currentMonth = getTodayIsoDate().slice(0, 7);
             const reconciliation = await ensureRevenueCategoryReconciliationLoaded("MONTHLY", currentMonth);
@@ -25059,8 +25100,12 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const ivrsNo = key.slice(separator + 1);
                 // Partial ho ya full: HQ/Village monthly report ki tarah ek
                 // valid positive Cash List payment consumer ko PAID banati hai.
-                if (rowDc === dcName && ivrsNo && scCountableReconAmount_(rowDc, ivrsNo, info) > 0) paidSet.add(ivrsNo); // PAID DATE RULE
+                if (rowDc === dcName && ivrsNo) {
+                    const cAmt_ = scCountableReconAmount_(rowDc, ivrsNo, info); // PAID DATE RULE
+                    if (cAmt_ > 0) { paidSet.add(ivrsNo); paidAmtMap_.set(ivrsNo, cAmt_); }
+                }
             });
+            revenuePendingPaidAmtMap = paidAmtMap_;
             revenuePendingDiag.liveTotal = 0;
             revenuePendingDiag.liveDcMatched = 0;
             revenuePendingDiag.uploadedFetched = paidSet.size;
