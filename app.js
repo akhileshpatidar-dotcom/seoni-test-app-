@@ -109,6 +109,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         let omvigSelDate = ""; // UPDATE 138: Daily report date (YYYY-MM-DD), "" = yesterday (default)
         let omvigDailyDateCache_ = null; // Daily report for a picked date
         let omvigKnownStartIso_ = ""; // Report Start Date (for month/date pickers)
+        let omvigHistoryFrom_ = ""; // UPDATE 139: Full History start (YYYY-MM-DD); "" = no history uploaded
+        let omvigPendingAllCache_ = {}; // UPDATE 139: history-mode pending rows per DC
         let omvigAdminStatus = null;  // { freeze_date, pending_count }
         let omvigFreezeStatusCache_ = null; // fast { freeze_date, pending_count } - see fetchOmvigFreezeStatus_
         // USER REQUEST (2026-09-14): Division/Circle level par drill-down dropdown
@@ -14607,7 +14609,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         // NEW FLOW (2026-11-01): Pending for Payment List (Power BI) padhta hai - Disposed status wali rows chhod deta hai.
-        async function readOmvigBilledFile(file) {
+        async function readOmvigBilledFile(file, opts = {}) {
             if (!file) return { rows: [], skippedDisposed: 0 };
             if (!window.XLSX) throw new Error("Excel reader could not be loaded. Please check internet and refresh.");
             const buffer = await file.arrayBuffer();
@@ -14626,7 +14628,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 pay: idx(["payment", "Payment amount", "Payment Received"]), status: idx(["Case_Status"])
             };
             if (c.pn < 0 || c.dc < 0 || c.billed < 0 || c.pay < 0) throw new Error("Pending list format does not match (Panchanama_No / DC / Billed_amount / payment column not found)");
-            if (c.status < 0) throw new Error("Case_Status column not found - please download the Pending for Payment list with Case_Status column");
+            if (c.status < 0 && !opts.history) throw new Error("Case_Status column not found - please download the Pending for Payment list with Case_Status column");
             const txt = (row, i) => (i > -1 ? (row[i] instanceof Date ? formatOmvigCellDate_(row[i]) : String(row[i] ?? "").trim()) : "");
             const rows = []; let skippedDisposed = 0;
             for (let r = 1; r < all.length; r++) {
@@ -14677,7 +14679,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         🟢 New cases added: <b>${parsed.added}</b><br>🔄 Existing cases updated: <b>${parsed.updated}</b><br>📤 Earlier cases not in this list (they stay; shown Paid when payment comes): <b>${parsed.not_in_latest}</b><br>📋 Active cases (balance pending at report start): <b>${parsed.active}</b><br>📅 Report start date: <b>${escapeHtml(parsed.freeze_date || "")}</b>
                     </div>
                     <div style="margin-top:8px; font-size:0.62rem; font-weight:700; color:#64748b; text-align:center;">Now upload the Payment Details List (Step 2).</div>`;
-                omvigPendingCache_ = {}; omvigPaidCache_ = {}; omvigReportCache_ = null; omvigFreezeStatusCache_ = null; omvigDailyReportCache_ = null;
+                omvigPendingCache_ = {}; omvigPendingAllCache_ = {}; omvigDailyDateCache_ = null; omvigPaidCache_ = {}; omvigReportCache_ = null; omvigFreezeStatusCache_ = null; omvigDailyReportCache_ = null;
                 if (fileInput) fileInput.value = "";
                 const nameBox = document.getElementById("omvig-billed-file-name");
                 if (nameBox) nameBox.innerText = "";
@@ -14688,6 +14690,60 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 say(`Upload fail: ${escapeHtml(error?.message || "")}`, "#b91c1c");
             } finally {
                 setTimeout(() => setActionButtonState(uploadBtn, "idle", "Upload Pending List"), 900);
+            }
+        }
+
+        function handleOmvigHistFileSelect(event) {
+            const file = event?.target?.files?.[0];
+            const nameBox = document.getElementById("omvig-hist-file-name");
+            if (nameBox) nameBox.innerText = file ? file.name : "";
+        }
+
+        // UPDATE 139: ONE-TIME Full History List (all old cases) - month/date reports of past months use it.
+        async function uploadOmvigHistoryList() {
+            const fileInput = document.getElementById("omvig-hist-file-input");
+            const uploadBtn = document.getElementById("omvig-hist-upload-btn");
+            const statusBox = document.getElementById("omvig-hist-upload-status");
+            const fromInput = document.getElementById("omvig-hist-from");
+            const file = fileInput?.files?.[0] || null;
+            if (!file) return showToast("Please select the Full History List file first", false);
+            const histFrom = String(fromInput?.value || "").trim();
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(histFrom)) return showToast("Please select the History Start Date", false);
+            setActionButtonState(uploadBtn, "processing", "Upload Full History");
+            const say = (html, color) => { if (statusBox) { statusBox.style.display = "block"; statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:${color};">${html}</div>`; } };
+            say("Reading file...", "#1d4ed8");
+            try {
+                const { rows } = await readOmvigBilledFile(file, { history: true });
+                if (!rows.length) throw new Error("No valid row found in the file");
+                say(`Uploading ${rows.length} cases... this can take 1-3 minutes, please wait`, "#1d4ed8");
+                const body = { action: "uploadFullHistory", admin_password: omvigAdminPasswordEntered, rows: rows.map((r) => r.slice(0, 13)), history_from: histFrom };
+                const response = await fetchWithTimeout(omvigSubmitScriptUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) }, 420000);
+                const text = await response.text();
+                let parsed = {};
+                try { parsed = JSON.parse(text || "{}"); } catch (_) {}
+                if (parsed.status !== "success") throw new Error(parsed.message || "Upload failed");
+                setActionButtonState(uploadBtn, "done", "Upload Full History");
+                showToast("Full history uploaded", true);
+                if (statusBox) statusBox.innerHTML = `
+                    <div style="text-align:center; padding:10px 12px; background:#f0fdf4; border:1.2px solid #86efac; border-radius:12px;">
+                        <div style="font-size:0.85rem; font-weight:950; color:#166534;">✅ Full History Uploaded</div>
+                        <div style="font-size:0.68rem; font-weight:700; color:#475569; margin-top:4px;">${parsed.total_in_file} cases in the file</div>
+                    </div>
+                    <div style="margin-top:8px; padding:9px 11px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#334155; line-height:1.6;">
+                        🟢 Old cases added: <b>${parsed.added}</b><br>🔁 Already in the system: <b>${parsed.already}</b><br>📅 History starts from: <b>${escapeHtml(parsed.history_from || histFrom)}</b><br>📋 Live active cases (unchanged): <b>${parsed.active}</b>
+                    </div>
+                    <div style="margin-top:8px; font-size:0.62rem; font-weight:700; color:#64748b; text-align:center;">Now upload the Payment Details List (Step 2) once again, so old payments are matched.</div>`;
+                omvigPendingCache_ = {}; omvigPendingAllCache_ = {}; omvigPaidCache_ = {}; omvigReportCache_ = null; omvigFreezeStatusCache_ = null; omvigDailyReportCache_ = null; omvigDailyDateCache_ = null;
+                if (fileInput) fileInput.value = "";
+                const nameBox = document.getElementById("omvig-hist-file-name");
+                if (nameBox) nameBox.innerText = "";
+                try { const fresh = await fetchOmvigFreezeStatus_(true); omvigAdminStatus = omvigStatusFrom_(fresh); renderOmvigAdminStatus(); } catch (_) {}
+            } catch (error) {
+                setActionButtonState(uploadBtn, "failed", "Upload Full History");
+                showToast(error?.message || "History upload failed", false);
+                say(`Upload fail: ${escapeHtml(error?.message || "")}`, "#b91c1c");
+            } finally {
+                setTimeout(() => setActionButtonState(uploadBtn, "idle", "Upload Full History"), 900);
             }
         }
 
@@ -14803,7 +14859,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         <div style="margin-top:8px; font-size:0.7rem; font-weight:850; color:#334155; text-align:center;">DC tabs updated:<br><span style="font-weight:700;">${(parsed.dc_tabs_updated || []).join(", ") || "-"}</span></div>
                     `;
                 }
-                omvigPendingCache_ = {}; omvigPaidCache_ = {}; omvigReportCache_ = null; omvigFreezeStatusCache_ = null; omvigDailyReportCache_ = null;
+                omvigPendingCache_ = {}; omvigPendingAllCache_ = {}; omvigDailyDateCache_ = null; omvigPaidCache_ = {}; omvigReportCache_ = null; omvigFreezeStatusCache_ = null; omvigDailyReportCache_ = null;
                 if (fileInput) fileInput.value = "";
                 const nameBox = document.getElementById("omvig-paid-file-name");
                 if (nameBox) nameBox.innerText = "";
@@ -14838,7 +14894,12 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 consumer_no: String(row[8] || "").trim(),
                 tariff_name: String(row[9] || "").trim(),
                 case_name: String(row[10] || "").trim(),
-                balanced_amount: cleanOmvigAmount_(row[11])
+                balanced_amount: cleanOmvigAmount_(row[11]),
+                // UPDATE 139: history-mode rows carry billed/rebate/status/first_seen (index 12..15)
+                hist: row.length > 12,
+                billed_amount: row.length > 12 ? cleanOmvigAmount_(row[12]) : 0,
+                court_rebate: row.length > 12 ? cleanOmvigAmount_(row[13]) : 0,
+                first_seen: row.length > 12 ? String(row[15] || "").trim().slice(0, 10) : ""
             };
         }
 
@@ -14952,14 +15013,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // panel kabhi khola hi nahi gaya.
             if (!freezeDate) {
                 freezeDate = await autoFreezeOmvigBaseline_();
-                if (freezeDate) { omvigPendingCache_ = {}; omvigReportCache_ = null; }
+                if (freezeDate) { omvigPendingCache_ = {}; omvigPendingAllCache_ = {}; omvigReportCache_ = null; }
             }
             // USER REQUEST (2026-09-15): "last upload kab hua" admin panel par
             // dikhana hai - backend isi fast endpoint se de deta hai, extra
             // call nahi lagti.
             const lastUploadAt = data?.last_upload_at || "";
             const lastUploadSummary = data?.last_upload_summary || "";
-            omvigFreezeStatusCache_ = { freeze_date: freezeDate, pending_count: pendingCount, last_upload_at: lastUploadAt, last_upload_summary: lastUploadSummary, last_billed_upload_at: data?.last_billed_upload_at || "", last_billed_upload_summary: data?.last_billed_upload_summary || "", payment_mismatch_cases: Number(data?.payment_mismatch_cases) || 0 };
+            omvigFreezeStatusCache_ = { freeze_date: freezeDate, pending_count: pendingCount, last_upload_at: lastUploadAt, last_upload_summary: lastUploadSummary, last_billed_upload_at: data?.last_billed_upload_at || "", last_billed_upload_summary: data?.last_billed_upload_summary || "", payment_mismatch_cases: Number(data?.payment_mismatch_cases) || 0, history_from: data?.history_from || "", last_history_upload_at: data?.last_history_upload_at || "", last_history_upload_summary: data?.last_history_upload_summary || "" };
+            omvigHistoryFrom_ = omvigFreezeStatusCache_.history_from;
             return omvigFreezeStatusCache_;
         }
 
@@ -15044,6 +15106,31 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 omvigPendingCache_[dcName] = { rows: dcMap[normalizeDcName(dcName)] || [], freeze_date: freezeDate };
             });
             return { rows, freeze_date: freezeDate };
+        }
+
+        // UPDATE 139: history-mode pending rows (includes cases already settled after history start)
+        async function fetchOmvigPendingAll_(dcNames) {
+            const names = Array.from(new Set((dcNames || []).map((n) => String(n || "").trim()).filter(Boolean)));
+            const missing = names.filter((n) => !omvigPendingAllCache_[n]);
+            const BATCH = 8;
+            for (let i = 0; i < missing.length; i += BATCH) {
+                const batch = missing.slice(i, i + BATCH);
+                const url = `${omvigSubmitScriptUrl}?action=getPendingSummary&dc_names=${encodeURIComponent(batch.join(","))}&all=1&t=${Date.now()}`;
+                const data = await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, 90000)));
+                if (data?.status === "error") throw new Error(data.message || "O&M/VIG history data load fail");
+                if (!data?.hist_mode) throw new Error("History data is not available (upload the Full History List / update backend)");
+                const dcMap = {};
+                batch.forEach((n) => { dcMap[normalizeDcName(n)] = []; });
+                (Array.isArray(data?.data) ? data.data : []).map(normalizeOmvigPendingRow_).forEach((row) => {
+                    const k = normalizeDcName(row.dc_name);
+                    if (dcMap[k]) dcMap[k].push(row);
+                });
+                batch.forEach((n) => { omvigPendingAllCache_[n] = { rows: dcMap[normalizeDcName(n)] || [], freeze_date: data?.freeze_date || "" }; });
+            }
+            const rows = [];
+            let fz = "";
+            names.forEach((n) => { const c = omvigPendingAllCache_[n]; if (c) { rows.push(...c.rows); if (!fz) fz = c.freeze_date; } });
+            return { rows, freeze_date: fz };
         }
 
         async function fetchOmvigPendingForDcs_(dcNames) {
@@ -15151,7 +15238,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // pehle "yyyy-mm-dd" me badal kar compare karte hain.
         function scOmIsoDate_(v) {
             const s = String(v == null ? "" : v).trim();
-            let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+            let m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
             if (m) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
             m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})/);
             if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
@@ -15410,24 +15497,32 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return { startIso: s0, endIso: e0, monthKey };
         }
 
-        function computeOmvigReportRows_(pendingRows, paidByPanchanama, freezeDate, monthKey = "") {
+        function computeOmvigReportRows_(pendingRows, paidByPanchanama, freezeDate, monthKey = "", histFrom = "") {
             const freezeIso = scOmIsoDate_(freezeDate);
-            const win = omvigMonthWindow_(freezeDate, monthKey);
+            const win = omvigMonthWindow_(histFrom || freezeDate, monthKey);
             const out = [];
             pendingRows.forEach((r) => {
                 const paidList = paidByPanchanama[r.panchanama_no] || [];
                 let paidAmountNow = 0, paidDateNow = "", paidIsoNow = "", paidBefore = 0;
+                const histRow = !!(win && histFrom && r.hist);
+                if (histRow && r.first_seen && r.first_seen > win.endIso) return; // case appeared after this month
+                if (histRow) { const inspIso = scOmIsoDate_(r.inspection_date); if (inspIso && inspIso > win.endIso) return; } // inspected after this month
                 paidList.forEach((p) => {
                     const payDateKey = scOmIsoDate_(p.pay_date);
+                    if (histRow) { // history mode: every payment counts; before month start reduces the opening balance
+                        if (!payDateKey || payDateKey < win.startIso) { paidBefore += p.amount; return; }
+                        if (payDateKey > win.endIso) return;
+                    } else {
                     if (!(freezeIso && payDateKey && payDateKey >= freezeIso)) return;
                     if (win) {
                         if (payDateKey < win.startIso) { paidBefore += p.amount; return; }
                         if (payDateKey > win.endIso) return;
                     }
+                    }
                     paidAmountNow += p.amount;
                     if (!paidIsoNow || payDateKey > paidIsoNow) { paidIsoNow = payDateKey; paidDateNow = scOmDmy_(payDateKey); }
                 });
-                const balancedAmount = win ? (r.balanced_amount - paidBefore) : r.balanced_amount;
+                const balancedAmount = histRow ? Math.round((r.billed_amount - r.court_rebate - paidBefore) * 100) / 100 : (win ? (r.balanced_amount - paidBefore) : r.balanced_amount);
                 if (win && balancedAmount <= 0.5) return; // already settled before this month
                 const remainingPending = Math.max(0, balancedAmount - paidAmountNow);
                 const isPaidNow = paidAmountNow > 0 && remainingPending <= 0;
@@ -15450,10 +15545,12 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const scopeKey = `${baseKey}|${monthKey}`;
             if (!forceRefresh && omvigReportCache_ && omvigReportCache_.scopeKey === scopeKey) return omvigReportCache_;
             // UPDATE 138: same scope, different month -> reuse downloaded raw data, only recompute.
-            if (!forceRefresh && omvigReportCache_ && omvigReportCache_.baseKey === baseKey && omvigReportCache_.raw) {
+            const wantAll = !!monthKey && !!omvigHistoryFrom_ && monthKey >= omvigHistoryFrom_.slice(0, 7);
+            if (!forceRefresh && omvigReportCache_ && omvigReportCache_.baseKey === baseKey && omvigReportCache_.raw && !!omvigReportCache_.raw.hist === wantAll) {
                 const rw = omvigReportCache_.raw;
-                const rowsM = computeOmvigReportRows_(rw.pendingRows, rw.paidMap, rw.freeze_date, monthKey);
-                const winM = omvigMonthWindow_(rw.freeze_date, monthKey);
+                const hfM = wantAll ? omvigHistoryFrom_ : "";
+                const rowsM = computeOmvigReportRows_(rw.pendingRows, rw.paidMap, rw.freeze_date, monthKey, hfM);
+                const winM = omvigMonthWindow_(hfM || rw.freeze_date, monthKey);
                 omvigReportCache_ = { scopeKey, baseKey, raw: rw, rowsWithStatus: rowsM, freeze_date: winM ? winM.startIso : rw.freeze_date, reportStart: rw.freeze_date, monthKey: winM ? monthKey : "", winEnd: winM ? winM.endIso : "", lastUploadAt: rw.lastUploadAt, lastUploadSummary: rw.lastUploadSummary };
                 return omvigReportCache_;
             }
@@ -15468,6 +15565,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             }
             const lastUploadAt = freezeStatus.last_upload_at || "";
             const lastUploadSummary = freezeStatus.last_upload_summary || "";
+            const useAll = !!monthKey && !!omvigHistoryFrom_ && monthKey >= omvigHistoryFrom_.slice(0, 7); // UPDATE 139
 
             const dcParam = activeViewLevel === "DC" ? activeDC : "";
             // BUG FIX (2026-09-14): pehle Division level bhi POORI Circle
@@ -15475,7 +15573,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // ab seedha sirf USI Division ki DC list chunked-fetch hoti hai
             // (kam call = kam data = fast, aur echo-404 ka risk bhi kam).
             let pending;
-            if (activeViewLevel === "DC") {
+            if (useAll) {
+                pending = await fetchOmvigPendingAll_(activeViewLevel === "DC" ? [activeDC] : (activeViewLevel === "DIVISION" ? getDivisionDcNames(activeDiv) : getAllOmvigDcNames_()));
+            } else if (activeViewLevel === "DC") {
                 pending = await fetchOmvigPendingSingleDc_(activeDC);
             } else if (activeViewLevel === "DIVISION") {
                 pending = await fetchOmvigPendingForDcs_(getDivisionDcNames(activeDiv));
@@ -15486,10 +15586,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
             const pendingRows = pending.rows;
             const paidMap = groupOmvigPaidByPanchanama_(paid);
-            const rowsWithStatus = computeOmvigReportRows_(pendingRows, paidMap, pending.freeze_date, monthKey);
-            const winN = omvigMonthWindow_(pending.freeze_date, monthKey);
+            const hfN = useAll ? omvigHistoryFrom_ : "";
+            const rowsWithStatus = computeOmvigReportRows_(pendingRows, paidMap, pending.freeze_date, monthKey, hfN);
+            const winN = omvigMonthWindow_(hfN || pending.freeze_date, monthKey);
 
-            omvigReportCache_ = { scopeKey, baseKey, raw: { pendingRows, paidMap, freeze_date: pending.freeze_date, lastUploadAt, lastUploadSummary }, rowsWithStatus, freeze_date: winN ? winN.startIso : pending.freeze_date, reportStart: pending.freeze_date, monthKey: winN ? monthKey : "", winEnd: winN ? winN.endIso : "", lastUploadAt, lastUploadSummary };
+            omvigReportCache_ = { scopeKey, baseKey, raw: { hist: useAll, pendingRows, paidMap, freeze_date: pending.freeze_date, lastUploadAt, lastUploadSummary }, rowsWithStatus, freeze_date: winN ? winN.startIso : pending.freeze_date, reportStart: pending.freeze_date, monthKey: winN ? monthKey : "", winEnd: winN ? winN.endIso : "", lastUploadAt, lastUploadSummary };
             return omvigReportCache_;
         }
 
@@ -15498,15 +15599,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const totalCount = rowsWithStatus.length;
             const paidCount = rowsWithStatus.filter((r) => r.isPaidNow).length;
             const partPaidCount = rowsWithStatus.filter((r) => !r.isPaidNow && r.paidAmountNow > 0).length;
-            const pendingCount = totalCount - paidCount;
+            const pendingCount = rowsWithStatus.filter((r) => omvigIsInPendingBucket_(r)).length;
             const scLimO_ = scListLimit_(Infinity); // STATUS PACK 3a: screen par pehle 50, poori list download me
             const rowsHtml = rowsWithStatus.slice(0, scLimO_).map((r) => {
-                const statusLabel = r.isPaidNow ? `PAID${r.paidDateNow ? ` (${r.paidDateNow})` : ""}` : (r.paidAmountNow > 0 ? `PENDING - PART PAID${r.paidDateNow ? ` (${r.paidDateNow})` : ""}` : "PENDING");
+                const statusLabel = r.isPaidNow ? `PAID${r.paidDateNow ? ` (${r.paidDateNow})` : ""}` : (r.paidAmountNow > 0 ? `PART PAID${r.paidDateNow ? ` (${r.paidDateNow})` : ""}` : "PENDING");
                 const statusColor = r.isPaidNow ? "#166534" : (r.paidAmountNow > 0 ? "#dc2626" : "#1e293b");
                 return `<div class="summary-table-row" style="grid-template-columns: 2fr 1.3fr 1fr; text-align:left;">
                     <div>${escapeHtml(r.consumer_name)}<br><span style="font-size:0.58rem; color:#64748b;">${escapeHtml(r.panchanama_no)} | ${escapeHtml(r.case_name)}</span></div>
                     <div style="font-weight:900; color:${statusColor};">${statusLabel}</div>
-                    <div class="font-black">${formatProgressReportAmount(r.isPaidNow ? r.balanced_amount : r.remainingPending)}</div>
+                    <div class="font-black">${formatProgressReportAmount(omvigFilterStatus === "PENDING" ? r.remainingPending : r.paidAmountNow)}</div>
                 </div>`;
             }).join("");
             return `
@@ -15518,18 +15619,22 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // Sirf poori balanced amount cover hone par case Paid hoga; part payment
         // ki bachi hui rashi Pending amount me shamil rahegi.
         function filterOmvigRowsByStatus_(rows, status) {
-            if (status === "PAID") return rows.filter((r) => r.isPaidNow);
-            if (status === "PENDING") return rows.filter((r) => !r.isPaidNow);
+            // UPDATE 140: PART PAID bhi Paid me (jitna aaya), bacha hua Pending me - Power BI se match.
+            if (status === "PAID") return rows.filter((r) => Number(r.paidAmountNow || 0) > 0);
+            if (status === "PENDING") return rows.filter((r) => Number(r.remainingPending || 0) > 0.5);
             return rows;
         }
 
         // DC/Division/Circle summaries me bhi wahi rule: fully settled = Paid,
         // aur Part Paid = Pending (remaining balance ke saath).
         function omvigIsInPaidBucket_(r) {
-            return !!r.isPaidNow;
+            return Number(r.paidAmountNow || 0) > 0;
         }
         function omvigPaidBucketAmount_(r) {
-            return Number(r.pending_amount || 0);
+            return Number(r.paidAmountNow || 0);
+        }
+        function omvigIsInPendingBucket_(r) {
+            return Number(r.remainingPending || 0) > 0.5;
         }
 
         // DC level ke liye ek hi row ka summary (Freeze NP ke DC-wise summary
@@ -15539,7 +15644,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             rowsWithStatus.forEach((r) => {
                 g.totalCount += 1;
                 if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
-                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
             });
             return g;
         }
@@ -15552,7 +15657,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function buildOmvigStatusSummaryRow_(filteredRows, dcName, status) {
             const g = { name: dcName || "-", totalCount: filteredRows.length, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 };
             filteredRows.forEach((r) => {
-                if (status === "PAID") { g.paidCount += 1; g.paidAmount += Number(r.isPaidNow ? r.pending_amount : r.paidAmountNow) || 0; }
+                if (status === "PAID") { g.paidCount += 1; g.paidAmount += Number(r.paidAmountNow) || 0; }
                 else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
             });
             return g;
@@ -15571,7 +15676,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const g = map[key];
                 g.totalCount += 1;
                 if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
-                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
             });
             return getDivisionDcNames(divisionName).map((dcName) => map[normalizeDcName(dcName)] || emptyGroup(normalizeDcName(dcName)));
         }
@@ -15601,7 +15706,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const g = map[key];
                 g.totalCount += 1;
                 if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
-                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
             });
 
             const rows = [];
@@ -15826,7 +15931,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const lastUploadLine = data.lastUploadAt
                 ? `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:2px;">🕒 Latest Paid Upload: ${escapeHtml(formatIndianDateTimeDisplay_(data.lastUploadAt))}${data.lastUploadSummary ? `<br><span style="font-weight:700; color:#64748b;">${escapeHtml(data.lastUploadSummary)}</span>` : ""}</div>`
                 : "";
-            const freezeLine = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:4px;">${data.monthKey ? `Month: ${escapeHtml(omvigMonthLabel_(data.monthKey))} (${escapeHtml(scOmDmy_(data.freeze_date))} to ${escapeHtml(scOmDmy_(data.winEnd))})<br><span style="font-weight:700; color:#64748b;">Pending = balance on ${escapeHtml(scOmDmy_(data.freeze_date))}. Paid = payments inside this month.</span>` : `Report Start Date: ${escapeHtml(data.freeze_date)}`}</div>${lastUploadLine}`;
+            const freezeLine = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:4px;">${data.monthKey ? `Month: ${escapeHtml(omvigMonthLabel_(data.monthKey))} (${escapeHtml(scOmDmy_(data.freeze_date))} to ${escapeHtml(scOmDmy_(data.winEnd))})<br><span style="font-weight:700; color:#64748b;">Total/Pending = balance on ${escapeHtml(scOmDmy_(data.freeze_date))}. Paid = payments inside this month.</span>` : `Report Start Date: ${escapeHtml(data.freeze_date)}`}</div>${lastUploadLine}`;
             let bodyHtml;
             const slabRows = omvigApplySlab_(data.rowsWithStatus);
             if (activeViewLevel === "DC") {
@@ -15865,7 +15970,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, "0")}-${String(yd.getDate()).padStart(2, "0")}`;
         }
         function renderOmvigPickerHtml_() {
-            const startIso = omvigKnownStartIso_ || "";
+            const startIso = omvigHistoryFrom_ || omvigKnownStartIso_ || "";
             const inpStyle = "flex:1; height:36px; border-radius:10px; border:2px solid #0d9488; font-size:0.72rem; font-weight:800; color:#0f172a; background:#fff; padding:0 8px;";
             if (omvigReportMode === "DAILY") {
                 const todayIso = getTodayIsoDate();
@@ -15876,7 +15981,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     <button type="button" onclick="setOmvigSelDate('')" style="height:36px; padding:0 10px; border-radius:10px; border:2px solid #0d9488; background:${omvigSelDate ? "#fff" : "#0d9488"}; color:${omvigSelDate ? "#0d9488" : "#fff"}; font-size:0.66rem; font-weight:900;">YESTERDAY</button>
                 </div>`;
             }
-            let opts = `<option value="">Since Report Start Date${startIso ? ` (${escapeHtml(scOmDmy_(startIso))})` : ""}</option>`;
+            let opts = `<option value="">Since Report Start Date${omvigKnownStartIso_ ? ` (${escapeHtml(scOmDmy_(omvigKnownStartIso_))})` : ""}</option>`;
             if (startIso) {
                 const nowIso = getTodayIsoDate();
                 let y = Number(startIso.slice(0, 4)), m = Number(startIso.slice(5, 7));
@@ -15920,8 +16025,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
         function setOmvigSelDate(v) {
             let d = /^\d{4}-\d{2}-\d{2}$/.test(v || "") ? v : "";
-            if (d && (d > getTodayIsoDate() || (omvigKnownStartIso_ && d < omvigKnownStartIso_))) {
-                showToast("Date must be between Report Start Date and today", false);
+            if (d && (d > getTodayIsoDate() || ((omvigHistoryFrom_ || omvigKnownStartIso_) && d < (omvigHistoryFrom_ || omvigKnownStartIso_)))) {
+                showToast("Date must be between the history start date and today", false);
                 d = "";
             }
             if (d === omvigYesterdayIso_()) d = ""; // same as default view
@@ -15962,7 +16067,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     if (myToken !== omvigProgressToken) { progress.stop(); return; }
                     const omYd = scOmIsoDate_(data.date);
                     scOmNewCtx_ = scOmNewCtxMake_(data.newCases, data.freezeIso, omYd, omYd);
-                    if (data.freezeIso) { omvigKnownStartIso_ = data.freezeIso; toggleHtml = renderOmvigModeToggleHtml_(); }
+                    if (data.freezeIso) omvigKnownStartIso_ = data.freezeIso; toggleHtml = renderOmvigModeToggleHtml_();
                     const html = toggleHtml + renderOmvigDailyReportHtml_(data);
                     await progress.finish();
                     if (myToken !== omvigProgressToken) return;
@@ -15995,7 +16100,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const omNewD = pOmNew ? await pOmNew : null;
                 if (myToken !== omvigProgressToken) { progress.stop(); return; }
                 const omFzIso = scOmIsoDate_(data.freeze_date);
-                if (data.reportStart) { omvigKnownStartIso_ = scOmIsoDate_(data.reportStart); toggleHtml = renderOmvigModeToggleHtml_(); }
+                if (data.reportStart) omvigKnownStartIso_ = scOmIsoDate_(data.reportStart); toggleHtml = renderOmvigModeToggleHtml_();
                 scOmNewCtx_ = omNewD ? scOmNewCtxMake_(omNewD.newCases, omFzIso, omFzIso, getTodayIsoDate()) : null;
                 const omNewHtml = "";
                 if (!data.freeze_date) {

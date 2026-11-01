@@ -310,6 +310,20 @@
                 <div id="omvig-paid-file-name" style="font-size:0.62rem; font-weight:800; color:#1d4ed8; text-align:center; margin-top:10px;"></div>
                 <button id="omvig-paid-upload-btn" class="dashboard-btn" style="width:100%; max-width:360px; margin-top:12px; background:#000; color:#fff !important;" onclick="uploadOmvigPaidList()">UPLOAD PAYMENT LIST</button>
                 <div id="omvig-paid-upload-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
+
+                <div style="font-size:0.68rem; font-weight:900; color:#0f172a; text-align:center; margin-top:26px;">ONE-TIME - FULL HISTORY LIST (OLD CASES)</div>
+                <div style="width:100%; max-width:360px; margin:6px auto 0; font-size:0.6rem; font-weight:700; color:#475569; text-align:center; line-height:1.5;">Upload the full Power BI list (all cases, paid and pending) only once, so past months and dates show correct Total / Paid / Pending. It does not change today's live Pending.</div>
+                <label style="display:block; width:100%; max-width:360px; margin:10px auto 0; border:2px dashed #94a3b8; border-radius:16px; padding:18px; text-align:center; cursor:pointer; background:#f8fafc;">
+                    <span style="font-size:0.72rem; font-weight:900; color:#0f172a;">Click to select Full History List Excel file</span>
+                    <input type="file" id="omvig-hist-file-input" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleOmvigHistFileSelect(event)">
+                </label>
+                <div id="omvig-hist-file-name" style="font-size:0.62rem; font-weight:800; color:#1d4ed8; text-align:center; margin-top:10px;"></div>
+                <div style="width:100%; max-width:360px; margin:10px auto 0; text-align:center;">
+                    <div style="font-size:0.6rem; font-weight:800; color:#475569; margin-bottom:4px;">History Start Date (first month you want to see; 2020-01-01 shows all months from 2020)</div>
+                    <input type="date" id="omvig-hist-from" value="2020-01-01" style="width:100%; height:38px; border:1.5px solid #94a3b8; border-radius:10px; padding:0 10px; font-size:0.74rem; font-weight:800;">
+                </div>
+                <button id="omvig-hist-upload-btn" class="dashboard-btn" style="width:100%; max-width:360px; margin-top:12px; background:#000; color:#fff !important;" onclick="uploadOmvigHistoryList()">UPLOAD FULL HISTORY</button>
+                <div id="omvig-hist-upload-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
             </div>
         </main>
 
