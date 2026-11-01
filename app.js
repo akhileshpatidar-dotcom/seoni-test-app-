@@ -5813,7 +5813,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // "PAID"/"PENDING" hi rehta hai, Freeze Tracking Report ke maujooda 3
         // call (jo naye param bilkul nahi bhejte) me output bilkul waisa hi
         // rahega, koi badlav nahi.
-        function renderFreezeGroupSummaryTableHtml(nameColLabel, summaryRows, titleText, paidColLabel, pendingColLabel, newCaseCol, noDuesCol, partCol) {
+        function renderFreezeGroupSummaryTableHtml(nameColLabel, summaryRows, titleText, paidColLabel, pendingColLabel, newCaseCol, noDuesCol, partCol, omLayout) {
             paidColLabel = paidColLabel || "PAID";
             pendingColLabel = pendingColLabel || "PENDING";
             const headCellStyle = "padding:6px 4px; font-size:0.56rem; font-weight:900; text-transform:uppercase; background:#0891b2; color:#fff; text-align:center;";
@@ -5832,9 +5832,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     <td style="${bodyCellStyle} ${fw} color:${totalColor};">${noDuesCol ? (Number(r.totalCount || 0) + Number(r.noDuesCount || 0)) : r.totalCount}</td>${noDuesCol ? `
                     <td style="${bodyCellStyle} ${fw} color:#475569;">${Number(r.noDuesCount || 0)}</td>` : ""}
                     <td style="${bodyCellStyle} ${fw} color:#166534;">${r.paidCount}</td>
-                    <td style="${bodyCellStyle} ${fw} color:#166534;">${formatRevenueLakhValue(r.paidAmount)}</td>
+                    <td style="${bodyCellStyle} ${fw} color:#166534;">${formatRevenueLakhValue(r.paidAmount)}</td>${(omLayout && partCol) ? `
+                    <td style="${bodyCellStyle} ${fw} color:#b45309;">${Number(r.partCount || 0)}</td>
+                    <td style="${bodyCellStyle} ${fw} color:#b45309;">${formatRevenueLakhValue(Number(r.partAmount || 0))}</td>` : ""}
                     <td style="${bodyCellStyle} ${fw} color:#9f1239;">${r.pendingCount}</td>
-                    <td style="${bodyCellStyle} ${fw} color:#9f1239;">${formatRevenueLakhValue(r.pendingAmount)}</td>${partCol ? `
+                    <td style="${bodyCellStyle} ${fw} color:#9f1239;">${formatRevenueLakhValue(r.pendingAmount)}</td>${(partCol && !omLayout) ? `
                     <td style="${bodyCellStyle} ${fw} color:#b45309;">${Number(r.partCount || 0)}</td>` : ""}${newCaseCol ? `
                     <td style="${bodyCellStyle} ${fw} color:#c2410c; background:#fff7ed;">${r.newCnt == null ? "-" : r.newCnt}</td>
                     <td style="${bodyCellStyle} ${fw} color:#c2410c; background:#fff7ed;">${r.newAmt == null ? "-" : formatRevenueLakhValue(r.newAmt)}</td>` : ""}
@@ -5843,20 +5845,23 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return `
                 <div style="font-size:0.62rem; font-weight:900; color:#9f1239; text-align:center; margin-top:10px;">${escapeHtml(titleText)}</div>
                 <div style="overflow-x:auto; margin-top:6px; border-radius:10px; border:1px solid #e2e8f0;">
-                    <table style="width:100%; border-collapse:collapse; min-width:${newCaseCol ? 600 : (noDuesCol ? 580 : (partCol ? 540 : 480))}px;">
+                    <table style="width:100%; border-collapse:collapse; min-width:${newCaseCol ? 600 : (noDuesCol ? 580 : (omLayout && partCol ? 620 : (partCol ? 540 : 480)))}px;">
                         <thead>
                             <tr>
                                 <th rowspan="2" style="${headCellStyle}">${escapeHtml(nameColLabel)}</th>
                                 <th rowspan="2" style="${headCellStyle}">TOTAL<br>CONSUMER</th>${noDuesCol ? `
                                 <th rowspan="2" style="${headCellStyle}">NO<br>DUES</th>` : ""}
-                                <th colspan="2" style="${headCellStyle}">${escapeHtml(paidColLabel)}</th>
-                                <th colspan="2" style="${headCellStyle}">${escapeHtml(pendingColLabel)}</th>${partCol ? `
+                                <th colspan="2" style="${headCellStyle}">${escapeHtml(paidColLabel)}</th>${(omLayout && partCol) ? `
+                                <th colspan="2" style="${headCellStyle} background:#b45309;">PART PAID</th>` : ""}
+                                <th colspan="2" style="${headCellStyle}">${escapeHtml(pendingColLabel)}</th>${(partCol && !omLayout) ? `
                                 <th rowspan="2" style="${headCellStyle}">PART<br>PAID</th>` : ""}${newCaseCol ? `
                                 <th colspan="2" style="${headCellStyle} background:#ea580c;">NEW CASE</th>` : ""}
                             </tr>
                             <tr>
                                 <th style="${headCellStyle}">COUNT</th>
-                                <th style="${headCellStyle}">AMT (LAKH)</th>
+                                <th style="${headCellStyle}">AMT (LAKH)</th>${(omLayout && partCol) ? `
+                                <th style="${headCellStyle} background:#b45309;">COUNT</th>
+                                <th style="${headCellStyle} background:#b45309;">AMT (LAKH)</th>` : ""}
                                 <th style="${headCellStyle}">COUNT</th>
                                 <th style="${headCellStyle}">AMT (LAKH)</th>${newCaseCol ? `
                                 <th style="${headCellStyle} background:#ea580c;">COUNT</th>
@@ -11576,7 +11581,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const pMobDay = mobAgg("DAILY", todayIso);
                 const pMobMonth = mobAgg("MONTHLY", ym);
                 const pOmDay = fetchOmvigDailyReport_(!!forceLive).catch(() => null);
-                const pOmMonth = loadOmvigReportData_(!!forceLive, true).catch(() => null);
+                const pOmMonth = loadOmvigReportData_(!!forceLive, todayIso.slice(0, 7)).catch(() => null); // UPDATE 146: current calendar month, same logic as report
                 const pMaster = (async () => { const out = {}; await runWithConcurrencyLimit_(dcs.slice(), 6, async (dc) => { out[normalizeDcName(dc)] = await scBriefMasterState_(dc, !!forceLive); }); return out; })();
                 const pPaid = (async () => {
                     const meta = await scPubPaidMeta_();
@@ -11709,29 +11714,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // Pending hamesha freeze se cumulative (report jaisa).
                 const omFreezeIso = scOmIsoDate_(omMonth && omMonth.freeze_date);
                 const omFromIso = omFreezeIso && omFreezeIso > `${todayIso.slice(0, 7)}-01` ? omFreezeIso : `${todayIso.slice(0, 7)}-01`;
-                const omMonthByPn = {};
-                if (omMonthOk) {
-                    try {
-                        const omPaidRows = await fetchOmvigPaid_(activeViewLevel === "DC" ? activeDC : "");
-                        omPaidRows.forEach((p) => {
-                            const d = scOmIsoDate_(p.pay_date);
-                            if (!d || !p.panchanama_no || (omFreezeIso && d < omFreezeIso) || d > todayIso) return;
-                            const o = omMonthByPn[p.panchanama_no] || (omMonthByPn[p.panchanama_no] = { before: 0, inWin: 0 });
-                            if (d >= omFromIso) o.inWin += Number(p.amount) || 0; else o.before += Number(p.amount) || 0;
-                        });
-                    } catch (_) {}
-                    if (isStale()) return;
-                }
                 if (omMonthOk) Object.keys(per).forEach((k) => {
                     const dcRows = omMonth.rowsWithStatus.filter((r) => normalizeDcName(r.dc_name || r.dc || "") === k);
                     const g = buildOmvigSingleDcSummaryRow_(dcRows, per[k].dc);
-                    let mc = 0, ma = 0;
-                    dcRows.forEach((r) => {
-                        const o = omMonthByPn[r.panchanama_no];
-                        if (!o || !(o.inWin > 0)) return;
-                        mc += 1; ma += Math.min(o.inWin, Math.max(0, Number(r.balanced_amount || 0) - o.before));
-                    });
-                    per[k].omMCnt = mc; per[k].omMAmt = ma; per[k].omPendCnt = g.pendingCount; per[k].omPendAmt = g.pendingAmount;
+                    // UPDATE 146: Paid = jin cases me is mahine payment aayi (part paid bhi), Pending = bacha hua (part paid ka remainder bhi)
+                    per[k].omMCnt = g.paidCount; per[k].omMAmt = g.paidAmount; per[k].omPendCnt = g.pendingCount; per[k].omPendAmt = g.pendingAmount;
                 });
                 Object.keys(per).forEach((k) => {
                     const p = paid.out[k] || {};
@@ -11840,13 +11827,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     dataAt: scRevenueLiveFromPublicAt_ ? scRevenueLiveFromPublicAt_ : Date.now(),
                     fromPublic: !!scRevenueLiveFromPublicAt_,
                     revOk, mobOk: !!mobDay, mobMOk: !!mobMonth, omOk: !!(omDay && omDay.dcSummaryMap), omMOk: omMonthOk,
-                    omDate: (omDay && omDay.date) || "", omNew: (() => { // OM NEW CASES - freeze ginti se alag
-                        if (!omDay || isDcLevel) return null;
-                        const dk = activeViewLevel === "DIVISION" ? scOmNewDivKey_(activeDiv) : "";
-                        const ydI = scOmIsoDate_(omDay.date);
-                        return { d: scOmNewCasesSummary_(omDay.newCases, omFreezeIso, ydI, ydI, dk), m: scOmNewCasesSummary_(omDay.newCases, omFreezeIso, omFromIso, todayIso, dk) };
-                    })(),
-                    omFreeze: scOmDmy_(omFreezeIso), omMLabel: omFromIso > `${todayIso.slice(0, 7)}-01` ? `From ${scOmDmy_(omFromIso).slice(0, 5)}` : "This Month", paidOk: paid.metaOk || !!coll, collOk: !!coll,
+                    omDate: (omDay && omDay.date) || "", omNew: null, // UPDATE 146: NEW CASE logic hata di
+                    omFreeze: "", omMLabel: "This Month", paidOk: paid.metaOk || !!coll, collOk: !!coll,
                     totals, divRows, subRows, subTitle, subHead, per: all,
                     dataStatus: all.map((p) => ({ dc: p.dc, cashDate: scBriefDateOf_(p.cashTs), cashDays: p.cashDays, cashToday: p.cashToday, master: p.master })),
                     lagging: lagging.slice(0, maxLag), laggingTotal: lagging.length,
@@ -14625,7 +14607,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 name: idx(["Consumer_Name", "Person Name"]), ez: idx(["EZ_no", "EZ Number"]), cno: idx(["Consumer_No"]),
                 insp: idx(["inspection_date", "Inspection Date"]), tariff: idx(["Tariff_Name"]), caseName: idx(["Case_Name"]),
                 billed: idx(["Billed_amount", "Billed Amount"]), rebate: idx(["Court_Rebate", "court_rebate"]),
-                pay: idx(["payment", "Payment amount", "Payment Received"]), status: idx(["Case_Status"])
+                pay: idx(["payment", "Payment amount", "Payment Received"]), status: idx(["Case_Status"]), statusDt: idx(["Case_Status_Dt"])
             };
             if (c.pn < 0 || c.dc < 0 || c.billed < 0 || c.pay < 0) throw new Error("Pending list format does not match (Panchanama_No / DC / Billed_amount / payment column not found)");
             if (c.status < 0 && !opts.history) throw new Error("Case_Status column not found - please download the Pending for Payment list with Case_Status column");
@@ -14637,7 +14619,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (!pn) continue;
                 const status = txt(row, c.status);
                 if (/^disposed/i.test(status)) skippedDisposed++; // backend: naya Disposed case nahi jodta, purane ko band kar deta hai
-                rows.push([txt(row, c.circle), txt(row, c.division), txt(row, c.dc), pn, txt(row, c.name), txt(row, c.ez), txt(row, c.cno), txt(row, c.insp), txt(row, c.tariff), txt(row, c.caseName), cleanOmvigAmount_(row[c.billed]), c.rebate > -1 ? cleanOmvigAmount_(row[c.rebate]) : 0, cleanOmvigAmount_(row[c.pay]), status]);
+                rows.push([txt(row, c.circle), txt(row, c.division), txt(row, c.dc), pn, txt(row, c.name), txt(row, c.ez), txt(row, c.cno), txt(row, c.insp), txt(row, c.tariff), txt(row, c.caseName), cleanOmvigAmount_(row[c.billed]), c.rebate > -1 ? cleanOmvigAmount_(row[c.rebate]) : 0, cleanOmvigAmount_(row[c.pay]), status, (/^disposed/i.test(status) ? txt(row, c.statusDt) : "")]);
             }
             return { rows, skippedDisposed };
         }
@@ -14899,7 +14881,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 hist: row.length > 12,
                 billed_amount: row.length > 12 ? cleanOmvigAmount_(row[12]) : 0,
                 court_rebate: row.length > 12 ? cleanOmvigAmount_(row[13]) : 0,
-                first_seen: row.length > 12 ? String(row[15] || "").trim().slice(0, 10) : ""
+                first_seen: row.length > 12 ? String(row[15] || "").trim().slice(0, 10) : "",
+                case_status: row.length > 12 ? String(row[14] || "").trim() : "",
+                disposed_date: row.length > 16 ? String(row[16] || "").trim().slice(0, 10) : ""
             };
         }
 
@@ -15040,7 +15024,33 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // saath (parallel), fetch + client-side merge karte hain. Koi bhi
         // ek DC ka response ab kabhi bhi itna bada nahi hoga ki echo layer
         // usse serve na kar paaye.
+        // UPDATE 142: O&M/VIG data IndexedDB me save (version = upload timestamps). App dobara kholne par
+        // data seedha device se aata hai; koi bhi upload hone par version badalta hai aur naya data aata hai.
+        function omvigDataVer_() {
+            const f = omvigFreezeStatusCache_;
+            if (!f) return "";
+            return [f.freeze_date, f.pending_count, f.last_upload_at, f.last_billed_upload_at, f.history_from, f.last_history_upload_at].join("|");
+        }
+        async function omvigIdbGet_(kind, key) {
+            const ver = omvigDataVer_();
+            if (!ver) return null;
+            try { const rec = await scCacheGet_(`omvig-${kind}|${key}`); return rec && rec.ver === ver ? rec.data : null; } catch (_) { return null; }
+        }
+        function omvigIdbSet_(kind, key, data) {
+            const ver = omvigDataVer_();
+            if (!ver || !data) return;
+            try { scCacheSet_(`omvig-${kind}|${key}`, { ver, data, at: Date.now() }).catch(() => {}); } catch (_) {}
+        }
+
         async function fetchOmvigPendingSingleDc_(dcName) {
+            if (omvigPendingCache_[dcName]) return omvigPendingCache_[dcName];
+            const hit = await omvigIdbGet_("pliv", dcName);
+            if (hit) { omvigPendingCache_[dcName] = hit; return hit; }
+            const res = await fetchOmvigPendingSingleDcNet_(dcName);
+            omvigIdbSet_("pliv", dcName, res);
+            return res;
+        }
+        async function fetchOmvigPendingSingleDcNet_(dcName) {
             const key = dcName;
             if (omvigPendingCache_[key]) return omvigPendingCache_[key];
             try { // SPEED 29/09: DC ke liye bhi public PENDING_ALL copy (backend dc-filter jaisa), pehle 14s Apps Script
@@ -15111,6 +15121,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // UPDATE 139: history-mode pending rows (includes cases already settled after history start)
         async function fetchOmvigPendingAll_(dcNames) {
             const names = Array.from(new Set((dcNames || []).map((n) => String(n || "").trim()).filter(Boolean)));
+            for (const n of names) {
+                if (omvigPendingAllCache_[n]) continue;
+                const hit = await omvigIdbGet_("pall", n);
+                if (hit) omvigPendingAllCache_[n] = hit;
+            }
             const missing = names.filter((n) => !omvigPendingAllCache_[n]);
             const BATCH = 8;
             for (let i = 0; i < missing.length; i += BATCH) {
@@ -15125,7 +15140,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     const k = normalizeDcName(row.dc_name);
                     if (dcMap[k]) dcMap[k].push(row);
                 });
-                batch.forEach((n) => { omvigPendingAllCache_[n] = { rows: dcMap[normalizeDcName(n)] || [], freeze_date: data?.freeze_date || "" }; });
+                batch.forEach((n) => { omvigPendingAllCache_[n] = { rows: dcMap[normalizeDcName(n)] || [], freeze_date: data?.freeze_date || "" }; omvigIdbSet_("pall", n, omvigPendingAllCache_[n]); });
             }
             const rows = [];
             let fz = "";
@@ -15134,6 +15149,17 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         async function fetchOmvigPendingForDcs_(dcNames) {
+            const idbHits = {};
+            for (const n of (dcNames || [])) {
+                if (omvigPendingCache_[n]) continue;
+                const hit = await omvigIdbGet_("pliv", n);
+                if (hit) { omvigPendingCache_[n] = hit; idbHits[n] = true; }
+            }
+            const out = await fetchOmvigPendingForDcsNet_(dcNames);
+            (dcNames || []).forEach((n) => { if (!idbHits[n] && omvigPendingCache_[n]) omvigIdbSet_("pliv", n, omvigPendingCache_[n]); });
+            return out;
+        }
+        async function fetchOmvigPendingForDcsNet_(dcNames) {
             const BATCH = 6;
             // PUBLIC CACHE 2026-09-26: sabhi DC ki pending list public copy se (backend ke dc-filter jaisa hi)
             try {
@@ -15194,6 +15220,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         async function fetchOmvigPaid_(dc) {
+            const key = dc || "ALL";
+            if (omvigPaidCache_[key]) return omvigPaidCache_[key];
+            const hit = await omvigIdbGet_("paid", key);
+            if (hit) { omvigPaidCache_[key] = hit; return hit; }
+            const res = await fetchOmvigPaidNet_(dc);
+            omvigIdbSet_("paid", key, res);
+            return res;
+        }
+        async function fetchOmvigPaidNet_(dc) {
             const key = dc || "ALL";
             if (omvigPaidCache_[key]) return omvigPaidCache_[key];
             const url = `${omvigSubmitScriptUrl}?action=getPaidSummary${dc ? `&dc=${encodeURIComponent(dc)}` : ""}&t=${Date.now()}`;
@@ -15326,7 +15361,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (!Array.isArray(newCases) || omvigFilterStatus === "PENDING" || scOmSlabOn_() || scOmNewCasesScopeDiv_() === null) return null;
             return { newCases, freezeIso: freezeIso || "", from: fromIso || "", to: toIso || "" };
         }
-        function scOmNewOn_() { return !!scOmNewCtx_ && scOmNewCasesScopeDiv_() !== null && omvigFilterStatus !== "PENDING" && !scOmSlabOn_(); }
+        function scOmNewOn_() { return false; /* UPDATE 146: NEW CASE logic hata di */ !!scOmNewCtx_ && scOmNewCasesScopeDiv_() !== null && omvigFilterStatus !== "PENDING" && !scOmSlabOn_(); }
         function scOmSlabOn_() { return !!omvigFilterSlab; } // slab me NEW CASE (freeze amount nahi) shamil nahi
         function scOmNewFor_(divKey) {
             const c = scOmNewCtx_;
@@ -15342,18 +15377,19 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 return { ...r, newCnt: null, newAmt: null };
             });
         }
+        function scOmHasPart_(rows) { return (rows || []).some((r) => !r.type && r.partCount != null); }
         function scOmSummaryTableHtml_(nameColLabel, rows, titleText, paidColLabel, pendingColLabel) {
-            const on = scOmNewOn_();
-            const html = renderFreezeGroupSummaryTableHtml(nameColLabel, on ? scOmAttachNewCases_(rows) : rows, titleText, paidColLabel, pendingColLabel, on);
-            return on ? html + `<div style="font-size:0.56rem; font-weight:700; color:#9a3412; text-align:center; margin-top:4px;">NEW CASE = a case found in the paid list that is not in the freeze list (separate from the freeze count). The paid list has no DC, so the figure is shown only in the Division/Total row.</div>` : html;
+            // UPDATE 146: TOTAL | PAID | PART PAID | PENDING (NEW CASE hata diya)
+            const hasPart = scOmHasPart_(rows);
+            const html = renderFreezeGroupSummaryTableHtml(nameColLabel, rows, titleText, paidColLabel, pendingColLabel, false, false, hasPart, true);
+            return html + (hasPart ? `<div style="font-size:0.56rem; font-weight:700; color:#64748b; text-align:center; margin-top:4px;">PAID includes part-paid cases (amount received). PENDING includes the balance of part-paid cases.</div>` : "");
         }
-        function scOmSumHead_(on) {
+        function scOmSumHead_(on, rows) {
             const pl = omvigReportMode === "DAILY" ? omvigDailyPaidLbl_() : "PAID (FREEZE)";
-            return ["DC NAME", "TOTAL", `${pl} COUNT`, `${pl} AMT`, "PENDING COUNT", "PENDING AMT", "PAID %", "PENDING %"].concat(on ? ["NEW CASE COUNT", "NEW CASE AMT"] : []);
+            return ["DC NAME", "TOTAL", `${pl} COUNT`, `${pl} AMT`].concat(scOmHasPart_(rows) ? ["PART PAID COUNT", "PART PAID AMT"] : []).concat(["PENDING COUNT", "PENDING AMT", "PAID %", "PENDING %"]);
         }
-        function scOmSumRow_(r, on) {
-            return [r.name, r.totalCount, r.paidCount, r.paidAmount, r.pendingCount, r.pendingAmount, `${r.paidPercent}%`, `${r.pendingPercent}%`]
-                .concat(on ? [r.newCnt == null ? "-" : r.newCnt, r.newAmt == null ? "-" : Math.round(r.newAmt)] : []);
+        function scOmSumRow_(r, on, rows) {
+            return [r.name, r.totalCount, r.paidCount, r.paidAmount].concat(scOmHasPart_(rows) ? [r.partCount || 0, Math.round(r.partAmount || 0)] : []).concat([r.pendingCount, r.pendingAmount, `${r.paidPercent}%`, `${r.pendingPercent}%`]);
         }
         // ----- NEW CASES dropdown view (USER 29/09 11:39) -----
         // Upar dropdown: FREEZE CASES (purana report, koi badlav nahi) / NEW CASES
@@ -15507,6 +15543,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const histRow = !!(win && histFrom && r.hist);
                 if (histRow && r.first_seen && r.first_seen > win.endIso) return; // case appeared after this month
                 if (histRow) { const inspIso = scOmIsoDate_(r.inspection_date); if (inspIso && inspIso > win.endIso) return; } // inspected after this month
+                const dispRow = histRow && /^disposed/i.test(r.case_status || "");
+                if (dispRow && (!r.disposed_date || r.disposed_date < win.startIso)) return; // disposed before this month
                 paidList.forEach((p) => {
                     const payDateKey = scOmIsoDate_(p.pay_date);
                     if (histRow) { // history mode: every payment counts; before month start reduces the opening balance
@@ -15524,7 +15562,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 });
                 const balancedAmount = histRow ? Math.round((r.billed_amount - r.court_rebate - paidBefore) * 100) / 100 : (win ? (r.balanced_amount - paidBefore) : r.balanced_amount);
                 if (win && balancedAmount <= 0.5) return; // already settled before this month
-                const remainingPending = Math.max(0, balancedAmount - paidAmountNow);
+                const remainingPending = (dispRow && r.disposed_date <= win.endIso) ? 0 : Math.max(0, balancedAmount - paidAmountNow);
                 const isPaidNow = paidAmountNow > 0 && remainingPending <= 0;
                 out.push({
                     ...r,
@@ -15540,7 +15578,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         async function loadOmvigReportData_(forceRefresh = false, noWindow = false) {
-            const monthKey = noWindow ? "" : (omvigSelMonth || "");
+            const monthKey = typeof noWindow === "string" ? noWindow : (noWindow ? "" : (omvigSelMonth || "")); // UPDATE 146: string = exact month (Daily Brief)
             const baseKey = `${activeViewLevel}:${activeViewLevel === "DC" ? activeDC : (activeViewLevel === "DIVISION" ? activeDiv : "CIRCLE")}`;
             const scopeKey = `${baseKey}|${monthKey}`;
             if (!forceRefresh && omvigReportCache_ && omvigReportCache_.scopeKey === scopeKey) return omvigReportCache_;
@@ -15633,6 +15671,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function omvigPaidBucketAmount_(r) {
             return Number(r.paidAmountNow || 0);
         }
+        function omvigIsPartRow_(r) { return Number(r.paidAmountNow || 0) > 0 && Number(r.remainingPending || 0) > 0.5; }
         function omvigIsInPendingBucket_(r) {
             return Number(r.remainingPending || 0) > 0.5;
         }
@@ -15640,11 +15679,12 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // DC level ke liye ek hi row ka summary (Freeze NP ke DC-wise summary
         // jaisa hi shape/table, bas is scope me hamesha ek hi row hogi).
         function buildOmvigSingleDcSummaryRow_(rowsWithStatus, dcName) {
-            const g = { name: dcName || "-", totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 };
+            const g = { name: dcName || "-", totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0 };
             rowsWithStatus.forEach((r) => {
                 g.totalCount += 1;
                 if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
                 if (omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
             });
             return g;
         }
@@ -15655,8 +15695,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // 0 rahega, sirf jo status choose kiya wahi count/amount dikhega,
         // niche ki list se exactly match karega.
         function buildOmvigStatusSummaryRow_(filteredRows, dcName, status) {
-            const g = { name: dcName || "-", totalCount: filteredRows.length, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 };
+            const g = { name: dcName || "-", totalCount: filteredRows.length, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0 };
             filteredRows.forEach((r) => {
+                if (omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
                 if (status === "PAID") { g.paidCount += 1; g.paidAmount += Number(r.paidAmountNow) || 0; }
                 else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
             });
@@ -15668,7 +15709,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // dikhaye, sabhi 24 DC ki nahi - Division-level jaisa hi DC-list
         // (bina sub-total/grand-total ke).
         function buildOmvigDivisionDcSummaryRows_(rowsWithStatus, divisionName) {
-            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 });
+            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0 });
             const map = {};
             rowsWithStatus.forEach((r) => {
                 const key = normalizeDcName(r.dc_name) || "-";
@@ -15677,6 +15718,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 g.totalCount += 1;
                 if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
                 if (omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
             });
             return getDivisionDcNames(divisionName).map((dcName) => map[normalizeDcName(dcName)] || emptyGroup(normalizeDcName(dcName)));
         }
@@ -15693,7 +15735,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // scope se hota hai (renderOmvigCircleLevelHtml_ + getOmvigDownloadSummaryRows_),
         // isliye DIVISION-level branch ki zaroorat nahi.
         function buildOmvigCircleDcWiseSummaryRows_(rowsWithStatus) {
-            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 });
+            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0 });
             const withPercents = (g) => ({
                 ...g,
                 paidPercent: g.totalCount ? ((g.paidCount / g.totalCount) * 100).toFixed(1) : "0.0",
@@ -15707,6 +15749,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 g.totalCount += 1;
                 if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
                 if (omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
             });
 
             const rows = [];
@@ -15720,11 +15763,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const divTotal = emptyGroup(getDivisionTotalLabel(divisionName));
                 dcRows.forEach((r) => {
                     divTotal.totalCount += r.totalCount; divTotal.paidCount += r.paidCount; divTotal.paidAmount += r.paidAmount;
-                    divTotal.pendingCount += r.pendingCount; divTotal.pendingAmount += r.pendingAmount;
+                    divTotal.pendingCount += r.pendingCount; divTotal.pendingAmount += r.pendingAmount; divTotal.partCount += (r.partCount || 0); divTotal.partAmount += (r.partAmount || 0);
                 });
                 rows.push({ ...withPercents(divTotal), type: "SUB_TOTAL" });
                 grand.totalCount += divTotal.totalCount; grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
-                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount;
+                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += divTotal.partAmount;
             });
             rows.push({ ...withPercents(grand), type: "GRAND_TOTAL" });
             return rows;
@@ -15741,8 +15784,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // renderOmvigDivisionLevelHtml_/renderOmvigCircleLevelHtml_ reuse karte
         // hain, isliye yeh fix dono me apne aap aa jaata hai.
         function appendOmvigTotalRow_(rows) {
-            const total = { name: "TOTAL", totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, type: "GRAND_TOTAL" };
+            const total = { name: "TOTAL", totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0, type: "GRAND_TOTAL" };
             rows.forEach((r) => {
+                total.partCount += (r.partCount || 0); total.partAmount += (r.partAmount || 0);
                 total.totalCount += r.totalCount; total.paidCount += r.paidCount; total.paidAmount += r.paidAmount;
                 total.pendingCount += r.pendingCount; total.pendingAmount += r.pendingAmount;
             });
@@ -15971,7 +16015,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
         function renderOmvigPickerHtml_() {
             const startIso = omvigHistoryFrom_ || omvigKnownStartIso_ || "";
-            const inpStyle = "flex:1; height:36px; border-radius:10px; border:2px solid #0d9488; font-size:0.72rem; font-weight:800; color:#0f172a; background:#fff; padding:0 8px;";
+            const inpStyle = "flex:1; min-width:0; height:36px; border-radius:10px; border:2px solid #0d9488; font-size:0.72rem; font-weight:800; color:#0f172a; background:#fff; padding:0 8px;";
             if (omvigReportMode === "DAILY") {
                 const todayIso = getTodayIsoDate();
                 const val = omvigSelDate || omvigYesterdayIso_();
@@ -15981,25 +16025,57 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     <button type="button" onclick="setOmvigSelDate('')" style="height:36px; padding:0 10px; border-radius:10px; border:2px solid #0d9488; background:${omvigSelDate ? "#fff" : "#0d9488"}; color:${omvigSelDate ? "#0d9488" : "#fff"}; font-size:0.66rem; font-weight:900;">YESTERDAY</button>
                 </div>`;
             }
-            let opts = `<option value="">Since Report Start Date${omvigKnownStartIso_ ? ` (${escapeHtml(scOmDmy_(omvigKnownStartIso_))})` : ""}</option>`;
-            if (startIso) {
-                const nowIso = getTodayIsoDate();
-                let y = Number(startIso.slice(0, 4)), m = Number(startIso.slice(5, 7));
-                const endKey = nowIso.slice(0, 7);
-                const keys = [];
-                for (let guard = 0; guard < 60; guard++) {
-                    const k = `${y}-${String(m).padStart(2, "0")}`;
-                    keys.push(k);
-                    if (k >= endKey) break;
-                    m += 1; if (m > 12) { m = 1; y += 1; }
-                }
-                keys.reverse().forEach((k) => { opts += `<option value="${k}" ${omvigSelMonth === k ? "selected" : ""}>${escapeHtml(omvigMonthLabel_(k))}</option>`; });
-            }
-            return `<div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
-                <span style="font-size:0.66rem; font-weight:900; color:#0f172a;">MONTH</span>
-                <select onchange="setOmvigSelMonth(this.value)" style="${inpStyle}">${opts}</select>
+            // UPDATE 145: ek hi button + popup (Year arrows + 12 month grid) - ek click me month chunna, ek hi baar load
+            const rg = omvigPickRange_();
+            const names3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const label = omvigSelMonth ? `${omvigMonthLabel_(omvigSelMonth)}` : `Since Report Start${omvigKnownStartIso_ ? ` (${scOmDmy_(omvigKnownStartIso_)})` : ""}`;
+            void names3; void rg;
+            return `<div style="position:relative; margin-bottom:10px;">
+                <button type="button" onclick="toggleOmvigPicker()" style="width:100%; height:40px; border-radius:10px; border:2px solid #0d9488; background:#fff; color:#0f172a; font-size:0.78rem; font-weight:900; display:flex; align-items:center; justify-content:space-between; padding:0 12px;"><span>📅 ${escapeHtml(label)}</span><span style="color:#0d9488;">▾</span></button>
+                <div id="omvig-picker-panel" style="display:none; margin-top:6px; background:#fff; border:2px solid #0d9488; border-radius:12px; padding:10px; box-shadow:0 6px 18px rgba(15,23,42,0.12);"></div>
             </div>`;
         }
+
+        function omvigPickRange_() {
+            const startIso = omvigHistoryFrom_ || omvigKnownStartIso_ || "";
+            const lastKey = getTodayIsoDate().slice(0, 7);
+            const firstKey = startIso ? startIso.slice(0, 7) : lastKey;
+            return { firstKey, lastKey, firstYear: Number(firstKey.slice(0, 4)), lastYear: Number(lastKey.slice(0, 4)) };
+        }
+        let omvigPickYear_ = 0;
+        function omvigPickerPanelHtml_() {
+            const rg = omvigPickRange_();
+            const names3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            const y = omvigPickYear_;
+            const arrow = (dir, enabled, sym) => `<button type="button" ${enabled ? `onclick="omvigPickerYear(${dir})"` : "disabled"} style="width:38px; height:34px; border-radius:8px; border:1.5px solid ${enabled ? "#0d9488" : "#cbd5e1"}; background:#fff; color:${enabled ? "#0d9488" : "#cbd5e1"}; font-size:1rem; font-weight:900;">${sym}</button>`;
+            let cells = "";
+            for (let m = 1; m <= 12; m++) {
+                const k = `${y}-${String(m).padStart(2, "0")}`;
+                const ok = k >= rg.firstKey && k <= rg.lastKey;
+                const sel = omvigSelMonth === k;
+                cells += `<button type="button" ${ok ? `onclick="omvigPickMonth('${k}')"` : "disabled"} style="height:36px; border-radius:8px; border:1.5px solid ${sel ? "#0d9488" : "#e2e8f0"}; background:${sel ? "#0d9488" : "#fff"}; color:${sel ? "#fff" : (ok ? "#0f172a" : "#cbd5e1")}; font-size:0.74rem; font-weight:900;">${names3[m - 1]}</button>`;
+            }
+            return `<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">${arrow(-1, y > rg.firstYear, "‹")}<span style="font-size:0.9rem; font-weight:950; color:#0f172a;">${y}</span>${arrow(1, y < rg.lastYear, "›")}</div>
+                <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px;">${cells}</div>
+                <button type="button" onclick="omvigPickSince()" style="width:100%; height:34px; margin-top:8px; border-radius:8px; border:1.5px solid #0d9488; background:${omvigSelMonth ? "#fff" : "#0d9488"}; color:${omvigSelMonth ? "#0d9488" : "#fff"}; font-size:0.68rem; font-weight:900;">Since Report Start${omvigKnownStartIso_ ? ` (${escapeHtml(scOmDmy_(omvigKnownStartIso_))})` : ""}</button>`;
+        }
+        function toggleOmvigPicker() {
+            const p = document.getElementById("omvig-picker-panel");
+            if (!p) return;
+            if (p.style.display === "block") { p.style.display = "none"; return; }
+            const rg = omvigPickRange_();
+            omvigPickYear_ = omvigSelMonth ? Number(omvigSelMonth.slice(0, 4)) : rg.lastYear;
+            p.innerHTML = omvigPickerPanelHtml_();
+            p.style.display = "block";
+        }
+        function omvigPickerYear(delta) {
+            const rg = omvigPickRange_();
+            omvigPickYear_ = Math.max(rg.firstYear, Math.min(rg.lastYear, omvigPickYear_ + delta));
+            const p = document.getElementById("omvig-picker-panel");
+            if (p) p.innerHTML = omvigPickerPanelHtml_();
+        }
+        function omvigPickMonth(k) { setOmvigSelMonth(k); }
+        function omvigPickSince() { setOmvigSelMonth(""); }
 
         function renderOmvigModeToggleHtml_() {
             const dailyActive = omvigReportMode === "DAILY";
@@ -16017,6 +16093,18 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         // UPDATE 138: Monthly month picker / Daily date picker
+        function setOmvigSelYear(y) {
+            if (!/^\d{4}$/.test(y || "")) { setOmvigSelMonth(""); return; }
+            const startIso = omvigHistoryFrom_ || omvigKnownStartIso_ || "";
+            const firstKey = startIso ? startIso.slice(0, 7) : "0000-00";
+            const lastKey = getTodayIsoDate().slice(0, 7);
+            const mm = omvigSelMonth ? omvigSelMonth.slice(5, 7) : lastKey.slice(5, 7); // same month number if possible, else latest allowed
+            let k = `${y}-${mm}`;
+            if (k > lastKey) k = lastKey;
+            if (k < firstKey) k = firstKey;
+            if (k.slice(0, 4) !== y) k = (`${y}-12` <= lastKey ? `${y}-12` : lastKey);
+            setOmvigSelMonth(k);
+        }
         function setOmvigSelMonth(v) {
             const k = /^\d{4}-\d{2}$/.test(v || "") ? v : "";
             if (omvigSelMonth === k) return;
@@ -16214,7 +16302,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 paidCount: s ? s.yesterdayPaidCount : 0,
                 paidAmount: s ? s.yesterdayPaidAmount : 0,
                 pendingCount: s ? s.pendingCount : 0,
-                pendingAmount: s ? s.pendingAmount : 0
+                pendingAmount: s ? s.pendingAmount : 0,
+                partCount: (s && s.hasPart) ? (s.partCount || 0) : null,
+                partAmount: (s && s.partAmount) || 0
             };
         }
 
@@ -16241,7 +16331,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // GRAND_TOTAL - buildOmvigCircleDcWiseSummaryRows_ jaisa hi shape, bas
         // source dcSummaryMap hai (case-level rowsWithStatus nahi).
         function omvigDailyCircleDcWiseSummaryRows_(dcSummaryMap, status) {
-            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0 });
+            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0 });
             const withPercents = (g) => ({
                 ...g,
                 paidPercent: g.totalCount ? ((g.paidCount / g.totalCount) * 100).toFixed(1) : "0.0",
@@ -16255,11 +16345,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const divTotal = emptyGroup(getDivisionTotalLabel(divisionName));
                 dcRows.forEach((r) => {
                     divTotal.totalCount += r.totalCount; divTotal.paidCount += r.paidCount; divTotal.paidAmount += r.paidAmount;
-                    divTotal.pendingCount += r.pendingCount; divTotal.pendingAmount += r.pendingAmount;
+                    divTotal.pendingCount += r.pendingCount; divTotal.pendingAmount += r.pendingAmount; divTotal.partCount += (r.partCount || 0); divTotal.partAmount += (r.partAmount || 0);
                 });
                 rows.push({ ...withPercents(divTotal), type: "SUB_TOTAL" });
                 grand.totalCount += divTotal.totalCount; grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
-                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount;
+                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += divTotal.partAmount;
             });
             rows.push({ ...withPercents(grand), type: "GRAND_TOTAL" });
             return rows;
@@ -16610,8 +16700,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         [totalCount, paidCount, `${paidPercent}%`, pendingCount, `${pendingPercent}%`], []];
                     if (activeViewLevel !== "DC") {
                         const summaryRows = scOmAttachNewCases_(getOmvigDownloadSummaryRows_(scopedRows, rowsWithStatus));
-                        rows.push(scOmSumHead_(omNewOn));
-                        summaryRows.forEach((r) => rows.push(scOmSumRow_(r, omNewOn)));
+                        rows.push(scOmSumHead_(omNewOn, summaryRows));
+                        summaryRows.forEach((r) => rows.push(scOmSumRow_(r, omNewOn, summaryRows)));
                         rows.push([]);
                     }
                     if (omNewRows.length) { rows.push(["NEW CASES - AFTER FREEZE (not included in freeze count, from freeze till now)", "CASES", "AMOUNT"], ...omNewRows, []); }
@@ -16712,8 +16802,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     const rowTypeFlags = summaryRows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
                     doc.autoTable({
                         startY: doc.lastAutoTable.finalY + 6,
-                        head: [scOmSumHead_(omNewOn)],
-                        body: summaryRows.map((r) => scOmSumRow_(r, omNewOn)),
+                        head: [scOmSumHead_(omNewOn, summaryRows)],
+                        body: summaryRows.map((r) => scOmSumRow_(r, omNewOn, summaryRows)),
                         theme: "grid", headStyles: { fillColor: [8, 145, 178], halign: "center" }, styles: { fontSize: 7, cellPadding: 1.5, halign: "center" },
                         didParseCell: function (hookData) {
                             if (hookData.section === "body") {
@@ -16803,8 +16893,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         [totalCount, totalAmount], []];
                     if (activeViewLevel !== "DC") {
                         const summaryRows = scOmAttachNewCases_(getOmvigDailyDownloadSummaryRows_(rowsWithStatus, data.dcSummaryMap));
-                        rows.push(scOmSumHead_(omNewOn));
-                        summaryRows.forEach((r) => rows.push(scOmSumRow_(r, omNewOn)));
+                        rows.push(scOmSumHead_(omNewOn, summaryRows));
+                        summaryRows.forEach((r) => rows.push(scOmSumRow_(r, omNewOn, summaryRows)));
                         rows.push([]);
                     }
                     if (omNewRows.length) { rows.push([`NEW CASES - YESTERDAY (${data.date}) (not included in freeze count)`, "CASES", "AMOUNT"], ...omNewRows, []); }
@@ -16870,8 +16960,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     const rowTypeFlags = summaryRows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
                     doc.autoTable({
                         startY: doc.lastAutoTable.finalY + 6,
-                        head: [scOmSumHead_(omNewOn)],
-                        body: summaryRows.map((r) => scOmSumRow_(r, omNewOn)),
+                        head: [scOmSumHead_(omNewOn, summaryRows)],
+                        body: summaryRows.map((r) => scOmSumRow_(r, omNewOn, summaryRows)),
                         theme: "grid", headStyles: { fillColor: [8, 145, 178], halign: "center" }, styles: { fontSize: 7, cellPadding: 1.5, halign: "center" },
                         didParseCell: function (hookData) {
                             if (hookData.section === "body") {
