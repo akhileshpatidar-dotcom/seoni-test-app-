@@ -14576,8 +14576,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // nahi hai to ye line simply nahi dikhti (naya/khaali OMVIG META).
         function renderOmvigLastUploadLine_() {
             const line = (label, at, summary) => at ? `<div style="text-align:center; font-size:0.66rem; font-weight:700; color:#475569; margin-top:6px; border-top:1px dashed #cbd5e1; padding-top:6px;">🕒 ${label}: ${escapeHtml(formatIndianDateTimeDisplay_(at))}${summary ? `<br><span style="font-weight:600; color:#64748b;">${escapeHtml(summary)}</span>` : ""}</div>` : "";
-            const warn = Number(omvigAdminStatus?.payment_mismatch_cases) > 0 ? `<div style="text-align:center; font-size:0.64rem; font-weight:800; color:#9a3412; margin-top:6px;">⚠️ ${omvigAdminStatus.payment_mismatch_cases} cases: payment total differs between Billed list and Payment list - please upload both latest lists.</div>` : "";
-            return line("Last Billed List Upload", omvigAdminStatus?.last_billed_upload_at, omvigAdminStatus?.last_billed_upload_summary) + line("Last Payment List Upload", omvigAdminStatus?.last_upload_at, omvigAdminStatus?.last_upload_summary) + warn;
+            const warn = Number(omvigAdminStatus?.payment_mismatch_cases) > 0 ? `<div style="text-align:center; font-size:0.64rem; font-weight:800; color:#9a3412; margin-top:6px;">⚠️ ${omvigAdminStatus.payment_mismatch_cases} cases: payment total differs between Pending list and Payment list - please upload both latest lists.</div>` : "";
+            return line("Last Pending List Upload", omvigAdminStatus?.last_billed_upload_at, omvigAdminStatus?.last_billed_upload_summary) + line("Last Payment List Upload", omvigAdminStatus?.last_upload_at, omvigAdminStatus?.last_upload_summary) + warn;
         }
 
         function renderOmvigAdminStatus() {
@@ -14586,7 +14586,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const frozen = !!omvigAdminStatus?.freeze_date;
             statusBox.innerHTML = frozen
                 ? `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#166534;">✅ Report Start Date: ${escapeHtml(omvigAdminStatus.freeze_date)}<br><span style="font-weight:800; color:#334155;">${omvigAdminStatus.pending_count} active cases</span></div>${renderOmvigLastUploadLine_()}`
-                : `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#9a3412;">⚠️ Data is not loaded yet - upload the Billed List (Step 1) or check internet and reopen the panel.</div>`;
+                : `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#9a3412;">⚠️ Data is not loaded yet - upload the Pending for Payment List (Step 1) or check internet and reopen the panel.</div>`;
         }
 
         function handleOmvigPaidFileSelect(event) {
@@ -14602,7 +14602,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (nameBox) nameBox.innerText = file ? file.name : "";
         }
 
-        // NEW FLOW (2026-11-01): Billed Consumer List (Power BI) padhta hai - Disposed status wali rows chhod deta hai.
+        // NEW FLOW (2026-11-01): Pending for Payment List (Power BI) padhta hai - Disposed status wali rows chhod deta hai.
         async function readOmvigBilledFile(file) {
             if (!file) return { rows: [], skippedDisposed: 0 };
             if (!window.XLSX) throw new Error("Excel reader could not be loaded. Please check internet and refresh.");
@@ -14621,8 +14621,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 billed: idx(["Billed_amount", "Billed Amount"]), rebate: idx(["Court_Rebate", "court_rebate"]),
                 pay: idx(["payment", "Payment amount", "Payment Received"]), status: idx(["Case_Status"])
             };
-            if (c.pn < 0 || c.dc < 0 || c.billed < 0 || c.pay < 0) throw new Error("Billed list format does not match (Panchanama_No / DC / Billed_amount / payment column not found)");
-            if (c.status < 0) throw new Error("Case_Status column not found - please download the Billed list with Case_Status column");
+            if (c.pn < 0 || c.dc < 0 || c.billed < 0 || c.pay < 0) throw new Error("Pending list format does not match (Panchanama_No / DC / Billed_amount / payment column not found)");
+            if (c.status < 0) throw new Error("Case_Status column not found - please download the Pending for Payment list with Case_Status column");
             const txt = (row, i) => (i > -1 ? (row[i] instanceof Date ? formatOmvigCellDate_(row[i]) : String(row[i] ?? "").trim()) : "");
             const rows = []; let skippedDisposed = 0;
             for (let r = 1; r < all.length; r++) {
@@ -14630,7 +14630,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const pn = txt(row, c.pn);
                 if (!pn) continue;
                 const status = txt(row, c.status);
-                if (/^disposed/i.test(status)) { skippedDisposed++; continue; }
+                if (/^disposed/i.test(status)) skippedDisposed++; // backend: naya Disposed case nahi jodta, purane ko band kar deta hai
                 rows.push([txt(row, c.circle), txt(row, c.division), txt(row, c.dc), pn, txt(row, c.name), txt(row, c.ez), txt(row, c.cno), txt(row, c.insp), txt(row, c.tariff), txt(row, c.caseName), cleanOmvigAmount_(row[c.billed]), c.rebate > -1 ? cleanOmvigAmount_(row[c.rebate]) : 0, cleanOmvigAmount_(row[c.pay]), status]);
             }
             return { rows, skippedDisposed };
@@ -14646,8 +14646,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const statusBox = document.getElementById("omvig-billed-upload-status");
             const psInput = document.getElementById("omvig-period-start");
             const file = fileInput?.files?.[0] || null;
-            if (!file) return showToast("Please select the Billed Consumer List file first", false);
-            setActionButtonState(uploadBtn, "processing", "Upload Billed List");
+            if (!file) return showToast("Please select the Pending for Payment List file first", false);
+            setActionButtonState(uploadBtn, "processing", "Upload Pending List");
             const say = (html, color) => { if (statusBox) { statusBox.style.display = "block"; statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:${color};">${html}</div>`; } };
             say("Reading file...", "#1d4ed8");
             try {
@@ -14662,15 +14662,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 let parsed = {};
                 try { parsed = JSON.parse(text || "{}"); } catch (_) {}
                 if (parsed.status !== "success") throw new Error(parsed.message || "Upload failed");
-                setActionButtonState(uploadBtn, "done", "Upload Billed List");
-                showToast("Billed list uploaded", true);
+                setActionButtonState(uploadBtn, "done", "Upload Pending List");
+                showToast("Pending list uploaded", true);
                 if (statusBox) statusBox.innerHTML = `
                     <div style="text-align:center; padding:10px 12px; background:#f0fdf4; border:1.2px solid #86efac; border-radius:12px;">
-                        <div style="font-size:0.85rem; font-weight:950; color:#166534;">✅ Billed List Uploaded</div>
-                        <div style="font-size:0.68rem; font-weight:700; color:#475569; margin-top:4px;">${parsed.total_in_file} cases in the file${skippedDisposed ? ` (${skippedDisposed} Disposed cases skipped)` : ""}</div>
+                        <div style="font-size:0.85rem; font-weight:950; color:#166534;">✅ Pending List Uploaded</div>
+                        <div style="font-size:0.68rem; font-weight:700; color:#475569; margin-top:4px;">${parsed.total_in_file} cases in the file${parsed.disposed_skipped ? ` (${parsed.disposed_skipped} new Disposed cases ignored)` : ""}</div>
                     </div>
                     <div style="margin-top:8px; padding:9px 11px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#334155; line-height:1.6;">
-                        🟢 New cases added: <b>${parsed.added}</b><br>🔄 Existing cases updated: <b>${parsed.updated}</b><br>📤 Earlier cases not in this list (paid/closed): <b>${parsed.not_in_latest}</b><br>📋 Active cases (balance pending at report start): <b>${parsed.active}</b><br>📅 Report start date: <b>${escapeHtml(parsed.freeze_date || "")}</b>
+                        🟢 New cases added: <b>${parsed.added}</b><br>🔄 Existing cases updated: <b>${parsed.updated}</b><br>📤 Earlier cases not in this list (they stay; shown Paid when payment comes): <b>${parsed.not_in_latest}</b><br>📋 Active cases (balance pending at report start): <b>${parsed.active}</b><br>📅 Report start date: <b>${escapeHtml(parsed.freeze_date || "")}</b>
                     </div>
                     <div style="margin-top:8px; font-size:0.62rem; font-weight:700; color:#64748b; text-align:center;">Now upload the Payment Details List (Step 2).</div>`;
                 omvigPendingCache_ = {}; omvigPaidCache_ = {}; omvigReportCache_ = null; omvigFreezeStatusCache_ = null; omvigDailyReportCache_ = null;
@@ -14679,11 +14679,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (nameBox) nameBox.innerText = "";
                 try { const fresh = await fetchOmvigFreezeStatus_(true); omvigAdminStatus = omvigStatusFrom_(fresh); renderOmvigAdminStatus(); } catch (_) {}
             } catch (error) {
-                setActionButtonState(uploadBtn, "failed", "Upload Billed List");
-                showToast(error?.message || "Billed list upload failed", false);
+                setActionButtonState(uploadBtn, "failed", "Upload Pending List");
+                showToast(error?.message || "Pending list upload failed", false);
                 say(`Upload fail: ${escapeHtml(error?.message || "")}`, "#b91c1c");
             } finally {
-                setTimeout(() => setActionButtonState(uploadBtn, "idle", "Upload Billed List"), 900);
+                setTimeout(() => setActionButtonState(uploadBtn, "idle", "Upload Pending List"), 900);
             }
         }
 
@@ -14793,9 +14793,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                             <div style="font-size:0.68rem; font-weight:700; color:#475569; margin-top:4px;">${parsed.total_in_file} payments in the file</div>
                         </div>
                         <div style="margin-top:8px; padding:9px 11px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#334155; line-height:1.6;">
-                            🟢 Payments of Billed cases: <b>${parsed.matched}</b><br>➕ New payments added: <b>${parsed.added}</b> (₹${Math.round(parsed.added_amount || 0).toLocaleString("en-IN")})<br>♻️ Already in the system: <b>${parsed.skipped_duplicate}</b><br>⚪ Not in Billed list (ignored): <b>${parsed.not_in_billed}</b>
+                            🟢 Payments of Pending-list cases: <b>${parsed.matched}</b><br>➕ New payments added: <b>${parsed.added}</b> (₹${Math.round(parsed.added_amount || 0).toLocaleString("en-IN")})<br>♻️ Already in the system: <b>${parsed.skipped_duplicate}</b><br>⚪ Not in Pending list (ignored): <b>${parsed.not_in_billed}</b>
                         </div>
-                        ${parsed.mismatch ? `<div style="margin-top:8px; padding:9px 11px; background:#fff7ed; border:1.2px solid #fdba74; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#9a3412; line-height:1.5;">⚠️ For ${parsed.mismatch} cases the payment total in the Billed list does not match the Payment list. Please upload the latest Billed list and the all-time Payment list of the same day.</div>` : `<div style="margin-top:8px; font-size:0.62rem; font-weight:800; color:#166534; text-align:center;">✔ Payment totals match the Billed list for all cases.</div>`}
+                        ${parsed.mismatch ? `<div style="margin-top:8px; padding:9px 11px; background:#fff7ed; border:1.2px solid #fdba74; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#9a3412; line-height:1.5;">⚠️ For ${parsed.mismatch} cases the payment total in the Pending list does not match the Payment list. Please upload the latest Pending list and the all-time Payment list of the same day.</div>` : `<div style="margin-top:8px; font-size:0.62rem; font-weight:800; color:#166534; text-align:center;">✔ Payment totals match the Pending list for all cases.</div>`}
                         <div style="margin-top:8px; font-size:0.7rem; font-weight:850; color:#334155; text-align:center;">DC tabs updated:<br><span style="font-weight:700;">${(parsed.dc_tabs_updated || []).join(", ") || "-"}</span></div>
                     `;
                 }
@@ -15902,7 +15902,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (!data.freeze_date) {
                     progress.stop();
                     if (myToken !== omvigProgressToken) return;
-                    body.innerHTML = toggleHtml + `<div style="text-align:center; color:#9f1239; font-size:0.72rem; margin-top:10px;">No O&M/VIG data yet. Please upload the Billed List and the Payment List from the Admin panel of Sub DN Chhapara under "🔒 ADMIN O&M/VIG UPLOAD".</div>`;
+                    body.innerHTML = toggleHtml + `<div style="text-align:center; color:#9f1239; font-size:0.72rem; margin-top:10px;">No O&M/VIG data yet. Please upload the Pending for Payment List and the Payment List from the Admin panel of Sub DN Chhapara under "🔒 ADMIN O&M/VIG UPLOAD".</div>`;
                     return;
                 }
                 const html = toggleHtml + renderOmvigReportHtml_(data, omNewHtml);
@@ -16310,7 +16310,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         async function scOmvigReportDownloadCore_(fmt) {
             try {
                 const data = await loadOmvigReportData_();
-                if (!data.freeze_date) return showToast("Please upload the Billed List first", false);
+                if (!data.freeze_date) return showToast("Please upload the Pending for Payment List first", false);
                 const omNewDl = (scOmNewCasesScopeDiv_() === null || omvigFilterStatus === "PENDING" || scOmSlabOn_()) ? null : await fetchOmvigDailyReport_().catch(() => null);
                 const omFzDl = scOmIsoDate_(data.freeze_date);
                 scOmNewCtx_ = omNewDl ? scOmNewCtxMake_(omNewDl.newCases, omFzDl, omFzDl, getTodayIsoDate()) : null;
