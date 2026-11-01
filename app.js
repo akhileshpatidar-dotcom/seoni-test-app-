@@ -2481,6 +2481,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
         function setProgressModule(module) {
             summaryModule = module || "";
+            if (summaryModule !== "OMVIG") restoreSharedDateControls_(); // UPDATE 151
             updateProgressReportPickerUI();
             const lokBtn = document.getElementById("progress-lok-btn");
             if (lokBtn) lokBtn.classList.toggle("active", module === "LOK_ADALAT");
@@ -2490,7 +2491,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // chahiye.
             const reportTypeBox = document.getElementById("progress-report-type-box");
             const dateWrap = document.getElementById("progress-report-date-wrap");
-            const needsDateControls = module === "MOBILE" || module === "REVENUE" || module === "LOK_ADALAT";
+            const needsDateControls = module === "MOBILE" || module === "REVENUE" || module === "LOK_ADALAT" || module === "OMVIG";
             if (reportTypeBox) reportTypeBox.style.display = needsDateControls ? "" : "none";
             if (dateWrap) dateWrap.style.display = needsDateControls ? "" : "none";
             if (!summaryModule) {
@@ -2513,6 +2514,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 return;
             }
             if (summaryModule === "OMVIG") {
+                syncOmvigDateControls_(); // UPDATE 151
                 // USER REQUEST (2026-09-14): pehle yahan ek plain spinner-only
                 // message dikhta tha - ab Revenue Live Progress jaisa hi ek-sa
                 // animated "%" progress-bar dikhta hai (loadAndRenderOmvigReport
@@ -9457,6 +9459,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // independent hai).
             if (summaryModule === "FREEZE") return refreshFreezeModuleSummary();
             if (summaryModule === "BRIEF") return scBriefLoad_(); // DAILY BRIEF 2026-09-28
+            if (summaryModule === "OMVIG") return omvigApplySharedControls_(); // UPDATE 151
             updateProgressReportScopeTitle();
             const refreshToken = ++summaryRefreshToken;
             const moduleAtStart = summaryModule;
@@ -16086,13 +16089,54 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function omvigPickMonth(k) { setOmvigSelMonth(k); }
         function omvigPickSince() { setOmvigSelMonth(""); }
 
-        function renderOmvigModeToggleHtml_() {
-            const dailyActive = omvigReportMode === "DAILY";
-            const btnStyle = (active) => `flex:1; height:38px; border-radius:10px; border:2px solid #0d9488; font-size:0.72rem; font-weight:900; ${active ? "background:#0d9488; color:#fff;" : "background:#fff; color:#0d9488;"}`;
-            return `<div style="display:flex; gap:8px; margin-bottom:10px;">
-                <button type="button" onclick="setOmvigReportMode('DAILY')" style="${btnStyle(dailyActive)}">⚡ DAILY (Fast)</button>
-                <button type="button" onclick="setOmvigReportMode('MONTHLY')" style="${btnStyle(!dailyActive)}">MONTHLY (Full)</button>
-            </div>` + renderOmvigPickerHtml_();
+        // UPDATE 151: Daily/Monthly + date/month selection ab Revenue report jaisa SHARED control (upar) - O&M ka apna toggle/picker nahi.
+        let omvigControlsOwned_ = false;
+        function restoreSharedDateControls_() {
+            if (!omvigControlsOwned_) return;
+            omvigControlsOwned_ = false;
+            try {
+                const inp = document.getElementById("report-date");
+                if (!inp) return;
+                inp.removeAttribute("min"); inp.removeAttribute("max");
+                document.getElementById("opt-daily")?.classList.toggle("active", summaryMode === "DAILY");
+                document.getElementById("opt-monthly")?.classList.toggle("active", summaryMode === "MONTHLY");
+                if (summaryMode === "MONTHLY") { inp.type = "month"; inp.value = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`; }
+                else { inp.type = "date"; inp.value = getTodayIsoDate(); }
+            } catch (_) {}
+        }
+        function syncOmvigDateControls_() {
+            omvigControlsOwned_ = true;
+            try {
+                const inp = document.getElementById("report-date");
+                if (!inp) return "";
+                const daily = omvigReportMode === "DAILY";
+                const startIso = omvigHistoryFrom_ || omvigKnownStartIso_ || "";
+                const todayIso = getTodayIsoDate();
+                document.getElementById("opt-daily")?.classList.toggle("active", daily);
+                document.getElementById("opt-monthly")?.classList.toggle("active", !daily);
+                if (daily) {
+                    inp.type = "date";
+                    inp.value = omvigSelDate || omvigYesterdayIso_();
+                    if (startIso) inp.min = startIso; else inp.removeAttribute("min");
+                    inp.max = todayIso;
+                } else {
+                    if (!omvigSelMonth) omvigSelMonth = todayIso.slice(0, 7);
+                    inp.type = "month";
+                    inp.value = omvigSelMonth;
+                    if (startIso) inp.min = startIso.slice(0, 7); else inp.removeAttribute("min");
+                    inp.max = todayIso.slice(0, 7);
+                }
+            } catch (_) {}
+            return "";
+        }
+        function renderOmvigModeToggleHtml_() { return syncOmvigDateControls_(); }
+        function omvigApplySharedControls_() {
+            const inp = document.getElementById("report-date");
+            const v = String(inp?.value || "");
+            if (omvigReportMode === "DAILY") {
+                if (/^\d{4}-\d{2}-\d{2}$/.test(v)) { omvigSelDate = (v === omvigYesterdayIso_() || v > getTodayIsoDate()) ? "" : v; if (omvigHistoryFrom_ && v < omvigHistoryFrom_) { showToast("Date must be on or after the history start date", false); omvigSelDate = ""; } }
+            } else if (/^\d{4}-\d{2}$/.test(v)) omvigSelMonth = v;
+            loadAndRenderOmvigReport(false);
         }
 
         function setOmvigReportMode(mode) {
@@ -35328,6 +35372,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         function setMode(m) {
+            if (summaryModule === "OMVIG") { // UPDATE 151: O&M/VIG bhi isi shared Daily/Monthly se
+                if (omvigReportMode !== m) { omvigReportMode = m; syncOmvigDateControls_(); loadAndRenderOmvigReport(false); }
+                return;
+            }
             summaryMode = m;
             const input = document.getElementById("report-date");
             document.getElementById("opt-daily").classList.toggle("active", m === "DAILY");
