@@ -15398,7 +15398,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return ["DC NAME", "TOTAL", `${pl} COUNT`, `${pl} AMT (LAKH)`].concat(scOmHasPart_(rows) ? ["PART PAID COUNT", "PART PAID AMT (LAKH)"] : []).concat(["PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %"]);
         }
         function scOmSumRow_(r, on, rows) {
-            return [r.name, r.totalCount, r.paidCount, formatRevenueLakhValue(r.paidAmount)].concat(scOmHasPart_(rows) ? [r.partCount || 0, formatRevenueLakhValue(r.partAmount || 0)] : []).concat([r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${r.paidPercent}%`, `${r.pendingPercent}%`]);
+            return [r.name, r.totalCount, r.paidCount, formatRevenueLakhValue(r.paidAmount)].concat(scOmHasPart_(rows) ? [r.partCount || 0, formatRevenueLakhValue(r.partAmount || 0)] : []).concat([r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${r.paidPercent != null ? r.paidPercent : (r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0")}%`, `${r.pendingPercent != null ? r.pendingPercent : (r.totalCount ? ((r.pendingCount / r.totalCount) * 100).toFixed(1) : "0.0")}%`]);
         }
         // ----- NEW CASES dropdown view (USER 29/09 11:39) -----
         // Upar dropdown: FREEZE CASES (purana report, koi badlav nahi) / NEW CASES
@@ -16644,7 +16644,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // is top box ka PAID/PENDING count niche wali DC-wise summary
                 // table se hamesha match kare.
                 const paidCount = rowsWithStatus.filter((r) => omvigIsInPaidBucket_(r)).length;
-                const pendingCount = totalCount - paidCount;
+                const pendingCount = rowsWithStatus.filter((r) => omvigIsInPendingBucket_(r)).length;
                 const paidPercent = totalCount ? ((paidCount / totalCount) * 100).toFixed(1) : "0.0";
                 const pendingPercent = totalCount ? ((pendingCount / totalCount) * 100).toFixed(1) : "0.0";
                 let scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
@@ -16707,7 +16707,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     const rows = [[reportTitle], [`Report Start Date: ${data.freeze_date}`], [],
                         ["TOTAL CASES", "PAID COUNT", "PAID %", "PENDING COUNT", "PENDING %"],
                         [totalCount, paidCount, `${paidPercent}%`, pendingCount, `${pendingPercent}%`], []];
-                    if (activeViewLevel !== "DC") {
+                    if (true) { // UPDATE 149: DC level par bhi summary table
                         const summaryRows = scOmAttachNewCases_(getOmvigDownloadSummaryRows_(scopedRows, rowsWithStatus));
                         rows.push(scOmSumHead_(omNewOn, summaryRows));
                         summaryRows.forEach((r) => rows.push(scOmSumRow_(r, omNewOn, summaryRows)));
@@ -16806,7 +16806,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     theme: "grid", headStyles: { fillColor: [17, 24, 39], halign: "center" }, styles: { fontSize: 9, halign: "center" }
                 });
 
-                if (activeViewLevel !== "DC") {
+                if (true) { // UPDATE 149: DC level par bhi summary table
                     const summaryRows = scOmAttachNewCases_(getOmvigDownloadSummaryRows_(scopedRows, rowsWithStatus));
                     const rowTypeFlags = summaryRows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
                     doc.autoTable({
@@ -16900,7 +16900,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     const rows = [[reportTitle], [`Date: ${data.date}`], [],
                         ["TOTAL SETTLEMENTS", "TOTAL AMOUNT"],
                         [totalCount, totalAmount], []];
-                    if (activeViewLevel !== "DC") {
+                    if (true) { // UPDATE 149: DC level par bhi summary table
                         const summaryRows = scOmAttachNewCases_(getOmvigDailyDownloadSummaryRows_(rowsWithStatus, data.dcSummaryMap));
                         rows.push(scOmSumHead_(omNewOn, summaryRows));
                         summaryRows.forEach((r) => rows.push(scOmSumRow_(r, omNewOn, summaryRows)));
@@ -16964,7 +16964,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     theme: "grid", headStyles: { fillColor: [17, 24, 39], halign: "center" }, styles: { fontSize: 9, halign: "center" }
                 });
 
-                if (activeViewLevel !== "DC") {
+                if (true) { // UPDATE 149: DC level par bhi summary table
                     const summaryRows = scOmAttachNewCases_(getOmvigDailyDownloadSummaryRows_(rowsWithStatus, data.dcSummaryMap));
                     const rowTypeFlags = summaryRows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
                     doc.autoTable({
