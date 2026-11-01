@@ -15386,10 +15386,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
         function scOmSumHead_(on, rows) {
             const pl = omvigReportMode === "DAILY" ? omvigDailyPaidLbl_() : "PAID (FREEZE)";
-            return ["DC NAME", "TOTAL", `${pl} COUNT`, `${pl} AMT`].concat(scOmHasPart_(rows) ? ["PART PAID COUNT", "PART PAID AMT"] : []).concat(["PENDING COUNT", "PENDING AMT", "PAID %", "PENDING %"]);
+            return ["DC NAME", "TOTAL", `${pl} COUNT`, `${pl} AMT (LAKH)`].concat(scOmHasPart_(rows) ? ["PART PAID COUNT", "PART PAID AMT (LAKH)"] : []).concat(["PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %"]);
         }
         function scOmSumRow_(r, on, rows) {
-            return [r.name, r.totalCount, r.paidCount, r.paidAmount].concat(scOmHasPart_(rows) ? [r.partCount || 0, Math.round(r.partAmount || 0)] : []).concat([r.pendingCount, r.pendingAmount, `${r.paidPercent}%`, `${r.pendingPercent}%`]);
+            return [r.name, r.totalCount, r.paidCount, formatRevenueLakhValue(r.paidAmount)].concat(scOmHasPart_(rows) ? [r.partCount || 0, formatRevenueLakhValue(r.partAmount || 0)] : []).concat([r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${r.paidPercent}%`, `${r.pendingPercent}%`]);
         }
         // ----- NEW CASES dropdown view (USER 29/09 11:39) -----
         // Upar dropdown: FREEZE CASES (purana report, koi badlav nahi) / NEW CASES
