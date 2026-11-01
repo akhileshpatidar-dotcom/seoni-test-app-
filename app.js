@@ -14528,6 +14528,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (paidFileInput) paidFileInput.value = "";
             if (paidFileNameBox) paidFileNameBox.innerText = "";
             if (paidStatusBox) paidStatusBox.style.display = "none";
+            const billedIn = document.getElementById("omvig-billed-file-input"); if (billedIn) billedIn.value = "";
+            const billedNm = document.getElementById("omvig-billed-file-name"); if (billedNm) billedNm.innerText = "";
+            const billedSt = document.getElementById("omvig-billed-upload-status"); if (billedSt) billedSt.style.display = "none";
             if (statusBox) statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:#1d4ed8;">SYNCING DATA... PLEASE WAIT</div>`;
             try {
                 // USER-REPORTED SLOWNESS FIX (2026-09-14): pehle yahan poori
@@ -14536,7 +14539,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // Ab fast, self-healing `fetchOmvigFreezeStatus_()` use karte hain
                 // (yeh khud hi auto-freeze bhi kar deta hai agar zaroorat ho).
                 const status = await fetchOmvigFreezeStatus_(true);
-                omvigAdminStatus = { freeze_date: status.freeze_date, pending_count: status.pending_count, last_upload_at: status.last_upload_at, last_upload_summary: status.last_upload_summary };
+                omvigAdminStatus = omvigStatusFrom_(status);
             } catch (_) {
                 omvigAdminStatus = null;
                 if (statusBox) statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:#b91c1c;">Status could not be loaded - please check internet</div>`;
@@ -14572,10 +14575,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // "last Paid List upload kab hua tha" - agar kabhi koi upload hua hi
         // nahi hai to ye line simply nahi dikhti (naya/khaali OMVIG META).
         function renderOmvigLastUploadLine_() {
-            const lastUploadAt = omvigAdminStatus?.last_upload_at || "";
-            if (!lastUploadAt) return "";
-            const summary = omvigAdminStatus?.last_upload_summary || "";
-            return `<div style="text-align:center; font-size:0.68rem; font-weight:700; color:#475569; margin-top:6px; border-top:1px dashed #cbd5e1; padding-top:6px;">🕒 Last Upload: ${escapeHtml(formatIndianDateTimeDisplay_(lastUploadAt))}${summary ? `<br><span style="font-weight:600; color:#64748b;">${escapeHtml(summary)}</span>` : ""}</div>`;
+            const line = (label, at, summary) => at ? `<div style="text-align:center; font-size:0.66rem; font-weight:700; color:#475569; margin-top:6px; border-top:1px dashed #cbd5e1; padding-top:6px;">🕒 ${label}: ${escapeHtml(formatIndianDateTimeDisplay_(at))}${summary ? `<br><span style="font-weight:600; color:#64748b;">${escapeHtml(summary)}</span>` : ""}</div>` : "";
+            const warn = Number(omvigAdminStatus?.payment_mismatch_cases) > 0 ? `<div style="text-align:center; font-size:0.64rem; font-weight:800; color:#9a3412; margin-top:6px;">⚠️ ${omvigAdminStatus.payment_mismatch_cases} cases: payment total differs between Billed list and Payment list - please upload both latest lists.</div>` : "";
+            return line("Last Billed List Upload", omvigAdminStatus?.last_billed_upload_at, omvigAdminStatus?.last_billed_upload_summary) + line("Last Payment List Upload", omvigAdminStatus?.last_upload_at, omvigAdminStatus?.last_upload_summary) + warn;
         }
 
         function renderOmvigAdminStatus() {
@@ -14583,14 +14585,106 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (!statusBox) return;
             const frozen = !!omvigAdminStatus?.freeze_date;
             statusBox.innerHTML = frozen
-                ? `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#166534;">✅ Baseline Frozen - Date: ${escapeHtml(omvigAdminStatus.freeze_date)}<br><span style="font-weight:800; color:#334155;">${omvigAdminStatus.pending_count} pending cases</span></div>${renderOmvigLastUploadLine_()}`
-                : `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#9a3412;">⚠️ Baseline is not set yet - please check internet and reopen the panel.</div>`;
+                ? `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#166534;">✅ Report Start Date: ${escapeHtml(omvigAdminStatus.freeze_date)}<br><span style="font-weight:800; color:#334155;">${omvigAdminStatus.pending_count} active cases</span></div>${renderOmvigLastUploadLine_()}`
+                : `<div style="text-align:center; font-size:0.78rem; font-weight:900; color:#9a3412;">⚠️ Data is not loaded yet - upload the Billed List (Step 1) or check internet and reopen the panel.</div>`;
         }
 
         function handleOmvigPaidFileSelect(event) {
             const file = event?.target?.files?.[0];
             const nameBox = document.getElementById("omvig-paid-file-name");
             if (nameBox) nameBox.innerText = file ? file.name : "";
+        }
+
+
+        function handleOmvigBilledFileSelect(event) {
+            const file = event?.target?.files?.[0];
+            const nameBox = document.getElementById("omvig-billed-file-name");
+            if (nameBox) nameBox.innerText = file ? file.name : "";
+        }
+
+        // NEW FLOW (2026-11-01): Billed Consumer List (Power BI) padhta hai - Disposed status wali rows chhod deta hai.
+        async function readOmvigBilledFile(file) {
+            if (!file) return { rows: [], skippedDisposed: 0 };
+            if (!window.XLSX) throw new Error("Excel reader could not be loaded. Please check internet and refresh.");
+            const buffer = await file.arrayBuffer();
+            const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const all = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+            if (!all.length) return { rows: [], skippedDisposed: 0 };
+            const headers = (all[0] || []).map((h) => String(h || "").trim().toLowerCase());
+            const idx = (names) => { for (const n of names) { const i = headers.indexOf(n.toLowerCase()); if (i > -1) return i; } return -1; };
+            const c = {
+                circle: idx(["Circle"]), division: idx(["Division"]), dc: idx(["DC"]),
+                pn: idx(["Panchanama_No", "Panchnama_No", "Panchanama Number", "Panchnama Number"]),
+                name: idx(["Consumer_Name", "Person Name"]), ez: idx(["EZ_no", "EZ Number"]), cno: idx(["Consumer_No"]),
+                insp: idx(["inspection_date", "Inspection Date"]), tariff: idx(["Tariff_Name"]), caseName: idx(["Case_Name"]),
+                billed: idx(["Billed_amount", "Billed Amount"]), rebate: idx(["Court_Rebate", "court_rebate"]),
+                pay: idx(["payment", "Payment amount", "Payment Received"]), status: idx(["Case_Status"])
+            };
+            if (c.pn < 0 || c.dc < 0 || c.billed < 0 || c.pay < 0) throw new Error("Billed list format does not match (Panchanama_No / DC / Billed_amount / payment column not found)");
+            if (c.status < 0) throw new Error("Case_Status column not found - please download the Billed list with Case_Status column");
+            const txt = (row, i) => (i > -1 ? (row[i] instanceof Date ? formatOmvigCellDate_(row[i]) : String(row[i] ?? "").trim()) : "");
+            const rows = []; let skippedDisposed = 0;
+            for (let r = 1; r < all.length; r++) {
+                const row = all[r];
+                const pn = txt(row, c.pn);
+                if (!pn) continue;
+                const status = txt(row, c.status);
+                if (/^disposed/i.test(status)) { skippedDisposed++; continue; }
+                rows.push([txt(row, c.circle), txt(row, c.division), txt(row, c.dc), pn, txt(row, c.name), txt(row, c.ez), txt(row, c.cno), txt(row, c.insp), txt(row, c.tariff), txt(row, c.caseName), cleanOmvigAmount_(row[c.billed]), c.rebate > -1 ? cleanOmvigAmount_(row[c.rebate]) : 0, cleanOmvigAmount_(row[c.pay]), status]);
+            }
+            return { rows, skippedDisposed };
+        }
+
+        function omvigStatusFrom_(st) {
+            return { freeze_date: st.freeze_date, pending_count: st.pending_count, last_upload_at: st.last_upload_at, last_upload_summary: st.last_upload_summary, last_billed_upload_at: st.last_billed_upload_at, last_billed_upload_summary: st.last_billed_upload_summary, payment_mismatch_cases: st.payment_mismatch_cases };
+        }
+
+        async function uploadOmvigBilledList() {
+            const fileInput = document.getElementById("omvig-billed-file-input");
+            const uploadBtn = document.getElementById("omvig-billed-upload-btn");
+            const statusBox = document.getElementById("omvig-billed-upload-status");
+            const psInput = document.getElementById("omvig-period-start");
+            const file = fileInput?.files?.[0] || null;
+            if (!file) return showToast("Please select the Billed Consumer List file first", false);
+            setActionButtonState(uploadBtn, "processing", "Upload Billed List");
+            const say = (html, color) => { if (statusBox) { statusBox.style.display = "block"; statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:${color};">${html}</div>`; } };
+            say("Reading file...", "#1d4ed8");
+            try {
+                const { rows, skippedDisposed } = await readOmvigBilledFile(file);
+                if (!rows.length) throw new Error("No valid row found in the file");
+                say(`Uploading ${rows.length} cases... please wait`, "#1d4ed8");
+                const body = { action: "uploadBilledList", admin_password: omvigAdminPasswordEntered, rows };
+                const ps = String(psInput?.value || "").trim();
+                if (ps) body.period_start = ps;
+                const response = await fetchWithTimeout(omvigSubmitScriptUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) }, 180000);
+                const text = await response.text();
+                let parsed = {};
+                try { parsed = JSON.parse(text || "{}"); } catch (_) {}
+                if (parsed.status !== "success") throw new Error(parsed.message || "Upload failed");
+                setActionButtonState(uploadBtn, "done", "Upload Billed List");
+                showToast("Billed list uploaded", true);
+                if (statusBox) statusBox.innerHTML = `
+                    <div style="text-align:center; padding:10px 12px; background:#f0fdf4; border:1.2px solid #86efac; border-radius:12px;">
+                        <div style="font-size:0.85rem; font-weight:950; color:#166534;">✅ Billed List Uploaded</div>
+                        <div style="font-size:0.68rem; font-weight:700; color:#475569; margin-top:4px;">${parsed.total_in_file} cases in the file${skippedDisposed ? ` (${skippedDisposed} Disposed cases skipped)` : ""}</div>
+                    </div>
+                    <div style="margin-top:8px; padding:9px 11px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#334155; line-height:1.6;">
+                        🟢 New cases added: <b>${parsed.added}</b><br>🔄 Existing cases updated: <b>${parsed.updated}</b><br>📤 Earlier cases not in this list (paid/closed): <b>${parsed.not_in_latest}</b><br>📋 Active cases (balance pending at report start): <b>${parsed.active}</b><br>📅 Report start date: <b>${escapeHtml(parsed.freeze_date || "")}</b>
+                    </div>
+                    <div style="margin-top:8px; font-size:0.62rem; font-weight:700; color:#64748b; text-align:center;">Now upload the Payment Details List (Step 2).</div>`;
+                omvigPendingCache_ = {}; omvigPaidCache_ = {}; omvigReportCache_ = null; omvigFreezeStatusCache_ = null; omvigDailyReportCache_ = null;
+                if (fileInput) fileInput.value = "";
+                const nameBox = document.getElementById("omvig-billed-file-name");
+                if (nameBox) nameBox.innerText = "";
+                try { const fresh = await fetchOmvigFreezeStatus_(true); omvigAdminStatus = omvigStatusFrom_(fresh); renderOmvigAdminStatus(); } catch (_) {}
+            } catch (error) {
+                setActionButtonState(uploadBtn, "failed", "Upload Billed List");
+                showToast(error?.message || "Billed list upload failed", false);
+                say(`Upload fail: ${escapeHtml(error?.message || "")}`, "#b91c1c");
+            } finally {
+                setTimeout(() => setActionButtonState(uploadBtn, "idle", "Upload Billed List"), 900);
+            }
         }
 
         function formatOmvigCellDate_(value) {
@@ -14693,28 +14787,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // backend response (parsed.new_matched/new_unmatched) me aate hain,
                 // bas ab yahan dikhaye ja rahe hain.
                 if (statusBox) {
-                    const totalRows = (parsed.matched || 0) + (parsed.unmatched || 0);
-                    const newMatched = parsed.new_matched ?? 0;
-                    const newUnmatched = parsed.new_unmatched ?? 0;
-                    const oldMatched = Math.max(0, (parsed.matched || 0) - newMatched);
-                    const oldUnmatched = Math.max(0, (parsed.unmatched || 0) - newUnmatched);
-                    const unmatchedBlock = parsed.unmatched
-                        ? `<div style="margin-top:8px; padding:9px 11px; background:#fff7ed; border:1.2px solid #fdba74; border-radius:12px; text-align:left;">
-                                <div style="color:#9a3412; font-weight:950; font-size:0.72rem;">⚠️ DC could not be identified for ${parsed.unmatched} rows</div>
-                                <div style="font-weight:700; color:#78350f; font-size:0.66rem; margin-top:3px;">Panchanama No of these rows was not found in the "Pending List". ${newUnmatched} row${newUnmatched === 1 ? "" : "s"} added to the "UNMATCHED" list for the first time${oldUnmatched ? `, the other ${oldUnmatched} were already there` : ""}. Please check the Panchanama No again.</div>
-                            </div>`
-                        : "";
                     statusBox.innerHTML = `
                         <div style="text-align:center; padding:10px 12px; background:#f0fdf4; border:1.2px solid #86efac; border-radius:12px;">
-                            <div style="font-size:0.85rem; font-weight:950; color:#166534;">✅ Upload Successful</div>
-                            <div style="font-size:0.68rem; font-weight:700; color:#475569; margin-top:4px;">Total ${totalRows} rows in the file</div>
+                            <div style="font-size:0.85rem; font-weight:950; color:#166534;">✅ Payment List Uploaded</div>
+                            <div style="font-size:0.68rem; font-weight:700; color:#475569; margin-top:4px;">${parsed.total_in_file} payments in the file</div>
                         </div>
-                        <div style="margin-top:8px; padding:9px 11px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:12px; text-align:left;">
-                            <div style="color:#1d4ed8; font-weight:950; font-size:0.72rem;">🟢 DC matched correctly for ${parsed.matched} rows</div>
-                            <div style="font-weight:700; color:#334155; font-size:0.66rem; margin-top:3px;">Of these, ${newMatched} row${newMatched === 1 ? "" : "s"} were NEW (added to the DC list for the first time)${oldMatched ? `, the other ${oldMatched} already existed (skipped on re-upload - no problem, data is safe)` : ""}.</div>
+                        <div style="margin-top:8px; padding:9px 11px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#334155; line-height:1.6;">
+                            🟢 Payments of Billed cases: <b>${parsed.matched}</b><br>➕ New payments added: <b>${parsed.added}</b> (₹${Math.round(parsed.added_amount || 0).toLocaleString("en-IN")})<br>♻️ Already in the system: <b>${parsed.skipped_duplicate}</b><br>⚪ Not in Billed list (ignored): <b>${parsed.not_in_billed}</b>
                         </div>
-                        ${unmatchedBlock}
-                        <div style="margin-top:8px; font-size:0.62rem; font-weight:700; color:#64748b; text-align:center; line-height:1.5;">ℹ️ A total of ${parsed.skipped_duplicate} rows were already in the system, so they were NOT counted again (this is normal - on re-upload an old entry is not added again, and there is no data loss or error).</div>
+                        ${parsed.mismatch ? `<div style="margin-top:8px; padding:9px 11px; background:#fff7ed; border:1.2px solid #fdba74; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#9a3412; line-height:1.5;">⚠️ For ${parsed.mismatch} cases the payment total in the Billed list does not match the Payment list. Please upload the latest Billed list and the all-time Payment list of the same day.</div>` : `<div style="margin-top:8px; font-size:0.62rem; font-weight:800; color:#166534; text-align:center;">✔ Payment totals match the Billed list for all cases.</div>`}
                         <div style="margin-top:8px; font-size:0.7rem; font-weight:850; color:#334155; text-align:center;">DC tabs updated:<br><span style="font-weight:700;">${(parsed.dc_tabs_updated || []).join(", ") || "-"}</span></div>
                     `;
                 }
@@ -14726,7 +14807,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // hi yahin turant "last upload" line dikh jaani chahiye.
                 try {
                     const freshStatus = await fetchOmvigFreezeStatus_(true);
-                    omvigAdminStatus = { freeze_date: freshStatus.freeze_date, pending_count: freshStatus.pending_count, last_upload_at: freshStatus.last_upload_at, last_upload_summary: freshStatus.last_upload_summary };
+                    omvigAdminStatus = omvigStatusFrom_(freshStatus);
                     renderOmvigAdminStatus();
                 } catch (_) {
                     // status refresh fail ho to bhi upload khud successful ho chuka hai - chup rehte hain, agli baar panel khulne par sahi dikh jayega.
@@ -14874,7 +14955,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // call nahi lagti.
             const lastUploadAt = data?.last_upload_at || "";
             const lastUploadSummary = data?.last_upload_summary || "";
-            omvigFreezeStatusCache_ = { freeze_date: freezeDate, pending_count: pendingCount, last_upload_at: lastUploadAt, last_upload_summary: lastUploadSummary };
+            omvigFreezeStatusCache_ = { freeze_date: freezeDate, pending_count: pendingCount, last_upload_at: lastUploadAt, last_upload_summary: lastUploadSummary, last_billed_upload_at: data?.last_billed_upload_at || "", last_billed_upload_summary: data?.last_billed_upload_summary || "", payment_mismatch_cases: Number(data?.payment_mismatch_cases) || 0 };
             return omvigFreezeStatusCache_;
         }
 
@@ -15191,6 +15272,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         let omvigCaseType = "FREEZE"; // "FREEZE" | "NEW"
         function scOmIsNewCaseView_() { return omvigCaseType === "NEW" && activeViewLevel !== "DC"; }
         function scOmCaseTypeSelectHtml_() {
+            return ""; // NEW FLOW 2026-11-01: naye cases ab Billed list se seedha main report me aate hain, alag NEW view nahi
             if (activeViewLevel === "DC") return "";
             const opt = (v, l) => `<option value="${v}" ${omvigCaseType === v ? "selected" : ""}>${l}</option>`;
             return `<select id="omvig-case-type-select" onchange="setOmvigCaseType(this.value)" style="width:100%; max-width:360px; height:38px; margin:0 auto 6px; display:block; border:2px solid #ea580c; border-radius:10px; padding:0 10px; font-size:0.74rem; font-weight:900; color:#9a3412; background:#fff7ed;">${opt("FREEZE", "📌 FREEZE CASES (freeze list)")}${opt("NEW", "🆕 NEW CASES (not in freeze list)")}</select>`;
@@ -15707,7 +15789,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const lastUploadLine = data.lastUploadAt
                 ? `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:2px;">🕒 Latest Paid Upload: ${escapeHtml(formatIndianDateTimeDisplay_(data.lastUploadAt))}${data.lastUploadSummary ? `<br><span style="font-weight:700; color:#64748b;">${escapeHtml(data.lastUploadSummary)}</span>` : ""}</div>`
                 : "";
-            const freezeLine = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:4px;">Freeze Date: ${escapeHtml(data.freeze_date)}</div>${lastUploadLine}`;
+            const freezeLine = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:4px;">Report Start Date: ${escapeHtml(data.freeze_date)}</div>${lastUploadLine}`;
             let bodyHtml;
             const slabRows = omvigApplySlab_(data.rowsWithStatus);
             if (activeViewLevel === "DC") {
@@ -15820,7 +15902,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (!data.freeze_date) {
                     progress.stop();
                     if (myToken !== omvigProgressToken) return;
-                    body.innerHTML = toggleHtml + `<div style="text-align:center; color:#9f1239; font-size:0.72rem; margin-top:10px;">O&M/VIG is not frozen yet. Please set the Freeze Date from the Admin panel of Sub DN Chhapara under "🔒 ADMIN O&M/VIG UPLOAD".</div>`;
+                    body.innerHTML = toggleHtml + `<div style="text-align:center; color:#9f1239; font-size:0.72rem; margin-top:10px;">No O&M/VIG data yet. Please upload the Billed List and the Payment List from the Admin panel of Sub DN Chhapara under "🔒 ADMIN O&M/VIG UPLOAD".</div>`;
                     return;
                 }
                 const html = toggleHtml + renderOmvigReportHtml_(data, omNewHtml);
@@ -16228,7 +16310,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         async function scOmvigReportDownloadCore_(fmt) {
             try {
                 const data = await loadOmvigReportData_();
-                if (!data.freeze_date) return showToast("Please set the Freeze Date first", false);
+                if (!data.freeze_date) return showToast("Please upload the Billed List first", false);
                 const omNewDl = (scOmNewCasesScopeDiv_() === null || omvigFilterStatus === "PENDING" || scOmSlabOn_()) ? null : await fetchOmvigDailyReport_().catch(() => null);
                 const omFzDl = scOmIsoDate_(data.freeze_date);
                 scOmNewCtx_ = omNewDl ? scOmNewCtxMake_(omNewDl.newCases, omFzDl, omFzDl, getTodayIsoDate()) : null;
@@ -16307,7 +16389,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         else if (state === 1) copy[statusColIndex] = `** ${copy[statusColIndex]} **`;
                         return copy;
                     });
-                    const rows = [[reportTitle], [`Freeze Date: ${data.freeze_date}`], [],
+                    const rows = [[reportTitle], [`Report Start Date: ${data.freeze_date}`], [],
                         ["TOTAL CASES", "PAID COUNT", "PAID %", "PENDING COUNT", "PENDING %"],
                         [totalCount, paidCount, `${paidPercent}%`, pendingCount, `${pendingPercent}%`], []];
                     if (activeViewLevel !== "DC") {
@@ -16393,7 +16475,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // ek chhota, seedha PDF hai - sirf poori list, koi summary table
                 // nahi (jab sirf list chahiye ho to poori summary ka bojh na ho).
                 if (fmt === "PDF_LIST") {
-                    scPdfHeader_(doc, { title: `${reportTitle} - Full List`, lines: [`Freeze Date: ${data.freeze_date}`], color: SC_PDF_THEME.omvig });
+                    scPdfHeader_(doc, { title: `${reportTitle} - Full List`, lines: [`Report Start Date: ${data.freeze_date}`], color: SC_PDF_THEME.omvig });
                     await scPrewarmHindiCells_(drawFullListTable, 26); // SPEED FIX 2026-09-26
                     drawFullListTable(26);
                     scPdfFinalize_(doc); const pdfBlob = doc.output("blob");
@@ -16401,7 +16483,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     return showToast("PDF report request has been sent. If the file does not appear in preview, please check in the browser or GitHub version.", true);
                 }
 
-                scPdfHeader_(doc, { title: reportTitle, lines: [`Freeze Date: ${data.freeze_date}`], color: SC_PDF_THEME.omvig });
+                scPdfHeader_(doc, { title: reportTitle, lines: [`Report Start Date: ${data.freeze_date}`], color: SC_PDF_THEME.omvig });
                 doc.autoTable({
                     startY: 29,
                     head: [["TOTAL CASES", "PAID COUNT", "PAID %", "PENDING COUNT", "PENDING %"]],
