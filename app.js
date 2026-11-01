@@ -14682,7 +14682,16 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         // UPDATE 139: ONE-TIME Full History List (all old cases) - month/date reports of past months use it.
+        function toggleOmvigHistBlock_() {
+            const b = document.getElementById("omvig-hist-block");
+            if (!b) return;
+            if (b.style.display === "none") {
+                if (!confirm("Full History is a ONE-TIME upload and is already done. Daily work only needs Step 1 (Pending list) and Step 2 (Payment list). Open this section anyway?")) return;
+                b.style.display = "block";
+            } else b.style.display = "none";
+        }
         async function uploadOmvigHistoryList() {
+            if (!confirm("WARNING: Full History is a ONE-TIME upload and may already be done. Uploading it again is not needed for daily work. Do you really want to upload it again?")) return;
             const fileInput = document.getElementById("omvig-hist-file-input");
             const uploadBtn = document.getElementById("omvig-hist-upload-btn");
             const statusBox = document.getElementById("omvig-hist-upload-status");
@@ -15638,7 +15647,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const paidCount = rowsWithStatus.filter((r) => r.isPaidNow).length;
             const partPaidCount = rowsWithStatus.filter((r) => !r.isPaidNow && r.paidAmountNow > 0).length;
             const pendingCount = rowsWithStatus.filter((r) => omvigIsInPendingBucket_(r)).length;
-            const scLimO_ = scListLimit_(Infinity); // STATUS PACK 3a: screen par pehle 50, poori list download me
+            const scLimO_ = Math.min(10, scListLimit_(Infinity)); // UPDATE 147: screen par sirf 10 // STATUS PACK 3a: screen par pehle 50, poori list download me
             const rowsHtml = rowsWithStatus.slice(0, scLimO_).map((r) => {
                 const statusLabel = r.isPaidNow ? `PAID${r.paidDateNow ? ` (${r.paidDateNow})` : ""}` : (r.paidAmountNow > 0 ? `PART PAID${r.paidDateNow ? ` (${r.paidDateNow})` : ""}` : "PENDING");
                 const statusColor = r.isPaidNow ? "#166534" : (r.paidAmountNow > 0 ? "#dc2626" : "#1e293b");
@@ -15998,7 +16007,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                      <button class="btn-unique" style="flex:1; min-width:100px; background:#0891b2; color:#fff;" onclick="downloadOmvigReport('PDF_SUMMARY')">📊 Summary PDF</button>
                      <button class="btn-unique" style="flex:1; min-width:100px; background:#dc2626; color:#fff;" onclick="downloadOmvigReport('PDF_LIST')">📋 List PDF</button>
                    </div>`;
-            return freezeLine + (newCasesHtml || "") + bodyHtml + downloadButtons + SC_OMVIG_DL_STATUS_HTML_;
+            return (newCasesHtml || "") + bodyHtml + downloadButtons + SC_OMVIG_DL_STATUS_HTML_;
         }
 
         // USER REQUEST (2026-09-14): "Daily/Monthly" toggle - Revenue jaisa hi,

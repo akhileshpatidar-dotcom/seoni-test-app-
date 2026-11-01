@@ -311,6 +311,8 @@
                 <button id="omvig-paid-upload-btn" class="dashboard-btn" style="width:100%; max-width:360px; margin-top:12px; background:#000; color:#fff !important;" onclick="uploadOmvigPaidList()">UPLOAD PAYMENT LIST</button>
                 <div id="omvig-paid-upload-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
 
+                <button id="omvig-hist-toggle-btn" class="dashboard-btn" style="width:100%; max-width:360px; margin-top:26px; background:#e2e8f0; color:#475569 !important; font-size:0.62rem;" onclick="toggleOmvigHistBlock_()">ONE-TIME FULL HISTORY UPLOAD (ALREADY DONE) - TAP TO OPEN</button>
+                <div id="omvig-hist-block" style="display:none;">
                 <div style="font-size:0.68rem; font-weight:900; color:#0f172a; text-align:center; margin-top:26px;">ONE-TIME - FULL HISTORY LIST (OLD CASES)</div>
                 <div style="width:100%; max-width:360px; margin:6px auto 0; font-size:0.6rem; font-weight:700; color:#475569; text-align:center; line-height:1.5;">Upload the full Power BI list (all cases, paid and pending) only once, so past months and dates show correct Total / Paid / Pending. It does not change today's live Pending.</div>
                 <label style="display:block; width:100%; max-width:360px; margin:10px auto 0; border:2px dashed #94a3b8; border-radius:16px; padding:18px; text-align:center; cursor:pointer; background:#f8fafc;">
@@ -324,6 +326,7 @@
                 </div>
                 <button id="omvig-hist-upload-btn" class="dashboard-btn" style="width:100%; max-width:360px; margin-top:12px; background:#000; color:#fff !important;" onclick="uploadOmvigHistoryList()">UPLOAD FULL HISTORY</button>
                 <div id="omvig-hist-upload-status" style="display:none; margin-top:12px; max-width:360px; margin-left:auto; margin-right:auto; border-radius:14px; padding:10px 14px; font-size:0.68rem; font-weight:850; text-align:center;"></div>
+                </div>
             </div>
         </main>
 
