@@ -35312,6 +35312,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             } else if (act === "help-chat-view") {
                 helpChatBack_(); // USER REQUEST (2026-10-06) Help / Chat with Admin
             } else if (act === "summary-view") {
+                // UPDATE 150: report khuli ho (Daily Brief/O&M/...) to Back = pehle report-picker (ek step), phir pichhli screen.
+                if (summaryModule) { showProgressReportPicker(); return; }
                 if (activeViewLevel === "DC") switchView("dc-dashboard");
                 else if (activeViewLevel === "DIVISION") switchView("dc-selection");
                 else switchView("home");
