@@ -105,6 +105,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         let omvigPaidCache_ = {};    // key: DC name ya "ALL" -> rows[]
         let omvigDailyReportCache_ = null; // { date, rows } - dedicated getDailyReport endpoint ka result (2026-09-15 speed fix)
         let omvigReportCache_ = null; // { scopeKey, rowsWithStatus, freeze_date }
+        let omvigSelMonth = ""; // UPDATE 138: Monthly report month (YYYY-MM), "" = since Report Start Date
+        let omvigSelDate = ""; // UPDATE 138: Daily report date (YYYY-MM-DD), "" = yesterday (default)
+        let omvigDailyDateCache_ = null; // Daily report for a picked date
+        let omvigKnownStartIso_ = ""; // Report Start Date (for month/date pickers)
         let omvigAdminStatus = null;  // { freeze_date, pending_count }
         let omvigFreezeStatusCache_ = null; // fast { freeze_date, pending_count } - see fetchOmvigFreezeStatus_
         // USER REQUEST (2026-09-14): Division/Circle level par drill-down dropdown
@@ -11570,7 +11574,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const pMobDay = mobAgg("DAILY", todayIso);
                 const pMobMonth = mobAgg("MONTHLY", ym);
                 const pOmDay = fetchOmvigDailyReport_(!!forceLive).catch(() => null);
-                const pOmMonth = loadOmvigReportData_(!!forceLive).catch(() => null);
+                const pOmMonth = loadOmvigReportData_(!!forceLive, true).catch(() => null);
                 const pMaster = (async () => { const out = {}; await runWithConcurrencyLimit_(dcs.slice(), 6, async (dc) => { out[normalizeDcName(dc)] = await scBriefMasterState_(dc, !!forceLive); }); return out; })();
                 const pPaid = (async () => {
                     const meta = await scPubPaidMeta_();
@@ -14756,7 +14760,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const statusBox = document.getElementById("omvig-paid-upload-status");
             const file = fileInput?.files?.[0] || null;
             if (!file) return showToast("Please select the Paid List file first", false);
-            setActionButtonState(uploadBtn, "processing", "Upload Paid List");
+            setActionButtonState(uploadBtn, "processing", "Upload Payment List");
             if (statusBox) { statusBox.style.display = "block"; statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:#1d4ed8;">Reading file...</div>`; }
             try {
                 const rows = await readOmvigPaidFile(file);
@@ -14771,7 +14775,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 let parsed = {};
                 try { parsed = JSON.parse(text || "{}"); } catch (_) {}
                 if (parsed.status !== "success") throw new Error(parsed.message || "Upload failed");
-                setActionButtonState(uploadBtn, "done", "Upload Paid List");
+                setActionButtonState(uploadBtn, "done", "Upload Payment List");
                 showToast(parsed.message || "Paid list uploaded", true);
                 // BUG FIX (2026-09-23, USER-REPORTED - "summary samajh nahi aa raha"):
                 // pehle sirf raw "X matched, Y unmatched, Z duplicate skip" ek line me
@@ -14793,7 +14797,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                             <div style="font-size:0.68rem; font-weight:700; color:#475569; margin-top:4px;">${parsed.total_in_file} payments in the file</div>
                         </div>
                         <div style="margin-top:8px; padding:9px 11px; background:#eff6ff; border:1.2px solid #93c5fd; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#334155; line-height:1.6;">
-                            🟢 Payments of Pending-list cases: <b>${parsed.matched}</b><br>➕ New payments added: <b>${parsed.added}</b> (₹${Math.round(parsed.added_amount || 0).toLocaleString("en-IN")})<br>♻️ Already in the system: <b>${parsed.skipped_duplicate}</b><br>⚪ Not in Pending list (ignored): <b>${parsed.not_in_billed}</b>
+                            🟢 Payments of Pending-list cases: <b>${parsed.matched}</b><br>➕ New payments: <b>${parsed.added}</b><br>♻️ Already in the system (refreshed): <b>${parsed.skipped_duplicate}</b><br>💰 Total of these payments: <b>₹${Math.round(parsed.added_amount || 0).toLocaleString("en-IN")}</b><br>⚪ Not in Pending list (ignored): <b>${parsed.not_in_billed}</b>
                         </div>
                         ${parsed.mismatch ? `<div style="margin-top:8px; padding:9px 11px; background:#fff7ed; border:1.2px solid #fdba74; border-radius:12px; text-align:left; font-size:0.66rem; font-weight:750; color:#9a3412; line-height:1.5;">⚠️ For ${parsed.mismatch} cases the payment total in the Pending list does not match the Payment list. Please upload the latest Pending list and the all-time Payment list of the same day.</div>` : `<div style="margin-top:8px; font-size:0.62rem; font-weight:800; color:#166534; text-align:center;">✔ Payment totals match the Pending list for all cases.</div>`}
                         <div style="margin-top:8px; font-size:0.7rem; font-weight:850; color:#334155; text-align:center;">DC tabs updated:<br><span style="font-weight:700;">${(parsed.dc_tabs_updated || []).join(", ") || "-"}</span></div>
@@ -14813,11 +14817,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     // status refresh fail ho to bhi upload khud successful ho chuka hai - chup rehte hain, agli baar panel khulne par sahi dikh jayega.
                 }
             } catch (error) {
-                setActionButtonState(uploadBtn, "failed", "Upload Paid List");
+                setActionButtonState(uploadBtn, "failed", "Upload Payment List");
                 showToast(error?.message || "Paid list upload failed", false);
                 if (statusBox) statusBox.innerHTML = `<div style="text-align:center; font-size:0.75rem; font-weight:800; color:#b91c1c;">Upload fail: ${escapeHtml(error?.message || "")}</div>`;
             } finally {
-                setTimeout(() => setActionButtonState(uploadBtn, "idle", "Upload Paid List"), 900);
+                setTimeout(() => setActionButtonState(uploadBtn, "idle", "Upload Payment List"), 900);
             }
         }
 
@@ -15257,7 +15261,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return on ? html + `<div style="font-size:0.56rem; font-weight:700; color:#9a3412; text-align:center; margin-top:4px;">NEW CASE = a case found in the paid list that is not in the freeze list (separate from the freeze count). The paid list has no DC, so the figure is shown only in the Division/Total row.</div>` : html;
         }
         function scOmSumHead_(on) {
-            const pl = omvigReportMode === "DAILY" ? "YESTERDAY PAID (FREEZE)" : "PAID (FREEZE)";
+            const pl = omvigReportMode === "DAILY" ? omvigDailyPaidLbl_() : "PAID (FREEZE)";
             return ["DC NAME", "TOTAL", `${pl} COUNT`, `${pl} AMT`, "PENDING COUNT", "PENDING AMT", "PAID %", "PENDING %"].concat(on ? ["NEW CASE COUNT", "NEW CASE AMT"] : []);
         }
         function scOmSumRow_(r, on) {
@@ -15392,42 +15396,74 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 () => Array.from(document.querySelectorAll(".omvig-dl-btns button")), fmt, scOmvigNewCasesDownloadCore_);
         }
         // ===== END OM NEW CASES =====
-        function computeOmvigReportRows_(pendingRows, paidByPanchanama, freezeDate) {
+        // UPDATE 138: month window. monthKey "YYYY-MM" -> payments counted only inside that
+        // month (never before Report Start Date); balance is reduced by earlier payments
+        // (Report Start .. month start) so Pending is the true opening balance of that month.
+        function omvigMonthWindow_(freezeDate, monthKey) {
+            if (!/^\d{4}-\d{2}$/.test(monthKey || "")) return null;
+            const fz = scOmIsoDate_(freezeDate) || "";
+            const y = Number(monthKey.slice(0, 4)), m = Number(monthKey.slice(5, 7));
+            const last = new Date(y, m, 0).getDate();
+            let s0 = `${monthKey}-01`;
+            const e0 = `${monthKey}-${String(last).padStart(2, "0")}`;
+            if (fz && s0 < fz) s0 = fz;
+            return { startIso: s0, endIso: e0, monthKey };
+        }
+
+        function computeOmvigReportRows_(pendingRows, paidByPanchanama, freezeDate, monthKey = "") {
             const freezeIso = scOmIsoDate_(freezeDate);
-            return pendingRows.map((r) => {
+            const win = omvigMonthWindow_(freezeDate, monthKey);
+            const out = [];
+            pendingRows.forEach((r) => {
                 const paidList = paidByPanchanama[r.panchanama_no] || [];
-                let paidAmountNow = 0, paidDateNow = "", paidIsoNow = "";
+                let paidAmountNow = 0, paidDateNow = "", paidIsoNow = "", paidBefore = 0;
                 paidList.forEach((p) => {
                     const payDateKey = scOmIsoDate_(p.pay_date);
-                    if (freezeIso && payDateKey && payDateKey >= freezeIso) {
-                        paidAmountNow += p.amount;
-                        if (!paidIsoNow || payDateKey > paidIsoNow) { paidIsoNow = payDateKey; paidDateNow = scOmDmy_(payDateKey); }
+                    if (!(freezeIso && payDateKey && payDateKey >= freezeIso)) return;
+                    if (win) {
+                        if (payDateKey < win.startIso) { paidBefore += p.amount; return; }
+                        if (payDateKey > win.endIso) return;
                     }
+                    paidAmountNow += p.amount;
+                    if (!paidIsoNow || payDateKey > paidIsoNow) { paidIsoNow = payDateKey; paidDateNow = scOmDmy_(payDateKey); }
                 });
-                const balancedAmount = r.balanced_amount;
+                const balancedAmount = win ? (r.balanced_amount - paidBefore) : r.balanced_amount;
+                if (win && balancedAmount <= 0.5) return; // already settled before this month
                 const remainingPending = Math.max(0, balancedAmount - paidAmountNow);
                 const isPaidNow = paidAmountNow > 0 && remainingPending <= 0;
-                return {
+                out.push({
                     ...r,
+                    balanced_amount: balancedAmount,
                     pending_amount: balancedAmount, // buildFreezeDcWiseSummaryRows ke saath field-name reuse ke liye
                     paidAmountNow,
                     remainingPending,
                     isPaidNow,
                     paidDateNow
-                };
+                });
             });
+            return out;
         }
 
-        async function loadOmvigReportData_(forceRefresh = false) {
-            const scopeKey = `${activeViewLevel}:${activeViewLevel === "DC" ? activeDC : (activeViewLevel === "DIVISION" ? activeDiv : "CIRCLE")}`;
+        async function loadOmvigReportData_(forceRefresh = false, noWindow = false) {
+            const monthKey = noWindow ? "" : (omvigSelMonth || "");
+            const baseKey = `${activeViewLevel}:${activeViewLevel === "DC" ? activeDC : (activeViewLevel === "DIVISION" ? activeDiv : "CIRCLE")}`;
+            const scopeKey = `${baseKey}|${monthKey}`;
             if (!forceRefresh && omvigReportCache_ && omvigReportCache_.scopeKey === scopeKey) return omvigReportCache_;
+            // UPDATE 138: same scope, different month -> reuse downloaded raw data, only recompute.
+            if (!forceRefresh && omvigReportCache_ && omvigReportCache_.baseKey === baseKey && omvigReportCache_.raw) {
+                const rw = omvigReportCache_.raw;
+                const rowsM = computeOmvigReportRows_(rw.pendingRows, rw.paidMap, rw.freeze_date, monthKey);
+                const winM = omvigMonthWindow_(rw.freeze_date, monthKey);
+                omvigReportCache_ = { scopeKey, baseKey, raw: rw, rowsWithStatus: rowsM, freeze_date: winM ? winM.startIso : rw.freeze_date, reportStart: rw.freeze_date, monthKey: winM ? monthKey : "", winEnd: winM ? winM.endIso : "", lastUploadAt: rw.lastUploadAt, lastUploadSummary: rw.lastUploadSummary };
+                return omvigReportCache_;
+            }
 
             // Pehle fast freeze-status check - agar freeze hua hi nahi hai to
             // poori (potentially ~9500 row, slow) pending/paid list fetch karne
             // ki zaroorat nahi, seedha empty result de dete hain.
             const freezeStatus = await fetchOmvigFreezeStatus_(forceRefresh);
             if (!freezeStatus.freeze_date) {
-                omvigReportCache_ = { scopeKey, rowsWithStatus: [], freeze_date: "" };
+                omvigReportCache_ = { scopeKey, baseKey, rowsWithStatus: [], freeze_date: "", reportStart: "" };
                 return omvigReportCache_;
             }
             const lastUploadAt = freezeStatus.last_upload_at || "";
@@ -15450,9 +15486,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
             const pendingRows = pending.rows;
             const paidMap = groupOmvigPaidByPanchanama_(paid);
-            const rowsWithStatus = computeOmvigReportRows_(pendingRows, paidMap, pending.freeze_date);
+            const rowsWithStatus = computeOmvigReportRows_(pendingRows, paidMap, pending.freeze_date, monthKey);
+            const winN = omvigMonthWindow_(pending.freeze_date, monthKey);
 
-            omvigReportCache_ = { scopeKey, rowsWithStatus, freeze_date: pending.freeze_date, lastUploadAt, lastUploadSummary };
+            omvigReportCache_ = { scopeKey, baseKey, raw: { pendingRows, paidMap, freeze_date: pending.freeze_date, lastUploadAt, lastUploadSummary }, rowsWithStatus, freeze_date: winN ? winN.startIso : pending.freeze_date, reportStart: pending.freeze_date, monthKey: winN ? monthKey : "", winEnd: winN ? winN.endIso : "", lastUploadAt, lastUploadSummary };
             return omvigReportCache_;
         }
 
@@ -15642,7 +15679,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // zero hai" na samjh baithein, balki samjhein ki yeh sirf us din ke
         // jama (settlement) hain.
         function omvigPaidColLabel_() {
-            return omvigReportMode === "DAILY" ? "YESTERDAY PAID (FREEZE)" : "PAID (FREEZE)";
+            return omvigReportMode === "DAILY" ? omvigDailyPaidLbl_() : "PAID (FREEZE)";
         }
 
         // USER REQUEST (2026-09-14 + fix): DC level par ab poori list seedhe
@@ -15789,7 +15826,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const lastUploadLine = data.lastUploadAt
                 ? `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:2px;">🕒 Latest Paid Upload: ${escapeHtml(formatIndianDateTimeDisplay_(data.lastUploadAt))}${data.lastUploadSummary ? `<br><span style="font-weight:700; color:#64748b;">${escapeHtml(data.lastUploadSummary)}</span>` : ""}</div>`
                 : "";
-            const freezeLine = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:4px;">Report Start Date: ${escapeHtml(data.freeze_date)}</div>${lastUploadLine}`;
+            const freezeLine = `<div style="text-align:center; font-size:0.66rem; font-weight:800; color:#475569; margin-top:4px;">${data.monthKey ? `Month: ${escapeHtml(omvigMonthLabel_(data.monthKey))} (${escapeHtml(scOmDmy_(data.freeze_date))} to ${escapeHtml(scOmDmy_(data.winEnd))})<br><span style="font-weight:700; color:#64748b;">Pending = balance on ${escapeHtml(scOmDmy_(data.freeze_date))}. Paid = payments inside this month.</span>` : `Report Start Date: ${escapeHtml(data.freeze_date)}`}</div>${lastUploadLine}`;
             let bodyHtml;
             const slabRows = omvigApplySlab_(data.rowsWithStatus);
             if (activeViewLevel === "DC") {
@@ -15818,13 +15855,54 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // USER REQUEST (2026-09-14): "Daily/Monthly" toggle - Revenue jaisa hi,
         // top par hamesha dikhta hai (loading/error/success sabhi state me) taaki
         // user kabhi bhi switch kar sake.
+        function omvigMonthLabel_(monthKey) {
+            const names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+            const m = Number(String(monthKey).slice(5, 7));
+            return `${names[m - 1] || ""} ${String(monthKey).slice(0, 4)}`;
+        }
+        function omvigYesterdayIso_() {
+            const yd = new Date(); yd.setDate(yd.getDate() - 1);
+            return `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, "0")}-${String(yd.getDate()).padStart(2, "0")}`;
+        }
+        function renderOmvigPickerHtml_() {
+            const startIso = omvigKnownStartIso_ || "";
+            const inpStyle = "flex:1; height:36px; border-radius:10px; border:2px solid #0d9488; font-size:0.72rem; font-weight:800; color:#0f172a; background:#fff; padding:0 8px;";
+            if (omvigReportMode === "DAILY") {
+                const todayIso = getTodayIsoDate();
+                const val = omvigSelDate || omvigYesterdayIso_();
+                return `<div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+                    <span style="font-size:0.66rem; font-weight:900; color:#0f172a;">DATE</span>
+                    <input type="date" value="${escapeHtml(val)}" ${startIso ? `min="${escapeHtml(startIso)}"` : ""} max="${escapeHtml(todayIso)}" onchange="setOmvigSelDate(this.value)" style="${inpStyle}">
+                    <button type="button" onclick="setOmvigSelDate('')" style="height:36px; padding:0 10px; border-radius:10px; border:2px solid #0d9488; background:${omvigSelDate ? "#fff" : "#0d9488"}; color:${omvigSelDate ? "#0d9488" : "#fff"}; font-size:0.66rem; font-weight:900;">YESTERDAY</button>
+                </div>`;
+            }
+            let opts = `<option value="">Since Report Start Date${startIso ? ` (${escapeHtml(scOmDmy_(startIso))})` : ""}</option>`;
+            if (startIso) {
+                const nowIso = getTodayIsoDate();
+                let y = Number(startIso.slice(0, 4)), m = Number(startIso.slice(5, 7));
+                const endKey = nowIso.slice(0, 7);
+                const keys = [];
+                for (let guard = 0; guard < 60; guard++) {
+                    const k = `${y}-${String(m).padStart(2, "0")}`;
+                    keys.push(k);
+                    if (k >= endKey) break;
+                    m += 1; if (m > 12) { m = 1; y += 1; }
+                }
+                keys.reverse().forEach((k) => { opts += `<option value="${k}" ${omvigSelMonth === k ? "selected" : ""}>${escapeHtml(omvigMonthLabel_(k))}</option>`; });
+            }
+            return `<div style="display:flex; gap:8px; align-items:center; margin-bottom:10px;">
+                <span style="font-size:0.66rem; font-weight:900; color:#0f172a;">MONTH</span>
+                <select onchange="setOmvigSelMonth(this.value)" style="${inpStyle}">${opts}</select>
+            </div>`;
+        }
+
         function renderOmvigModeToggleHtml_() {
             const dailyActive = omvigReportMode === "DAILY";
             const btnStyle = (active) => `flex:1; height:38px; border-radius:10px; border:2px solid #0d9488; font-size:0.72rem; font-weight:900; ${active ? "background:#0d9488; color:#fff;" : "background:#fff; color:#0d9488;"}`;
             return `<div style="display:flex; gap:8px; margin-bottom:10px;">
                 <button type="button" onclick="setOmvigReportMode('DAILY')" style="${btnStyle(dailyActive)}">⚡ DAILY (Fast)</button>
                 <button type="button" onclick="setOmvigReportMode('MONTHLY')" style="${btnStyle(!dailyActive)}">MONTHLY (Full)</button>
-            </div>`;
+            </div>` + renderOmvigPickerHtml_();
         }
 
         function setOmvigReportMode(mode) {
@@ -15833,11 +15911,30 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             loadAndRenderOmvigReport(false);
         }
 
+        // UPDATE 138: Monthly month picker / Daily date picker
+        function setOmvigSelMonth(v) {
+            const k = /^\d{4}-\d{2}$/.test(v || "") ? v : "";
+            if (omvigSelMonth === k) return;
+            omvigSelMonth = k;
+            loadAndRenderOmvigReport(false);
+        }
+        function setOmvigSelDate(v) {
+            let d = /^\d{4}-\d{2}-\d{2}$/.test(v || "") ? v : "";
+            if (d && (d > getTodayIsoDate() || (omvigKnownStartIso_ && d < omvigKnownStartIso_))) {
+                showToast("Date must be between Report Start Date and today", false);
+                d = "";
+            }
+            if (d === omvigYesterdayIso_()) d = ""; // same as default view
+            if (omvigSelDate === d) { loadAndRenderOmvigReport(false); return; }
+            omvigSelDate = d;
+            loadAndRenderOmvigReport(false);
+        }
+
         async function loadAndRenderOmvigReport(forceRefresh = false) {
             const body = document.getElementById("summary-content");
             if (!body) return;
             const myToken = ++omvigProgressToken;
-            const toggleHtml = renderOmvigModeToggleHtml_(); // 29/09 12:32: NEW CASE ab summary column me (dropdown nahi)
+            let toggleHtml = renderOmvigModeToggleHtml_(); // 29/09 12:32: NEW CASE ab summary column me (dropdown nahi)
             omvigCaseType = "FREEZE";
             if (scOmIsNewCaseView_()) { // OM NEW CASES dropdown view (chhota data, snapshot nahi)
                 const progress = renderSyncingProgress(body, () => myToken === omvigProgressToken, "SYNCING DATA... PLEASE WAIT");
@@ -15856,7 +15953,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 return;
             }
             if (omvigReportMode === "DAILY") {
-                const scOmKey = activeViewLevel !== "DC" ? scSnapshotKey_("OMVIG-DAILY") : ""; // SPEED PHASE 1
+                const scOmKey = activeViewLevel !== "DC" ? scSnapshotKey_("OMVIG-DAILY" + (omvigSelDate ? "-" + omvigSelDate : "")) : ""; // SPEED PHASE 1
                 const scOmHost = scOmKey ? await scShowSnapshot_(body, scOmKey) : null;
                 if (myToken !== omvigProgressToken) return;
                 const progress = renderSyncingProgress(scOmHost || body, () => myToken === omvigProgressToken, "SYNCING DATA... PLEASE WAIT");
@@ -15865,6 +15962,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     if (myToken !== omvigProgressToken) { progress.stop(); return; }
                     const omYd = scOmIsoDate_(data.date);
                     scOmNewCtx_ = scOmNewCtxMake_(data.newCases, data.freezeIso, omYd, omYd);
+                    if (data.freezeIso) { omvigKnownStartIso_ = data.freezeIso; toggleHtml = renderOmvigModeToggleHtml_(); }
                     const html = toggleHtml + renderOmvigDailyReportHtml_(data);
                     await progress.finish();
                     if (myToken !== omvigProgressToken) return;
@@ -15886,7 +15984,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // DATA... PLEASE WAIT" wali upar wali line ab hamesha clean rehti hai.
             const levelLabel = activeViewLevel === "DIVISION" ? "Division" : (activeViewLevel === "CIRCLE" ? "Circle" : "DC");
             const subLabel = activeViewLevel === "DC" ? "" : `(${levelLabel} level may take 1-2 minutes)`;
-            const scOmMKey = activeViewLevel !== "DC" ? scSnapshotKey_("OMVIG-MONTHLY") : ""; // SPEED PHASE 1
+            const scOmMKey = activeViewLevel !== "DC" ? scSnapshotKey_("OMVIG-MONTHLY" + (omvigSelMonth ? "-" + omvigSelMonth : "")) : ""; // SPEED PHASE 1
             const scOmMHost = scOmMKey ? await scShowSnapshot_(body, scOmMKey) : null;
             if (myToken !== omvigProgressToken) return;
             const progress = renderSyncingProgress(scOmMHost || body, () => myToken === omvigProgressToken, "SYNCING DATA... PLEASE WAIT", subLabel);
@@ -15897,6 +15995,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const omNewD = pOmNew ? await pOmNew : null;
                 if (myToken !== omvigProgressToken) { progress.stop(); return; }
                 const omFzIso = scOmIsoDate_(data.freeze_date);
+                if (data.reportStart) { omvigKnownStartIso_ = scOmIsoDate_(data.reportStart); toggleHtml = renderOmvigModeToggleHtml_(); }
                 scOmNewCtx_ = omNewD ? scOmNewCtxMake_(omNewD.newCases, omFzIso, omFzIso, getTodayIsoDate()) : null;
                 const omNewHtml = "";
                 if (!data.freeze_date) {
@@ -15931,12 +16030,18 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // sirf ek hi chhoti call lagti hai, active-DC-count se ab call-count ka
         // koi lena-dena nahi, isliye Circle/Division Daily bhi ab seconds me
         // load hona chahiye.
-        async function fetchOmvigDailyReport_(forceRefresh = false) {
-            if (forceRefresh) omvigDailyReportCache_ = null;
-            if (omvigDailyReportCache_) return omvigDailyReportCache_;
-            const url = `${omvigSubmitScriptUrl}?action=getDailyReport&t=${Date.now()}`;
-            const data = (await scPubOmvigJson_("DAILY")) || await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, 45000))); // PUBLIC CACHE 2026-09-26
+        async function fetchOmvigDailyReport_(forceRefresh = false, forDateIso = "") {
+            const fd = /^\d{4}-\d{2}-\d{2}$/.test(forDateIso || "") ? forDateIso : ""; // UPDATE 138: picked date
+            if (fd) {
+                if (!forceRefresh && omvigDailyDateCache_ && omvigDailyDateCache_.forDate === fd) return omvigDailyDateCache_;
+            } else {
+                if (forceRefresh) omvigDailyReportCache_ = null;
+                if (omvigDailyReportCache_) return omvigDailyReportCache_;
+            }
+            const url = `${omvigSubmitScriptUrl}?action=getDailyReport${fd ? `&date=${fd}` : ""}&t=${Date.now()}`;
+            const data = (fd ? null : await scPubOmvigJson_("DAILY")) || await withOmvigRetry_(() => withAppsScriptConcurrencyGate_(omvigSubmitScriptUrl, () => loadRemoteJson(url, 45000))); // PUBLIC CACHE 2026-09-26
             if (data?.status === "error") throw new Error(data.message || "O&M/VIG daily report load fail");
+            if (fd && String(data?.for_date || "") !== fd) throw new Error("Backend update pending: date-wise report not available");
             const rows = Array.isArray(data?.rows) ? data.rows.map((r) => ({
                 dc_name: String(r.dc_name || "").trim(),
                 consumer_name: String(r.consumer_name || "").trim(),
@@ -15975,13 +16080,14 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const latestIso = scOmIsoDate_(data?.date_iso || data?.date);
             const yd = new Date(); yd.setDate(yd.getDate() - 1);
             const yIso = `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, "0")}-${String(yd.getDate()).padStart(2, "0")}`;
-            const noYesterday = !!latestIso && latestIso !== yIso;
+            const noYesterday = !fd && !!latestIso && latestIso !== yIso;
             if (noYesterday) {
                 rows.length = 0;
                 Object.keys(dcSummaryMap).forEach((k) => { dcSummaryMap[k].yesterdayPaidCount = 0; dcSummaryMap[k].yesterdayPaidAmount = 0; });
             }
-            omvigDailyReportCache_ = { date: latestIso ? scOmDmy_(noYesterday ? yIso : latestIso) : "", rows, dcSummaryMap, noYesterday, latestPayDate: scOmDmy_(latestIso), newCases: Array.isArray(data?.new_cases) ? data.new_cases : [], freezeIso: scOmIsoDate_(data?.freeze_date) };
-            return omvigDailyReportCache_;
+            const omvigDailyRes_ = { forDate: fd, date: latestIso ? scOmDmy_(noYesterday ? yIso : latestIso) : "", rows, dcSummaryMap, noYesterday, latestPayDate: scOmDmy_(latestIso), newCases: Array.isArray(data?.new_cases) ? data.new_cases : [], freezeIso: scOmIsoDate_(data?.freeze_date) };
+            if (fd) omvigDailyDateCache_ = omvigDailyRes_; else omvigDailyReportCache_ = omvigDailyRes_;
+            return omvigDailyRes_;
         }
 
         // Daily ke per-DC TRUE summary group - `dcSummaryMap` (backend se) se
@@ -16106,13 +16212,14 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // hai - yeh admin panel me pehle se available hai (fetchOmvigFreezeStatus_),
             // usi cached/fast call ko yahan bhi (parallel) use kar lete hain, koi
             // naya slow call nahi.
-            const [{ date, rows, dcSummaryMap, noYesterday, latestPayDate, newCases, freezeIso }, freezeStatus] = await Promise.all([
-                fetchOmvigDailyReport_(forceRefresh),
+            const [{ date, rows, dcSummaryMap, noYesterday, latestPayDate, newCases, freezeIso, forDate }, freezeStatus] = await Promise.all([
+                fetchOmvigDailyReport_(forceRefresh, omvigSelDate),
                 fetchOmvigFreezeStatus_(forceRefresh).catch(() => null)
             ]);
             const scoped = scopeOmvigDailyRowsToView_(rows);
             return {
                 date,
+                forDate: forDate || "",
                 rowsWithStatus: mapOmvigDailyRowsWithStatus_(scoped, date),
                 dcSummaryMap,
                 noYesterday: !!noYesterday,
@@ -16129,15 +16236,18 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // dropdown/structure, bas "no filter" summary ab TRUE dcSummaryMap se
         // banti hai; Paid/Unpaid dropdown chunne wala hissa purane flat
         // rowsWithStatus-based tareeke se hi hai, wahan koi badlav nahi).
+        function omvigDailyPaidLbl_() {
+            return omvigSelDate ? `PAID ON ${scOmDmy_(omvigSelDate).slice(0, 5)}` : "YESTERDAY PAID (FREEZE)";
+        }
         function renderOmvigDailyDcLevelHtml_(rowsWithStatus, dcSummaryMap) {
             const statusSelectHtml = omvigFilterSelectHtml_("omvig-dc-status-select", "-- Select Paid/Unpaid to View List --", OMVIG_STATUS_OPTIONS_, omvigFilterStatus) + omvigSlabSelectHtml_();
             let summaryHtml, listHtml = "";
             if (omvigFilterStatus) {
                 const filteredRows = filterOmvigRowsByStatus_(rowsWithStatus, omvigFilterStatus);
-                summaryHtml = scOmSummaryTableHtml_("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, activeDC, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, "YESTERDAY PAID (FREEZE)", "PENDING");
+                summaryHtml = scOmSummaryTableHtml_("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, activeDC, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
                 listHtml = renderOmvigDcListHtml_(filteredRows);
             } else {
-                summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, activeDC)], "DC SUMMARY (AMOUNT IN LAKH)", "YESTERDAY PAID (FREEZE)", "PENDING");
+                summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, activeDC)], "DC SUMMARY (AMOUNT IN LAKH)", omvigDailyPaidLbl_(), "PENDING");
             }
             return summaryHtml + statusSelectHtml + listHtml;
         }
@@ -16153,13 +16263,13 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const titleSuffix = omvigFilterStatus ? ` - ${omvigFilterStatus}` : "";
             let summaryHtml;
             if (!omvigFilterDc) {
-                summaryHtml = scOmSummaryTableHtml_("DC NAME", appendOmvigTotalRow_(omvigDailyDivisionDcSummaryRows_(dcSummaryMap, activeDiv, omvigFilterStatus)), `DC WISE SUMMARY${titleSuffix} (AMOUNT IN LAKH)`, "YESTERDAY PAID (FREEZE)", "PENDING");
+                summaryHtml = scOmSummaryTableHtml_("DC NAME", appendOmvigTotalRow_(omvigDailyDivisionDcSummaryRows_(dcSummaryMap, activeDiv, omvigFilterStatus)), `DC WISE SUMMARY${titleSuffix} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
             } else if (!omvigFilterStatus) {
-                summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)", "YESTERDAY PAID (FREEZE)", "PENDING");
+                summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)", omvigDailyPaidLbl_(), "PENDING");
             } else {
                 const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
                 const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
-                summaryHtml = scOmSummaryTableHtml_("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, "YESTERDAY PAID (FREEZE)", "PENDING");
+                summaryHtml = scOmSummaryTableHtml_("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
             }
             return summaryHtml + dcSelectHtml + statusSelectHtml;
         }
@@ -16171,18 +16281,18 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const titleSuffix = omvigFilterStatus ? ` - ${omvigFilterStatus}` : "";
             let summaryHtml, dcSelectHtml = "";
             if (!omvigFilterDivision) {
-                summaryHtml = scOmSummaryTableHtml_("DC NAME", omvigDailyCircleDcWiseSummaryRows_(dcSummaryMap, omvigFilterStatus), `DC WISE SUMMARY${titleSuffix} (AMOUNT IN LAKH)`, "YESTERDAY PAID (FREEZE)", "PENDING");
+                summaryHtml = scOmSummaryTableHtml_("DC NAME", omvigDailyCircleDcWiseSummaryRows_(dcSummaryMap, omvigFilterStatus), `DC WISE SUMMARY${titleSuffix} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
             } else {
                 const dcOptions = getDivisionDcNames(omvigFilterDivision).map((n) => ({ value: n, label: n }));
                 dcSelectHtml = omvigFilterSelectHtml_("omvig-circle-dc-select", "-- Select DC --", dcOptions, omvigFilterDc);
                 if (!omvigFilterDc) {
-                    summaryHtml = scOmSummaryTableHtml_("DC NAME", appendOmvigTotalRow_(omvigDailyDivisionDcSummaryRows_(dcSummaryMap, omvigFilterDivision, omvigFilterStatus)), `DC-WISE SUMMARY${titleSuffix} (AMOUNT IN LAKH)`, "YESTERDAY PAID (FREEZE)", "PENDING");
+                    summaryHtml = scOmSummaryTableHtml_("DC NAME", appendOmvigTotalRow_(omvigDailyDivisionDcSummaryRows_(dcSummaryMap, omvigFilterDivision, omvigFilterStatus)), `DC-WISE SUMMARY${titleSuffix} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
                 } else if (!omvigFilterStatus) {
-                    summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)", "YESTERDAY PAID (FREEZE)", "PENDING");
+                    summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, omvigFilterDc)], "DC SUMMARY (AMOUNT IN LAKH)", omvigDailyPaidLbl_(), "PENDING");
                 } else {
                     const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
                     const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
-                    summaryHtml = scOmSummaryTableHtml_("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, "YESTERDAY PAID (FREEZE)", "PENDING");
+                    summaryHtml = scOmSummaryTableHtml_("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
                 }
             }
             return summaryHtml + divSelectHtml + dcSelectHtml + statusSelectHtml;
@@ -16231,7 +16341,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                    </div>`;
             const ydIso = scOmIsoDate_(data.date);
             const newHtml = ""; // 29/09 12:32: NEW CASE ab summary column me
-            return dateLine + noYdNote + newHtml + bodyHtml + downloadButtons + SC_OMVIG_DL_STATUS_HTML_;
+            const pickNote = data.forDate ? `<div style="text-align:center; font-size:0.64rem; font-weight:800; color:#0f766e; background:#f0fdfa; border-radius:8px; padding:5px 7px; margin-bottom:6px;">Payments of ${escapeHtml(scOmDmy_(data.forDate))}. Pending = balance as on ${escapeHtml(scOmDmy_(data.forDate))}.</div>` : "";
+            return dateLine + pickNote + noYdNote + newHtml + bodyHtml + downloadButtons + SC_OMVIG_DL_STATUS_HTML_;
         }
 
         // USER REQUEST (2026-09-14): on-screen dropdown filter (Division/DC/
