@@ -5125,7 +5125,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (!paymentFilter) return true;
             // Full payment only is PAID. A part-paid consumer still has balance,
             // therefore deliberately belongs to PENDING along with unpaid rows.
-            return paymentFilter === "PAID" ? !!row.isPaidNow : !row.isPaidNow;
+            // UPDATE 154: PAID = jisne koi bhi payment ki (part paid bhi); PART_PAID = sirf part; PENDING = bacha bakaya (part paid ka bhi).
+            const paidAny = Number(row.paidAmountNow || 0) > 0;
+            if (paymentFilter === "PAID") return paidAny;
+            if (paymentFilter === "PART_PAID") return paidAny && !row.isPaidNow;
+            return !row.isPaidNow;
         }
 
         function isFreezeNetBillInSlab(row, slabValue) {
@@ -5299,7 +5303,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             }
             const rowsWithStatusUnsorted = getFreezeFilteredRowsWithStatus(scFzBase_);
             const rowsWithStatus = rowsWithStatusUnsorted.slice().sort((a, b) => Number(b.pending_amount || 0) - Number(a.pending_amount || 0));
-            let paidCount = 0, paidAmount = 0, totalFrozenAmount = 0, pendingAmount = 0, partCount = 0;
+            let paidCount = 0, paidAmount = 0, totalFrozenAmount = 0, pendingAmount = 0, partCount = 0, partAmount = 0, fullPaidCount = 0;
             rowsWithStatus.forEach((r) => {
                 // BUG FIX (2026-09-14) - USER-REPORTED: Circle/Division/DC summary
                 // aur consumer list me "PAID AMOUNT" kabhi-kabhi ekdum bada (galat)
@@ -5317,8 +5321,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // purana/anya payment history hai, is report se related nahi.
                 // 2026-10-25 (USER REQUEST) PAID NIYAM: Paid count = poora jama; Paid Amt = mili rakam (part-paid ki jama rakam bhi, bill tak seemit);
                 // Pending = bacha bakaya (part-paid ka bhi); part-paid ki ginti alag (partCount) - Pending count me bhi.
-                if (r.isPaidNow) paidCount += 1;
-                if (Number(r.paidAmountNow || 0) > 0) { paidAmount += Math.min(Number(r.paidAmountNow || 0), Number(r.pending_amount || 0)); if (!r.isPaidNow) partCount += 1; }
+                // UPDATE 154: Paid count = koi bhi payment (part paid bhi); Part Paid alag (count+amt); Pending = bacha bakaya (part ka bhi)
+                if (r.isPaidNow) fullPaidCount += 1;
+                if (Number(r.paidAmountNow || 0) > 0) { const pa_ = Math.min(Number(r.paidAmountNow || 0), Number(r.pending_amount || 0)); paidCount += 1; paidAmount += pa_; if (!r.isPaidNow) { partCount += 1; partAmount += pa_; } }
                 totalFrozenAmount += Number(r.pending_amount || 0);
                 // USER REQUEST (2026-09-13): Division/Circle summary me "abhi kitna
                 // bakaya hai" saaf dikhna chahiye - "Frozen Total Amount" wahi
@@ -5335,7 +5340,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return {
                 active, error: false, rowsWithStatus, noDuesRows, allScopedRows: scopedRowsWithStatus,
                 totals: {
-                    totalCount, paidCount, partCount, pendingCount: totalCount - paidCount, paidAmount, totalFrozenAmount, pendingAmount,
+                    totalCount, paidCount, partCount, partAmount, pendingCount: totalCount - fullPaidCount, paidAmount, totalFrozenAmount, pendingAmount,
                     paidPercent: totalCount ? ((paidCount / totalCount) * 100).toFixed(1) : "0.0"
                 }
             };
@@ -5717,7 +5722,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // ka SUB_TOTAL + ek GRAND_TOTAL row (buildRevenueNonPayeeGroupSummary
         // jaisा hi structure).
         function buildFreezeDcWiseSummaryRows(rowsWithStatus, noDuesRows) {
-            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, noDuesCount: 0, partCount: 0 });
+            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, noDuesCount: 0, partCount: 0, partAmount: 0 });
             const withPercents = (g) => ({
                 ...g,
                 paidPercent: g.totalCount ? ((g.paidCount / g.totalCount) * 100).toFixed(1) : "0.0",
@@ -5735,9 +5740,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // history tak nahi (jo AG/seasonal consumers ke liye ekdum bada
                 // galat number dikhata tha).
                 // 2026-10-25 PAID NIYAM: Paid count = poora jama; Paid Amt = mili rakam (part-paid ki bhi); Pending = bacha bakaya (part-paid ka bhi)
-                if (r.isPaidNow) { g.paidCount += 1; }
-                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); if (Number(r.paidAmountNow || 0) > 0) g.partCount += 1; }
-                if (Number(r.paidAmountNow || 0) > 0) g.paidAmount += Math.min(Number(r.paidAmountNow || 0), Number(r.pending_amount || 0));
+                // UPDATE 154: Paid = koi bhi payment (part paid bhi); Part Paid alag (count+amt); Pending = bacha bakaya (part ka bhi)
+                if (!r.isPaidNow) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (Number(r.paidAmountNow || 0) > 0) { const pa_ = Math.min(Number(r.paidAmountNow || 0), Number(r.pending_amount || 0)); g.paidCount += 1; g.paidAmount += pa_; if (!r.isPaidNow) { g.partCount += 1; g.partAmount += pa_; } }
             });
 
             (noDuesRows || []).forEach((r) => {
@@ -5754,7 +5759,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // USER REQUEST (2026-09-27): Arrears 1 Lakh jaisa - Division par bhi TOTAL row.
                 const divTotalRow = emptyGroup(getDivisionTotalLabel(activeDiv));
                 divDcRows.forEach((r) => {
-                    divTotalRow.totalCount += r.totalCount; divTotalRow.noDuesCount += r.noDuesCount; divTotalRow.partCount += r.partCount; divTotalRow.paidCount += r.paidCount; divTotalRow.paidAmount += r.paidAmount;
+                    divTotalRow.totalCount += r.totalCount; divTotalRow.noDuesCount += r.noDuesCount; divTotalRow.partCount += r.partCount; divTotalRow.partAmount += (r.partAmount || 0); divTotalRow.paidCount += r.paidCount; divTotalRow.paidAmount += r.paidAmount;
                     divTotalRow.pendingCount += r.pendingCount; divTotalRow.pendingAmount += r.pendingAmount;
                 });
                 return [...divDcRows, { ...withPercents(divTotalRow), type: "GRAND_TOTAL" }];
@@ -5769,7 +5774,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 });
                 const selTotal = emptyGroup(getDivisionTotalLabel(selDiv_));
                 dcRowsSel.forEach((r) => {
-                    selTotal.totalCount += r.totalCount; selTotal.noDuesCount += r.noDuesCount; selTotal.partCount += r.partCount; selTotal.paidCount += r.paidCount; selTotal.paidAmount += r.paidAmount;
+                    selTotal.totalCount += r.totalCount; selTotal.noDuesCount += r.noDuesCount; selTotal.partCount += r.partCount; selTotal.partAmount += (r.partAmount || 0); selTotal.paidCount += r.paidCount; selTotal.paidAmount += r.paidAmount;
                     selTotal.pendingCount += r.pendingCount; selTotal.pendingAmount += r.pendingAmount;
                 });
                 return [...dcRowsSel, { ...withPercents(selTotal), type: "GRAND_TOTAL" }];
@@ -5786,11 +5791,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 rows.push(...dcRows);
                 const divTotal = emptyGroup(getDivisionTotalLabel(divisionName));
                 dcRows.forEach((r) => {
-                    divTotal.totalCount += r.totalCount; divTotal.noDuesCount += r.noDuesCount; divTotal.partCount += r.partCount; divTotal.paidCount += r.paidCount; divTotal.paidAmount += r.paidAmount;
+                    divTotal.totalCount += r.totalCount; divTotal.noDuesCount += r.noDuesCount; divTotal.partCount += r.partCount; divTotal.partAmount += (r.partAmount || 0); divTotal.paidCount += r.paidCount; divTotal.paidAmount += r.paidAmount;
                     divTotal.pendingCount += r.pendingCount; divTotal.pendingAmount += r.pendingAmount;
                 });
                 rows.push({ ...withPercents(divTotal), type: "SUB_TOTAL" });
-                grand.totalCount += divTotal.totalCount; grand.noDuesCount += divTotal.noDuesCount; grand.partCount += divTotal.partCount; grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
+                grand.totalCount += divTotal.totalCount; grand.noDuesCount += divTotal.noDuesCount; grand.partCount += divTotal.partCount; grand.partAmount += (divTotal.partAmount || 0); grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
                 grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount;
             });
             rows.push({ ...withPercents(grand), type: "GRAND_TOTAL" });
@@ -5876,14 +5881,14 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         function renderFreezeDcWiseSummaryHtml(rowsWithStatus, noDuesRows) {
-            return renderFreezeGroupSummaryTableHtml("DC NAME", buildFreezeDcWiseSummaryRows(rowsWithStatus, noDuesRows), "DC WISE SUMMARY (AMOUNT IN LAKH)", "", "", false, Array.isArray(noDuesRows), true);
+            return renderFreezeGroupSummaryTableHtml("DC NAME", buildFreezeDcWiseSummaryRows(rowsWithStatus, noDuesRows), "DC WISE SUMMARY (AMOUNT IN LAKH)", "", "", false, Array.isArray(noDuesRows), true, true);
         }
 
         // DC-level scope ke liye HQ-wise wahi group summary (buildFreezeDcWiseSummaryRows
         // jaisa hi structure, bas dc_name ki jagah hq_name se group hota hai - koi
         // SUB_TOTAL/GRAND_TOTAL nahi, kyonki DC-level par divisions nahi hote).
         function buildFreezeHqWiseSummaryRows(rowsWithStatus, noDuesRows) {
-            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, noDuesCount: 0, partCount: 0 });
+            const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, noDuesCount: 0, partCount: 0, partAmount: 0 });
             const map = {};
             (rowsWithStatus || []).forEach((r) => {
                 const key = String(r.hq_name || "").trim().toUpperCase() || "GENERAL";
@@ -5896,9 +5901,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // history tak nahi (jo AG/seasonal consumers ke liye ekdum bada
                 // galat number dikhata tha).
                 // 2026-10-25 PAID NIYAM: Paid count = poora jama; Paid Amt = mili rakam (part-paid ki bhi); Pending = bacha bakaya (part-paid ka bhi)
-                if (r.isPaidNow) { g.paidCount += 1; }
-                else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); if (Number(r.paidAmountNow || 0) > 0) g.partCount += 1; }
-                if (Number(r.paidAmountNow || 0) > 0) g.paidAmount += Math.min(Number(r.paidAmountNow || 0), Number(r.pending_amount || 0));
+                // UPDATE 154: Paid = koi bhi payment (part paid bhi); Part Paid alag (count+amt); Pending = bacha bakaya (part ka bhi)
+                if (!r.isPaidNow) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (Number(r.paidAmountNow || 0) > 0) { const pa_ = Math.min(Number(r.paidAmountNow || 0), Number(r.pending_amount || 0)); g.paidCount += 1; g.paidAmount += pa_; if (!r.isPaidNow) { g.partCount += 1; g.partAmount += pa_; } }
             });
             (noDuesRows || []).forEach((r) => {
                 const key = String(r.hq_name || "").trim().toUpperCase() || "GENERAL";
@@ -5909,14 +5914,14 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // USER REQUEST (2026-09-27): Arrears 1 Lakh jaisa - HQ-wise summary me bhi DC TOTAL row.
             const hqTotal = emptyGroup(`${normalizeDcName(getFreezeSingleDcName_() || activeDC) || "DC"} TOTAL`);
             hqRows.forEach((g) => {
-                hqTotal.totalCount += g.totalCount; hqTotal.noDuesCount += g.noDuesCount; hqTotal.partCount += g.partCount; hqTotal.paidCount += g.paidCount; hqTotal.paidAmount += g.paidAmount;
+                hqTotal.totalCount += g.totalCount; hqTotal.noDuesCount += g.noDuesCount; hqTotal.partCount += g.partCount; hqTotal.partAmount += (g.partAmount || 0); hqTotal.paidCount += g.paidCount; hqTotal.paidAmount += g.paidAmount;
                 hqTotal.pendingCount += g.pendingCount; hqTotal.pendingAmount += g.pendingAmount;
             });
             return hqRows.length ? [...hqRows, { ...hqTotal, type: "GRAND_TOTAL" }] : hqRows;
         }
 
         function renderFreezeHqWiseSummaryHtml(rowsWithStatus, noDuesRows) {
-            return renderFreezeGroupSummaryTableHtml(revenueHqLabelUpper(getFreezeSingleDcName_() || activeDC), buildFreezeHqWiseSummaryRows(rowsWithStatus, noDuesRows), `${activeViewLevel !== "DC" && getFreezeSingleDcName_() ? getFreezeSingleDcName_() + " - " : ""}HQ WISE SUMMARY (AMOUNT IN LAKH)`, "", "", false, Array.isArray(noDuesRows), true);
+            return renderFreezeGroupSummaryTableHtml(revenueHqLabelUpper(getFreezeSingleDcName_() || activeDC), buildFreezeHqWiseSummaryRows(rowsWithStatus, noDuesRows), `${activeViewLevel !== "DC" && getFreezeSingleDcName_() ? getFreezeSingleDcName_() + " - " : ""}HQ WISE SUMMARY (AMOUNT IN LAKH)`, "", "", false, Array.isArray(noDuesRows), true, true);
         }
 
         // USER REQUEST (2026-09-14): Freeze Report (NP3/NP6/Since Connection/Top20/50)
@@ -5929,7 +5934,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function buildFreezeActiveFiltersLabel_() {
             if (isFreezeCategoryDefaultersType()) {
                 const g = freezeDefaultersGovtFilter === "GOVT" ? "Govt" : (freezeDefaultersGovtFilter === "NONGOVT" ? "Non Govt" : "All (Govt + Non Govt)");
-                const p = freezeDefaultersPaymentFilter === "PAID" ? "Paid (Full Only)" : (freezeDefaultersPaymentFilter === "PENDING" ? "Pending (Unpaid + Part Paid)" : "All Payment Status");
+                const p = freezeDefaultersPaymentFilter === "PAID" ? "Paid (incl. Part Paid)" : (freezeDefaultersPaymentFilter === "PART_PAID" ? "Part Paid only" : (freezeDefaultersPaymentFilter === "PENDING" ? "Pending (Unpaid + Part Paid balance)" : "All Payment Status"));
                 return `Filters: ${g} | Payment: ${p}`;
             }
             const f = freezeNonPayeeFilterState;
@@ -5941,7 +5946,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             parts.push(`Category: ${f.category || "All"}`);
             parts.push(`Slab: ${f.slab || "All"}`);
             parts.push(`Govt: ${f.govt === "GOVT" ? "Govt" : (f.govt === "NONGOVT" ? "Non Govt" : "All")}`);
-            parts.push(`Payment: ${f.payment === "PAID" ? "Paid (Full Only)" : (f.payment === "PENDING" ? "Pending (Unpaid + Part Paid)" : "All")}`);
+            parts.push(`Payment: ${f.payment === "PAID" ? "Paid (incl. Part Paid)" : (f.payment === "PART_PAID" ? "Part Paid only" : (f.payment === "PENDING" ? "Pending (Unpaid + Part Paid balance)" : "All"))}`);
             return `Filters: ${parts.join(" | ")}`;
         }
 
@@ -5969,10 +5974,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // aur is download dono me) ab PAID/PENDING amount LAKH me dikhaegi (jaise
             // 50000 -> 0.50) - poora/complete amount sirf DC-level ki consumer LIST
             // me dikhta rahega (yahan disturb nahi kiya).
-            const headers = ["DC NAME", "TOTAL CONSUMER", ...(ndCol_ ? ["NO DUES"] : []), "PAID COUNT", "PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %", "PART PAID COUNT"];
+            const headers = ["DC NAME", "TOTAL CONSUMER", ...(ndCol_ ? ["NO DUES"] : []), "PAID COUNT", "PAID AMT (LAKH)", "PART PAID COUNT", "PART PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %"];
             const bodyRows = summaryRows.map((r) => [
-                r.name, ndCol_ ? r.totalCount + (r.noDuesCount || 0) : r.totalCount, ...(ndCol_ ? [r.noDuesCount || 0] : []), r.paidCount, formatRevenueLakhValue(r.paidAmount),
-                r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${r.paidPercent}%`, `${r.pendingPercent}%`, r.partCount || 0
+                r.name, ndCol_ ? r.totalCount + (r.noDuesCount || 0) : r.totalCount, ...(ndCol_ ? [r.noDuesCount || 0] : []), r.paidCount, formatRevenueLakhValue(r.paidAmount), r.partCount || 0, formatRevenueLakhValue(r.partAmount || 0),
+                r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${r.paidPercent}%`, `${r.pendingPercent}%`
             ]);
             const rowTypeFlags = summaryRows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
             const scope = activeViewLevel === "DIVISION" ? activeDiv : (freezeNonPayeeFilterState.division || "SEONI CIRCLE");
@@ -6021,11 +6026,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const summaryRows = buildFreezeHqWiseSummaryRows(data.rowsWithStatus, data.noDuesRows);
             const ndCol_ = Array.isArray(data.noDuesRows); // 2026-10-23: NO DUES column
             const nameColLabel = revenueHqLabelUpper(getFreezeSingleDcName_() || activeDC);
-            const headers = [nameColLabel, "TOTAL CONSUMER", ...(ndCol_ ? ["NO DUES"] : []), "PAID COUNT", "PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %", "PART PAID COUNT"];
+            const headers = [nameColLabel, "TOTAL CONSUMER", ...(ndCol_ ? ["NO DUES"] : []), "PAID COUNT", "PAID AMT (LAKH)", "PART PAID COUNT", "PART PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %"];
             const bodyRows = summaryRows.map((r) => {
                 const paidPercent = r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0";
                 const pendingPercent = r.totalCount ? ((r.pendingCount / r.totalCount) * 100).toFixed(1) : "0.0";
-                return [r.name, ndCol_ ? r.totalCount + (r.noDuesCount || 0) : r.totalCount, ...(ndCol_ ? [r.noDuesCount || 0] : []), r.paidCount, formatRevenueLakhValue(r.paidAmount), r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${paidPercent}%`, `${pendingPercent}%`, r.partCount || 0];
+                return [r.name, ndCol_ ? r.totalCount + (r.noDuesCount || 0) : r.totalCount, ...(ndCol_ ? [r.noDuesCount || 0] : []), r.paidCount, formatRevenueLakhValue(r.paidAmount), r.partCount || 0, formatRevenueLakhValue(r.partAmount || 0), r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${paidPercent}%`, `${pendingPercent}%`];
             });
             const hqRowTypes = summaryRows.map((r) => r.type || "");
             const scope = `DC - ${getFreezeSingleDcName_() || activeDC}`;
@@ -6261,7 +6266,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     </select>
                     <select onchange="setFreezePaymentFilter(this.value)" style="width:100%; height:38px; margin:5px auto 0; display:block; border:1.5px solid #fda4af; border-radius:12px; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a; background:#ffffff;">
                         <option value="">All Payment Status</option>
-                        <option value="PAID" ${freezeDefaultersPaymentFilter === "PAID" ? "selected" : ""}>Paid (Full Payment Only)</option>
+                        <option value="PAID" ${freezeDefaultersPaymentFilter === "PAID" ? "selected" : ""}>Paid (incl. Part Paid)</option>
+                        <option value="PART_PAID" ${freezeDefaultersPaymentFilter === "PART_PAID" ? "selected" : ""}>Part Paid only</option>
                         <option value="PENDING" ${freezeDefaultersPaymentFilter === "PENDING" ? "selected" : ""}>Pending (Unpaid + Part Paid)</option>
                     </select>`;
             } else {
@@ -6298,7 +6304,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     </select>
                     <select onchange="setFreezePaymentFilter(this.value)" style="${freezeSelectStyle}">
                         <option value="">All Payment Status</option>
-                        <option value="PAID" ${f.payment === "PAID" ? "selected" : ""}>Paid (Full Payment Only)</option>
+                        <option value="PAID" ${f.payment === "PAID" ? "selected" : ""}>Paid (incl. Part Paid)</option>
+                        <option value="PART_PAID" ${f.payment === "PART_PAID" ? "selected" : ""}>Part Paid only</option>
                         <option value="PENDING" ${f.payment === "PENDING" ? "selected" : ""}>Pending (Unpaid + Part Paid)</option>
                     </select>`;
             }
@@ -8509,7 +8516,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 && (!f.slab || r.slab === f.slab)
                 && (!f.govt || (f.govt === "GOVT" ? r.govt : !r.govt))
                 && (!f.payment || (isFreeze
-                    ? r.status === f.payment
+                    ? (f.payment === "PAID" ? r.paidAmount > 0 : r.status === f.payment) // UPDATE 154: PAID me part paid bhi
                     : (f.payment === "PAID" ? r.inPaidBucket : true)))
             ));
         }
@@ -8518,20 +8525,21 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // HQ-wise; Division -> uski saari DC + Division total; Circle -> har
         // Division ki saari DC + Division total, aur aakhri me Circle total.
         function buildArrears1LSummary_(rows, selectedDc, selectedDiv, freezeRule) {
-            const newGroup = (name, type) => ({ name, type, total: 0, paidCount: 0, paidAmount: 0, unpaidCount: 0, unpaidAmount: 0, partCount: 0 });
+            const newGroup = (name, type) => ({ name, type, total: 0, paidCount: 0, paidAmount: 0, unpaidCount: 0, unpaidAmount: 0, partCount: 0, partAmount: 0 });
             const addRow = (g, r) => {
                 g.total += 1;
                 if (freezeRule) {
                     // 2026-10-25 PAID NIYAM (Freeze): Paid count = poora jama; Paid Amt = mili rakam (part-paid ki bhi);
                     // Unpaid/Pending = bacha bakaya (part-paid ka bhi); part-paid ki ginti alag (Pending count me bhi).
-                    if (r.paidAmount > 0) { g.paidAmount += r.paidAmount; if (r.balance <= 0) g.paidCount += 1; }
-                    if (r.balance > 0) { g.unpaidCount += 1; g.unpaidAmount += r.balance; if (r.paidAmount > 0) g.partCount += 1; }
+                    // UPDATE 154: Paid = koi bhi payment (part paid bhi); Part Paid alag (count+amt); Pending = bacha bakaya (part ka bhi)
+                    if (r.paidAmount > 0) { g.paidAmount += r.paidAmount; g.paidCount += 1; if (r.balance > 0) { g.partCount += 1; g.partAmount += r.paidAmount; } }
+                    if (r.balance > 0) { g.unpaidCount += 1; g.unpaidAmount += r.balance; }
                 } else if (r.inPaidBucket) { g.paidCount += 1; g.paidAmount += r.paidAmount; }
                 else { g.unpaidCount += 1; g.unpaidAmount += r.balance; }
             };
             const addGroup = (target, g) => {
                 target.total += g.total; target.paidCount += g.paidCount; target.paidAmount += g.paidAmount;
-                target.unpaidCount += g.unpaidCount; target.unpaidAmount += g.unpaidAmount; target.partCount += g.partCount;
+                target.unpaidCount += g.unpaidCount; target.unpaidAmount += g.unpaidAmount; target.partCount += g.partCount; target.partAmount += (g.partAmount || 0);
             };
             const singleDc = activeViewLevel === "DC" ? activeDC : (selectedDc || "");
             if (singleDc) {
@@ -8633,8 +8641,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (isFreeze) {
                 html += `<select onchange="${setter}('payment', this.value)" style="${selectStyle}">
                     <option value="">All Payment Status</option>
-                    <option value="PAID" ${f.payment === "PAID" ? "selected" : ""}>Paid (Full Payment)</option>
-                    <option value="PART_PAID" ${f.payment === "PART_PAID" ? "selected" : ""}>Part Paid</option>
+                    <option value="PAID" ${f.payment === "PAID" ? "selected" : ""}>Paid (incl. Part Paid)</option>
+                    <option value="PART_PAID" ${f.payment === "PART_PAID" ? "selected" : ""}>Part Paid only</option>
                     <option value="UNPAID" ${f.payment === "UNPAID" ? "selected" : ""}>Unpaid (No payment)</option>
                 </select>` + scFzResetBtnHtml_();
             }
@@ -8654,11 +8662,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     scFzTileHtml_("#fff1f2", "#9f1239", "Pending Amt", scFzLakh_(gt.unpaidAmount) + " L", "")
                 ], 3, 6);
             }
-            const grid = isFreeze ? "grid-template-columns: 1.3fr 0.7fr 1fr 1fr 0.5fr;" : "grid-template-columns: 1.3fr 0.7fr 1fr 1fr;";
-            html += `<div class="summary-wrapper" style="margin-top:10px;"><div class="summary-table-header" style="${grid}"><div>${escapeHtml(summary.colLabel)}</div><div>TOTAL CONSUMER</div><div>PAID (LAKH)<br>COUNT / AMT</div><div>UNPAID (LAKH)<br>COUNT / AMT</div>${isFreeze ? "<div>PART<br>PAID</div>" : ""}</div>`;
+            const grid = isFreeze ? "grid-template-columns: 1.2fr 0.6fr 0.95fr 0.95fr 0.95fr;" : "grid-template-columns: 1.3fr 0.7fr 1fr 1fr;";
+            html += `<div class="summary-wrapper" style="margin-top:10px;"><div class="summary-table-header" style="${grid}"><div>${escapeHtml(summary.colLabel)}</div><div>TOTAL CONSUMER</div><div>PAID (LAKH)<br>COUNT / AMT</div>${isFreeze ? "<div>PART PAID (LAKH)<br>COUNT / AMT</div>" : ""}<div>${isFreeze ? "PENDING" : "UNPAID"} (LAKH)<br>COUNT / AMT</div></div>`;
             summary.rows.forEach((g) => {
                 const rowClass = g.type === "GRAND_TOTAL" ? " blue-bold" : (g.type === "SUB_TOTAL" ? " subdn-bold" : "");
-                html += `<div class="summary-table-row${rowClass}" style="${grid}"><div>${escapeHtml(g.name)}</div><div class="font-black">${g.total}</div><div class="font-black" style="color:#166534;">${g.paidCount} / ${formatRevenueLakhValue(g.paidAmount)}</div><div class="font-black" style="color:#9f1239;">${g.unpaidCount} / ${formatRevenueLakhValue(g.unpaidAmount)}</div>${isFreeze ? `<div class="font-black" style="color:#b45309;">${g.partCount || 0}</div>` : ""}</div>`;
+                html += `<div class="summary-table-row${rowClass}" style="${grid}"><div>${escapeHtml(g.name)}</div><div class="font-black">${g.total}</div><div class="font-black" style="color:#166534;">${g.paidCount} / ${formatRevenueLakhValue(g.paidAmount)}</div>${isFreeze ? `<div class="font-black" style="color:#b45309;">${g.partCount || 0} / ${formatRevenueLakhValue(g.partAmount || 0)}</div>` : ""}<div class="font-black" style="color:#9f1239;">${g.unpaidCount} / ${formatRevenueLakhValue(g.unpaidAmount)}</div></div>`;
             });
             html += `</div>`;
             const kindArgs = isFreeze ? "true" : "false";
@@ -8947,7 +8955,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 c.n += 1; c.a += Number(r.netBill) || 0;
                 g.tot.n += 1; g.tot.a += Number(r.netBill) || 0;
                 // 2026-10-25 PAID NIYAM: Paid No = poora jama; Paid Amt = mili rakam (part-paid ki bhi); Pending = bacha bakaya (part-paid ka bhi); Part Paid alag ginti
-                if (r.paidAmount > 0) { g.paid.a += r.paidAmount; if (r.balance <= 0) g.paid.n += 1; }
+                if (r.paidAmount > 0) { g.paid.a += r.paidAmount; g.paid.n += 1; } // UPDATE 154: Paid count me part paid bhi
                 if (r.balance > 0) { g.pend.n += 1; g.pend.a += r.balance; if (r.paidAmount > 0) g.part.n += 1; }
             });
             let layout = [];
@@ -9005,7 +9013,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const reportTitle = `Freeze-Revenue Report - Arrears Slab Wise - ${scope} - Summary`;
                 const periodLine = `Base: Master Data (Net Bill > 0, slab wise) | Paid: Cash List (LV5: Metered = Normal list, Unmetered = AG list) | ${scFzDownloadLine_(null)}`;
                 const filtersLine = "Filters - None (all slabs, all categories)";
-                const note = "Paid = consumers who paid in full; Paid Amt = amount received as per Cash List (part payments included). Pending = consumers with balance left; Pending Amt = remaining arrears (part-paid balance included). Part Paid = consumers who paid part (already counted in Pending). Amounts in Lakh.";
+                const note = "Paid = consumers who made any payment (part paid included); Paid Amt = amount received as per Cash List. Pending = consumers with balance left; Pending Amt = remaining arrears (part-paid balance included). Part Paid = of the Paid consumers, those who paid only part (also counted in Pending). Amounts in Lakh.";
                 const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
                 const rs = (v) => formatRevenueLakhValue(Number(v) || 0); // 2026-10-24: Summary amount LAKH me
                 const slabs = ARREARS_SLABS_.map((sl) => ({ k: sl.k, l: ARREARS_SLAB_PDF_LABELS_[sl.k] || sl.k }));
@@ -9154,8 +9162,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 let statusCol = -1;
                 if (kind === "SUMMARY") {
                     const summary = buildArrears1LSummary_(rows, activeViewLevel === "DC" ? "" : f.dc, f.division, isFreeze);
-                    headers = [summary.colLabel, "TOTAL CONSUMER", "PAID COUNT", "PAID AMT (LAKH)", "UNPAID COUNT", "UNPAID AMT (LAKH)", ...(isFreeze ? ["PART PAID COUNT"] : [])];
-                    bodyRows = summary.rows.map((g) => [g.name, g.total, g.paidCount, formatRevenueLakhValue(g.paidAmount), g.unpaidCount, formatRevenueLakhValue(g.unpaidAmount), ...(isFreeze ? [g.partCount || 0] : [])]);
+                    headers = [summary.colLabel, "TOTAL CONSUMER", "PAID COUNT", "PAID AMT (LAKH)", ...(isFreeze ? ["PART PAID COUNT", "PART PAID AMT (LAKH)"] : []), isFreeze ? "PENDING COUNT" : "UNPAID COUNT", isFreeze ? "PENDING AMT (LAKH)" : "UNPAID AMT (LAKH)"];
+                    bodyRows = summary.rows.map((g) => [g.name, g.total, g.paidCount, formatRevenueLakhValue(g.paidAmount), ...(isFreeze ? [g.partCount || 0, formatRevenueLakhValue(g.partAmount || 0)] : []), g.unpaidCount, formatRevenueLakhValue(g.unpaidAmount)]);
                     rowTypes = summary.rows.map((g) => g.type);
                 } else {
                     const listRows = getArrears1LListRows_(isFreeze, rows, f.payment);
@@ -11725,7 +11733,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     per[k] = { dc, key: k, div: scBriefDivOf_(dc), master: master[k] || "FAIL",
                         revAmt: 0, revCnt: 0, revMAmt: 0, revMCnt: 0, td: 0, tdAmt: 0, tdM: 0, tdMAmt: 0, mobile: 0, mobileM: 0,
                         paidCnt: null, paidAmt: 0, lastPay: "", cashTs: 0,
-                        omDCnt: 0, omDAmt: 0, omMCnt: 0, omMAmt: 0, omPendCnt: 0, omPendAmt: 0, pumpPaidCnt: 0, pumpPaidAmt: 0, pumpPendCnt: 0, pumpPendAmt: 0 };
+                        omDCnt: 0, omDAmt: 0, omMCnt: 0, omMAmt: 0, omPendCnt: 0, omPendAmt: 0, omPartCnt: 0, pumpPaidCnt: 0, pumpPaidAmt: 0, pumpPendCnt: 0, pumpPendAmt: 0 };
                 });
                 if (revOk) {
                     getRevenueLiveEntries().forEach((row) => {
@@ -11759,7 +11767,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     const dcRows = omMonth.rowsWithStatus.filter((r) => normalizeDcName(r.dc_name || r.dc || "") === k);
                     const g = buildOmvigSingleDcSummaryRow_(dcRows, per[k].dc);
                     // UPDATE 146: Paid = jin cases me is mahine payment aayi (part paid bhi), Pending = bacha hua (part paid ka remainder bhi)
-                    per[k].omMCnt = g.paidCount; per[k].omMAmt = g.paidAmount; per[k].omPendCnt = g.pendingCount; per[k].omPendAmt = g.pendingAmount;
+                    per[k].omMCnt = g.paidCount; per[k].omMAmt = g.paidAmount; per[k].omPendCnt = g.pendingCount; per[k].omPendAmt = g.pendingAmount; per[k].omPartCnt = g.partCount || 0;
                 });
                 Object.keys(per).forEach((k) => {
                     const p = paid.out[k] || {};
@@ -11808,7 +11816,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     p.red = red; p.orange = orange;
                 });
 
-                const F = ["revAmt", "revCnt", "revMAmt", "revMCnt", "td", "tdAmt", "tdM", "tdMAmt", "mobile", "mobileM", "paidAmt", "omDCnt", "omDAmt", "omMCnt", "omMAmt", "omPendCnt", "omPendAmt", "pumpPaidCnt", "pumpPaidAmt", "pumpPendCnt", "pumpPendAmt"];
+                const F = ["revAmt", "revCnt", "revMAmt", "revMCnt", "td", "tdAmt", "tdM", "tdMAmt", "mobile", "mobileM", "paidAmt", "omDCnt", "omDAmt", "omMCnt", "omMAmt", "omPendCnt", "omPendAmt", "omPartCnt", "pumpPaidCnt", "pumpPaidAmt", "pumpPendCnt", "pumpPendAmt"];
                 if (pumpData && pumpData.byDc) Object.keys(per).forEach((k) => { const b = pumpData.byDc[k]; if (b) { per[k].pumpPaidCnt = b.paidCnt; per[k].pumpPaidAmt = b.paidAmt; per[k].pumpPendCnt = b.pendCnt; per[k].pumpPendAmt = b.pendAmt; } });
                 const sum = (list) => {
                     const a = { paidCnt: 0, paidMissing: 0, lastPay: "" };
@@ -11943,7 +11951,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 ${box("✅", "Paid as per Cash List", `${r.collOk ? "Every payment in the cash list (1st to today)" : "Uploaded cash list"} · ${escapeHtml(r.monthLabel)}${t.lastPay ? " · till " + escapeHtml(t.lastPay) : ""}`, [MONTH], [["Count", `${nm(r.paidOk, t.paidCnt)}`], ["Amount", `${rs(r.paidOk, t.paidAmt)}`]], "#db2777",
                     `<div style="margin-top:4px; padding:5px 7px; background:#f0fdf4; border-radius:8px; font-size:0.58rem; font-weight:800; color:#166534;">(Of this, manual entry by staff: ${nm(r.revOk, t.revMCnt)} consumers · ${rs(r.revOk, t.revMAmt)})</div>`)}
                 ${box("🛡️", "O&M / VIG", `Panchnama cases${r.omFreeze ? " · freeze " + escapeHtml(r.omFreeze) : ""}`, [`Paid ${r.omDate ? "(" + escapeHtml(r.omDate.slice(0, 5)) + ")" : "(Last day)"}`, `Paid (${escapeHtml(r.omMLabel || "This Month")})`], [["Consumers", nm(r.omOk, t.omDCnt), nm(r.omMOk, t.omMCnt)], ["Amount", rs(r.omOk, t.omDAmt), rs(r.omMOk, t.omMAmt)]], "#334155",
-                    `<div style="margin-top:4px; padding:5px 7px; background:#f1f5f9; border-radius:8px; font-size:0.58rem; font-weight:800; color:#334155;">Pending: ${nm(r.omMOk, t.omPendCnt)} consumers · ${rs(r.omMOk, t.omPendAmt)}</div>${(r.omNew && (r.omNew.m.newCnt || r.omNew.d.newCnt)) ? `<div style="margin-top:4px; padding:5px 7px; background:#fff7ed; border:1px dashed #fb923c; border-radius:8px; font-size:0.58rem; font-weight:800; color:#9a3412;">🆕 New cases after Freeze (separate): Yesterday ${r.omNew.d.newCnt} · ₹ ${scBriefLakh_(r.omNew.d.newAmt)} | ${escapeHtml(r.omMLabel || "This Month")} ${r.omNew.m.newCnt} · ₹ ${scBriefLakh_(r.omNew.m.newAmt)}</div>` : ""}`)}
+                    `<div style="margin-top:4px; padding:5px 7px; background:#f1f5f9; border-radius:8px; font-size:0.58rem; font-weight:800; color:#334155;">Of which part paid: ${nm(r.omMOk, t.omPartCnt)} · Pending (incl. part-paid balance): ${nm(r.omMOk, t.omPendCnt)} consumers · ${rs(r.omMOk, t.omPendAmt)}</div>${(r.omNew && (r.omNew.m.newCnt || r.omNew.d.newCnt)) ? `<div style="margin-top:4px; padding:5px 7px; background:#fff7ed; border:1px dashed #fb923c; border-radius:8px; font-size:0.58rem; font-weight:800; color:#9a3412;">🆕 New cases after Freeze (separate): Yesterday ${r.omNew.d.newCnt} · ₹ ${scBriefLakh_(r.omNew.d.newAmt)} | ${escapeHtml(r.omMLabel || "This Month")} ${r.omNew.m.newCnt} · ₹ ${scBriefLakh_(r.omNew.m.newAmt)}</div>` : ""}`)}
                 ${box("🚜", "Arrears Pump Consumers", `LV5 pump consumers with arrears · Paid = this month's payments only`, [`This Month (${escapeHtml(r.monthLabel)})`], [["Total consumers", nm(!!r.pump, r.pump && r.pump.total)], ["Paid (incl. part paid)", nm(!!r.pump, r.pump && r.pump.monthPaidCnt)], ["Amount received", rs(!!r.pump, r.pump && r.pump.paidAmt)]], "#7c3aed",
                     `<div style="margin-top:4px; padding:5px 7px; background:#f5f3ff; border-radius:8px; font-size:0.58rem; font-weight:800; color:#5b21b6;">Of which part paid: ${nm(!!r.pump, r.pump && r.pump.partCnt)} consumers · Pending (incl. balance of part paid): ${nm(!!r.pump, r.pump && r.pump.pendCnt)} consumers · ${rs(!!r.pump, r.pump && r.pump.pendAmt)}</div>`)}`;
 
@@ -12046,7 +12054,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     { label: "LINE TD (BY STAFF)", src: "Amount = arrears of TD consumers", cols: [TD_, MO_], rows: [["Consumers", NM(r.revOk, t.td), NM(r.revOk, t.tdM)], ["Arrears", RS(r.revOk, t.tdAmt), RS(r.revOk, t.tdMAmt)]], c: [185, 28, 28] },
                     { label: "MOBILE UPDATED (BY STAFF)", src: "Corrected mobile numbers", cols: [TD_, MO_], rows: [["Consumers", NM(r.mobOk, t.mobile), NM(r.mobMOk, t.mobileM)]], c: [2, 132, 199] },
                     { label: "PAID AS PER CASH LIST", src: `${r.collOk ? "Cash list payments (1st to today)" : "Uploaded cash list"}${t.lastPay ? " till " + t.lastPay : ""}`, cols: [MO_], rows: [["Count", NM(r.paidOk, t.paidCnt)], ["Amount", RS(r.paidOk, t.paidAmt)]], note: `(Staff entry: ${NM(r.revOk, t.revMCnt)} | ${RS(r.revOk, t.revMAmt)})`, c: [219, 39, 119] },
-                    { label: "O&M / VIG", src: r.omFreeze ? `Freeze ${r.omFreeze}` : "Panchnama cases", cols: [r.omDate ? `PAID ${r.omDate.slice(0, 5)}` : "PAID LAST DAY", (r.omMLabel || "This Month").toUpperCase()], rows: [["Consumers", NM(r.omOk, t.omDCnt), NM(r.omMOk, t.omMCnt)], ["Amount", RS(r.omOk, t.omDAmt), RS(r.omMOk, t.omMAmt)]], note: `Pending: ${NM(r.omMOk, t.omPendCnt)} | ${RS(r.omMOk, t.omPendAmt)}`, note2: (r.omNew && (r.omNew.m.newCnt || r.omNew.d.newCnt)) ? `New cases (separate): Yesterday ${r.omNew.d.newCnt} | ${scBriefLakh_(r.omNew.d.newAmt)} · ${r.omMLabel || "Month"} ${r.omNew.m.newCnt} | ${scBriefLakh_(r.omNew.m.newAmt)}` : "", c: [51, 65, 85] },
+                    { label: "O&M / VIG", src: r.omFreeze ? `Freeze ${r.omFreeze}` : "Panchnama cases", cols: [r.omDate ? `PAID ${r.omDate.slice(0, 5)}` : "PAID LAST DAY", (r.omMLabel || "This Month").toUpperCase()], rows: [["Consumers", NM(r.omOk, t.omDCnt), NM(r.omMOk, t.omMCnt)], ["Amount", RS(r.omOk, t.omDAmt), RS(r.omMOk, t.omMAmt)]], note: `Pending: ${NM(r.omMOk, t.omPendCnt)} | ${RS(r.omMOk, t.omPendAmt)}`, note2: `Of which part paid: ${NM(r.omMOk, t.omPartCnt)}`, note2old_: (r.omNew && (r.omNew.m.newCnt || r.omNew.d.newCnt)) ? `New cases (separate): Yesterday ${r.omNew.d.newCnt} | ${scBriefLakh_(r.omNew.d.newAmt)} · ${r.omMLabel || "Month"} ${r.omNew.m.newCnt} | ${scBriefLakh_(r.omNew.m.newAmt)}` : "", c: [51, 65, 85] },
                     { label: "ARREARS PUMP CONSUMERS", src: "LV5 pump arrears - this month's payments", cols: [MO_], rows: [["Total", NM(!!r.pump, r.pump && r.pump.total)], ["Paid", `${NM(!!r.pump, r.pump && r.pump.monthPaidCnt)} | ${RS(!!r.pump, r.pump && r.pump.paidAmt)}`]], note: `Of which part paid: ${NM(!!r.pump, r.pump && r.pump.partCnt)}`, note2: `Pending: ${NM(!!r.pump, r.pump && r.pump.pendCnt)} | ${RS(!!r.pump, r.pump && r.pump.pendAmt)}`, c: [124, 58, 237] }
                 ];
                 const gap = 3, bx = 8, bw = (W - 2 * bx - gap * (boxes.length - 1)) / boxes.length;
@@ -15824,7 +15832,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 });
                 rows.push({ ...withPercents(divTotal), type: "SUB_TOTAL" });
                 grand.totalCount += divTotal.totalCount; grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
-                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += divTotal.partAmount;
+                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += (divTotal.partAmount || 0); grand.partAmount += divTotal.partAmount;
             });
             rows.push({ ...withPercents(grand), type: "GRAND_TOTAL" });
             return rows;
@@ -16447,7 +16455,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 });
                 rows.push({ ...withPercents(divTotal), type: "SUB_TOTAL" });
                 grand.totalCount += divTotal.totalCount; grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
-                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += divTotal.partAmount;
+                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += (divTotal.partAmount || 0); grand.partAmount += divTotal.partAmount;
             });
             rows.push({ ...withPercents(grand), type: "GRAND_TOTAL" });
             return rows;
