@@ -5726,7 +5726,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const withPercents = (g) => ({
                 ...g,
                 paidPercent: g.totalCount ? ((g.paidCount / g.totalCount) * 100).toFixed(1) : "0.0",
-                pendingPercent: g.totalCount ? ((g.pendingCount / g.totalCount) * 100).toFixed(1) : "0.0"
+                pendingPercent: g.totalCount ? (100 - Number(((g.paidCount / g.totalCount) * 100).toFixed(1))).toFixed(1) : "0.0"
             });
             const map = {};
             (rowsWithStatus || []).forEach((r) => {
@@ -5974,7 +5974,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // aur is download dono me) ab PAID/PENDING amount LAKH me dikhaegi (jaise
             // 50000 -> 0.50) - poora/complete amount sirf DC-level ki consumer LIST
             // me dikhta rahega (yahan disturb nahi kiya).
-            const headers = ["DC NAME", "TOTAL CONSUMER", ...(ndCol_ ? ["NO DUES"] : []), "PAID COUNT", "PAID AMT (LAKH)", "PART PAID COUNT", "PART PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %"];
+            const headers = ["DC NAME", "TOTAL CONSUMER", ...(ndCol_ ? ["NO DUES"] : []), "PAID COUNT", "PAID AMT (LAKH)", "PART PAID COUNT", "PART PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "NOT PAID %"];
             const bodyRows = summaryRows.map((r) => [
                 r.name, ndCol_ ? r.totalCount + (r.noDuesCount || 0) : r.totalCount, ...(ndCol_ ? [r.noDuesCount || 0] : []), r.paidCount, formatRevenueLakhValue(r.paidAmount), r.partCount || 0, formatRevenueLakhValue(r.partAmount || 0),
                 r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${r.paidPercent}%`, `${r.pendingPercent}%`
@@ -6026,10 +6026,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const summaryRows = buildFreezeHqWiseSummaryRows(data.rowsWithStatus, data.noDuesRows);
             const ndCol_ = Array.isArray(data.noDuesRows); // 2026-10-23: NO DUES column
             const nameColLabel = revenueHqLabelUpper(getFreezeSingleDcName_() || activeDC);
-            const headers = [nameColLabel, "TOTAL CONSUMER", ...(ndCol_ ? ["NO DUES"] : []), "PAID COUNT", "PAID AMT (LAKH)", "PART PAID COUNT", "PART PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %"];
+            const headers = [nameColLabel, "TOTAL CONSUMER", ...(ndCol_ ? ["NO DUES"] : []), "PAID COUNT", "PAID AMT (LAKH)", "PART PAID COUNT", "PART PAID AMT (LAKH)", "PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "NOT PAID %"];
             const bodyRows = summaryRows.map((r) => {
                 const paidPercent = r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0";
-                const pendingPercent = r.totalCount ? ((r.pendingCount / r.totalCount) * 100).toFixed(1) : "0.0";
+                const pendingPercent = r.totalCount ? (100 - Number(paidPercent)).toFixed(1) : "0.0";
                 return [r.name, ndCol_ ? r.totalCount + (r.noDuesCount || 0) : r.totalCount, ...(ndCol_ ? [r.noDuesCount || 0] : []), r.paidCount, formatRevenueLakhValue(r.paidAmount), r.partCount || 0, formatRevenueLakhValue(r.partAmount || 0), r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${paidPercent}%`, `${pendingPercent}%`];
             });
             const hqRowTypes = summaryRows.map((r) => r.type || "");
@@ -15451,10 +15451,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
         function scOmSumHead_(on, rows) {
             const pl = omvigReportMode === "DAILY" ? omvigDailyPaidLbl_() : "PAID (FREEZE)";
-            return ["DC NAME", "TOTAL", `${pl} COUNT`, `${pl} AMT (LAKH)`].concat(scOmHasPart_(rows) ? ["PART PAID COUNT", "PART PAID AMT (LAKH)"] : []).concat(["PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "PENDING %"]);
+            return ["DC NAME", "TOTAL", `${pl} COUNT`, `${pl} AMT (LAKH)`].concat(scOmHasPart_(rows) ? ["PART PAID COUNT", "PART PAID AMT (LAKH)"] : []).concat(["PENDING COUNT", "PENDING AMT (LAKH)", "PAID %", "NOT PAID %"]);
         }
         function scOmSumRow_(r, on, rows) {
-            return [r.name, r.totalCount, r.paidCount, formatRevenueLakhValue(r.paidAmount)].concat(scOmHasPart_(rows) ? [r.partCount || 0, formatRevenueLakhValue(r.partAmount || 0)] : []).concat([r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${r.paidPercent != null ? r.paidPercent : (r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0")}%`, `${r.pendingPercent != null ? r.pendingPercent : (r.totalCount ? ((r.pendingCount / r.totalCount) * 100).toFixed(1) : "0.0")}%`]);
+            return [r.name, r.totalCount, r.paidCount, formatRevenueLakhValue(r.paidAmount)].concat(scOmHasPart_(rows) ? [r.partCount || 0, formatRevenueLakhValue(r.partAmount || 0)] : []).concat([r.pendingCount, formatRevenueLakhValue(r.pendingAmount), `${r.paidPercent != null ? r.paidPercent : (r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0")}%`, `${r.pendingPercent != null ? r.pendingPercent : (r.totalCount ? (100 - Number(r.paidPercent != null ? r.paidPercent : ((r.paidCount / r.totalCount) * 100).toFixed(1))).toFixed(1) : "0.0")}%`]);
         }
         // ----- NEW CASES dropdown view (USER 29/09 11:39) -----
         // Upar dropdown: FREEZE CASES (purana report, koi badlav nahi) / NEW CASES
@@ -15804,7 +15804,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const withPercents = (g) => ({
                 ...g,
                 paidPercent: g.totalCount ? ((g.paidCount / g.totalCount) * 100).toFixed(1) : "0.0",
-                pendingPercent: g.totalCount ? ((g.pendingCount / g.totalCount) * 100).toFixed(1) : "0.0"
+                pendingPercent: g.totalCount ? (100 - Number(((g.paidCount / g.totalCount) * 100).toFixed(1))).toFixed(1) : "0.0"
             });
             const map = {};
             (rowsWithStatus || []).forEach((r) => {
@@ -15856,7 +15856,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 total.pendingCount += r.pendingCount; total.pendingAmount += r.pendingAmount;
             });
             total.paidPercent = total.totalCount ? ((total.paidCount / total.totalCount) * 100).toFixed(1) : "0.0";
-            total.pendingPercent = total.totalCount ? ((total.pendingCount / total.totalCount) * 100).toFixed(1) : "0.0";
+            total.pendingPercent = total.totalCount ? (100 - Number(total.paidPercent)).toFixed(1) : "0.0";
             return rows.concat([total]);
         }
 
@@ -16441,7 +16441,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const withPercents = (g) => ({
                 ...g,
                 paidPercent: g.totalCount ? ((g.paidCount / g.totalCount) * 100).toFixed(1) : "0.0",
-                pendingPercent: g.totalCount ? ((g.pendingCount / g.totalCount) * 100).toFixed(1) : "0.0"
+                pendingPercent: g.totalCount ? (100 - Number(((g.paidCount / g.totalCount) * 100).toFixed(1))).toFixed(1) : "0.0"
             });
             const rows = [];
             const grand = emptyGroup("GRAND TOTAL");
@@ -16689,7 +16689,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return rows.map((r) => ({
                 ...r,
                 paidPercent: r.paidPercent !== undefined ? r.paidPercent : (r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0"),
-                pendingPercent: r.pendingPercent !== undefined ? r.pendingPercent : (r.totalCount ? ((r.pendingCount / r.totalCount) * 100).toFixed(1) : "0.0")
+                pendingPercent: r.pendingPercent !== undefined ? r.pendingPercent : (r.totalCount ? (100 - Number(r.paidPercent != null ? r.paidPercent : ((r.paidCount / r.totalCount) * 100).toFixed(1))).toFixed(1) : "0.0")
             }));
         }
 
@@ -16715,7 +16715,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return rows.map((r) => ({
                 ...r,
                 paidPercent: r.paidPercent !== undefined ? r.paidPercent : (r.totalCount ? ((r.paidCount / r.totalCount) * 100).toFixed(1) : "0.0"),
-                pendingPercent: r.pendingPercent !== undefined ? r.pendingPercent : (r.totalCount ? ((r.pendingCount / r.totalCount) * 100).toFixed(1) : "0.0")
+                pendingPercent: r.pendingPercent !== undefined ? r.pendingPercent : (r.totalCount ? (100 - Number(r.paidPercent != null ? r.paidPercent : ((r.paidCount / r.totalCount) * 100).toFixed(1))).toFixed(1) : "0.0")
             }));
         }
 
@@ -16743,7 +16743,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const paidCount = rowsWithStatus.filter((r) => omvigIsInPaidBucket_(r)).length;
                 const pendingCount = rowsWithStatus.filter((r) => omvigIsInPendingBucket_(r)).length;
                 const paidPercent = totalCount ? ((paidCount / totalCount) * 100).toFixed(1) : "0.0";
-                const pendingPercent = totalCount ? ((pendingCount / totalCount) * 100).toFixed(1) : "0.0";
+                const pendingPercent = totalCount ? (100 - Number(paidPercent)).toFixed(1) : "0.0";
                 let scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
                 // USER REQUEST (2026-09-14): download ka title/filename bhi
                 // batana chahiye ki kaunsa filter laga hua hai (jab laga ho).
@@ -16802,7 +16802,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         return copy;
                     });
                     const rows = [[reportTitle], [`Report Start Date: ${data.freeze_date}`], [],
-                        ["TOTAL CASES", "PAID COUNT", "PAID %", "PENDING COUNT", "PENDING %"],
+                        ["TOTAL CASES", "PAID COUNT", "PAID %", "PENDING COUNT", "NOT PAID %"],
                         [totalCount, paidCount, `${paidPercent}%`, pendingCount, `${pendingPercent}%`], []];
                     if (true) { // UPDATE 149: DC level par bhi summary table
                         const summaryRows = scOmAttachNewCases_(getOmvigDownloadSummaryRows_(scopedRows, rowsWithStatus));
@@ -16898,7 +16898,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 scPdfHeader_(doc, { title: reportTitle, lines: [`Report Start Date: ${data.freeze_date}`], color: SC_PDF_THEME.omvig });
                 doc.autoTable({
                     startY: 29,
-                    head: [["TOTAL CASES", "PAID COUNT", "PAID %", "PENDING COUNT", "PENDING %"]],
+                    head: [["TOTAL CASES", "PAID COUNT", "PAID %", "PENDING COUNT", "NOT PAID %"]],
                     body: [[totalCount, paidCount, `${paidPercent}%`, pendingCount, `${pendingPercent}%`]],
                     theme: "grid", headStyles: { fillColor: [17, 24, 39], halign: "center" }, styles: { fontSize: 9, halign: "center" }
                 });
