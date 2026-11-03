@@ -91,7 +91,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         const lokAdalatScriptUrl = "https://script.google.com/macros/s/AKfycbzS1xRgKs5HyUjnCGt7l9d3D33rscPaFhtucyH63KAfFabfIu67loo1Yd-uGSIffJieIg/exec";
         const lokAdalatDistributedCsvUrl = "https://docs.google.com/spreadsheets/d/1l-IJkL7aylyjxpdYtHlwJzUhFS8OPtg4RzhXfLlJWjQ/export?format=csv&gid=0";
         const stockSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbwdjxhm7IyGlV8RACo3zIIZogwyu8HNLsWgtFp-XkSzDac4SeN_rlKDgrxsbDj6pdfK/exec";
-        const shmsSubmitScriptUrl = "https://script.google.com/macros/s/AKfycbyoMfuaxupxeZip7DoSoTkjCIM-43Ns4EkR-t5TX0ud222TIMbj9FdlbV0l8q-B8z8/exec";
         const stmComplaintScriptUrl = "https://script.google.com/macros/s/AKfycby9ZIXl5g_690kavCweIkYfGAz2NnAEiqgJzct5xhKaBjyCF08ELpguYTbgvTV_lAN6UQ/exec";
         // NEW MODULE (2026-09-14): O&M/VIG Report - DC/Division/Circle "Daily
         // Progress" ka 4th tile (Mobile/Live-Revenue/Freeze-Revenue ke saath).
@@ -161,7 +160,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // 2026-10-27 (USER REQUEST): purani per-DC master sheet links hata di - master ab sirf Division Master (META) se aata hai.
         const revenueCollectionCsvUrls = {};
         const stockMaterialsCsvUrl = "https://docs.google.com/spreadsheets/d/1OfrU7ZuN5LV9f_3hqORv66BVLYKFGIBBjDyeSXHwldA/export?format=csv&gid=641545139";
-        const shmsCsvUrl = "https://docs.google.com/spreadsheets/d/1GXnTMBqq7BidUTIOdDeTXGjNgzL5UljOSJt3yeBxHxo/export?format=csv&gid=0";
         const lokAdalatFallbackTotals = {
             "ADEGAON": 752,
             "CHHAPARA-1": 564,
@@ -227,8 +225,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // teeno DC/Division/Circle scope automatically activeViewLevel se hi follow karte
         // hain (jaisa is view ka baaki sab data already karta hai), koi alag scoping nahi.
         let progressRevenueReportType = "STAFF";
-        let progressRevenueDefaultersLimit = 20;
-        let progressDefaultersGovtFilter = "";
         // USER REQUEST (2026-08-13): Daily Progress -> Revenue -> "Target vs
         // Achievement" dropdown me bhi Govt/Non-Govt filter chahiye (jaisa Top
         // Defaulters me pehle se hai).
@@ -305,7 +301,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         let progressSummaryDownloadInProgress = false;
         let selectedStockReceiveItem = null, selectedStockIssueItem = null, pendingReceiveItems = [], pendingIssueItems = [];
         let activeIssueDc = "";
-        let shmsRows = [], shmsSubstations = [], selectedShmsRow = null, shmsDataLoaded = false, selectedShmsSubstation = "", selectedShmsEventType = "", shmsPendingEntries = [];
         let gpsCameraGeoData = null, gpsCameraPhotoDataUrl = "", gpsCameraPhotoFileName = "", gpsCameraGeoPromise = null, gpsCameraGeoCapturedAt = 0, gpsCameraOpeningInProgress = false, gpsCameraTarget = "home";
         let selectedVehicleNo = "", vehiclePhotoDataUrl = "", vehiclePhotoName = "", vehicleReadingEntries = [], vehicleReadingSubmitInProgress = false;
         let revenueCollectionRowsByDc = {};
@@ -452,15 +447,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         let feederHistorySyncingFor_ = "";
         let selectedFeederSubstation = "";
         let activeFeederOperator = null;
-        let activeShmsOperator = null;
         let activeStmComplaintOperator = null;
-        let shmsProgressRows = [];
-        let shmsProgressLoaded = false;
-        let shmsProgressStale = false; // ITEM-8 FIX (2026-09-15): true jab fresh fetch fail hokar purana cached data dikha rahe hain
         let shmsProgressMode = "DAILY";
-        let progressReportSource = "SHMS";
-        let shmsPendingTrackerRows = [];
-        let shmsRecentSubmittedEntries = [];
+        let progressReportSource = "FEEDER"; // UPDATE 157: SHMS removed
         let summaryRefreshToken = 0;
         let activePeakLoadOperator = null;
         let selectedPeakLoadSubstation = "";
@@ -477,8 +466,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         const courtServedStorageKey = "seoni-circle-lok-adalat-served";
         const courtCaseCacheStorageKey = "seoni-circle-lok-adalat-csv-cache";
         const dcCsvCacheStoragePrefix = "seoni-circle-dc-csv-";
-        const shmsRecentSubmittedStorageKey = "seoni-circle-shms-recent-submitted";
-        const shmsRecentSubmittedTtlMs = 2 * 60 * 1000;
         const feederRecentSubmittedStorageKey = "seoni-circle-feeder-recent-submitted";
         const feederOperatorStorageKey = "feederOperatorProfile";
         const feederAlertStartDateKey = "2026-05-04";
@@ -5637,80 +5624,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return "PENDING";
         }
 
-        // USER REQUEST (2026-09-12): NP3 / NP6 / Since Connection ki list nikalते
-        // waqt, list ke UPAR ek chhota summary bhi dikhe - DC scope me HQ-wise,
-        // Division scope me DC-wise, aur Circle scope me DC-wise + har Division
-        // ka Division Total + sabse aakhir me ek Grand Total row. Yeh ek hi
-        // shared builder/renderer hai jo Live Non-Payee report aur Freeze Report
-        // (NP3/NP6/Since Connection categories) dono me reuse hota hai - caller
-        // sirf normalizedRows [{dcName, hqName, pendingAmount}] pass karta hai.
-        function buildRevenueNonPayeeGroupSummary(normalizedRows, selectedDc) {
-            const sumByKey = (list, keyFn) => {
-                const map = {};
-                (list || []).forEach((r) => {
-                    const key = keyFn(r) || "-";
-                    if (!map[key]) map[key] = { name: key, count: 0, pendingTotal: 0 };
-                    map[key].count += 1;
-                    map[key].pendingTotal += Number(r.pendingAmount || 0);
-                });
-                return map;
-            };
-            // BUG FIX (2026-09-13) - ASLI ROOT CAUSE: yahan pehle "normalizeHqName(...)"
-            // call ho raha tha, jo kahin bhi is function ke scope me defined nahi tha
-            // (sirf buildProgressRevenueSummaryRows() ke ANDAR ek alag local const ke
-            // roop me tha) - isliye DC-level par (jab bhi yeh group-summary banti thi)
-            // seedha "ReferenceError: normalizeHqName is not defined" throw ho jaata
-            // tha, jo upar loadRevenueProgressFreezeData() ke try/catch tak jaakar
-            // generic "Freeze data load nahi ho payi" dikhata tha - DIVISION/CIRCLE
-            // par yeh line kabhi chalti hi nahi thi (wo normalizeDcName use karte hain,
-            // jo globally defined hai), isliye sirf DC hamesha fail hoti thi, Division/
-            // Circle hamesha chal jaate the. Ab yahin ek local helper define kar diya.
-            const normalizeHqNameLocal_ = (value) => String(value || "GENERAL").trim().toUpperCase() || "GENERAL";
-
-            // ISOLATED FIX (2026-09-22, USER-REPORTED): Division/Circle level par jab
-            // "All DC" dropdown se ek specific DC chun liya jaata tha, "normalizedRows"
-            // (jo caller pehle se hi is DC tak filter karke bhejta hai) to sahi tha,
-            // lekin neeche CIRCLE/DIVISION branch hamesha apni Division/Circle ki
-            // SAARI DC names ki list par map banata tha (isliye sirf selected DC ka
-            // data dikhta tha, baaki 23 DC "0" ke saath dikhti thin - ek single DC
-            // row, HQ-wise breakdown kabhi nahi) - aur download bhi isi (shared)
-            // function se banta hai, isliye wahan bhi yahi problem thi. Ab jab koi
-            // specific DC select ho (activeViewLevel DC na ho tab bhi), DC-level jaisa
-            // hi HQ-wise summary banate hain - jaisa app ke baaki reports (Category
-            // Wise/HQ-Village) me DC select karne par hota hai.
-            if (activeViewLevel === "DC" || selectedDc) {
-                const map = sumByKey(normalizedRows, (r) => normalizeHqNameLocal_(r.hqName) || "GENERAL");
-                const rows = Object.values(map).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-                return { colLabel: revenueHqLabelUpper(), rows };
-            }
-
-            if (activeViewLevel === "DIVISION") {
-                const map = sumByKey(normalizedRows, (r) => normalizeDcName(r.dcName) || "-");
-                const rows = getDivisionDcNames(activeDiv).map((dcName) => {
-                    const key = normalizeDcName(dcName);
-                    return map[key] || { name: key, count: 0, pendingTotal: 0 };
-                });
-                return { colLabel: "DC NAME", rows };
-            }
-
-            // CIRCLE: DC-wise, division-wise SUB_TOTAL rows, aur last me GRAND TOTAL.
-            const map = sumByKey(normalizedRows, (r) => normalizeDcName(r.dcName) || "-");
-            const rows = [];
-            let grandCount = 0, grandPending = 0;
-            Object.keys(divisionConfigs).forEach((divisionName) => {
-                const dcRows = getDivisionDcNames(divisionName).map((dcName) => {
-                    const key = normalizeDcName(dcName);
-                    return map[key] || { name: key, count: 0, pendingTotal: 0 };
-                });
-                rows.push(...dcRows);
-                const divCount = dcRows.reduce((s, r) => s + r.count, 0);
-                const divPending = dcRows.reduce((s, r) => s + r.pendingTotal, 0);
-                grandCount += divCount; grandPending += divPending;
-                rows.push({ name: getDivisionTotalLabel(divisionName), count: divCount, pendingTotal: divPending, type: "SUB_TOTAL" });
-            });
-            rows.push({ name: "GRAND TOTAL", count: grandCount, pendingTotal: grandPending, type: "GRAND_TOTAL" });
-            return { colLabel: "DC NAME", rows };
-        }
 
         // USER REQUEST (2026-09-13): Freeze Report (NP3/NP6/Since Connection) ka
         // Division/Circle DOWNLOAD ab bhi poori consumer-list de raha tha, jabki
@@ -6069,27 +5982,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             }
         }
 
-        function renderRevenueNonPayeeGroupSummaryHtml(normalizedRows) {
-            const summary = buildRevenueNonPayeeGroupSummary(normalizedRows, progressNonPayeeFilterState.dc);
-            let html = `<div style="font-size:0.62rem; font-weight:900; color:#9f1239; text-align:center; margin-top:10px;">${escapeHtml(summary.colLabel)} WISE SUMMARY</div>
-                <div class="summary-wrapper" style="margin-top:6px;"><div class="summary-table-header" style="grid-template-columns: 1.5fr 0.75fr 1fr;"><div>${escapeHtml(summary.colLabel)}</div><div>COUNT</div><div>PENDING (L)</div></div>`;
-            if (!summary.rows.length) {
-                html += `${scEmptyState_(`No data found.`)}`;
-            } else {
-                summary.rows.forEach((row) => {
-                    // USER REQUEST (2026-09-14): SUB_TOTAL (Division total) aur GRAND_TOTAL
-                    // row pehle dono hi "blue-bold" (same colour) the - ab Freeze Report
-                    // jaisa hi alag TEXT COLOUR se alag pehchane jaate hain (app ke apne
-                    // existing subdn-bold/blue-bold classes reuse kiye - SUB_TOTAL = orange,
-                    // GRAND_TOTAL = blue, jaisa baaki reports me DIV_TOTAL/SUBDN_TOTAL ke
-                    // liye pehle se istemal hota hai).
-                    const rowClass = row.type === "GRAND_TOTAL" ? " blue-bold" : (row.type === "SUB_TOTAL" ? " subdn-bold" : "");
-                    html += `<div class="summary-table-row${rowClass}" style="grid-template-columns: 1.5fr 0.75fr 1fr;"><div>${escapeHtml(row.name)}</div><div class="font-black">${row.count}</div><div class="text-rose-700 font-black">${formatProgressReportDisplayAmount(row.pendingTotal)}</div></div>`;
-                });
-            }
-            html += `</div>`;
-            return html;
-        }
 
         // 2026-10-25 (USER REQUEST #9): har freeze report me ek hi "Download" box - Kya (Summary/List) + Kis roop me (Excel/PDF).
         var scFzDlActions_ = [];
@@ -6857,80 +6749,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return paidInfoByDc;
         }
 
-        // ISOLATED ADDITION (2026-09-17, USER-APPROVED): optional `rows` (already-
-        // built buildRevenueCategorySummaryRows() output) - jab diya jaata hai to
-        // OTHER-bucket (missing/unknown tariff category, valid Master consumer)
-        // ke Paid/Unpaid count+amount bhi diagnostic me judte hain, taaki Grand
-        // Total aur LV1-LV5 column-sum ke beech ka antar (agar ho) kis wajah se
-        // hai yeh pata chal sake. `rows` na diya jaaye to bilkul purana behaviour
-        // (koi other* field object me nahi aata) - is function ka ek hi caller
-        // hai, isliye backward-compat sirf documentation ke liye hai.
-        function buildRevenueCategoryDiagnostic(mode, filterValue, rows = null) {
-            const targetDcs = new Set(getRevenueCategoryTargetDcs().map((dcName) => normalizeDcName(dcName)).filter(Boolean));
-            const masterIvrsByDc = {};
-            targetDcs.forEach((dcName) => {
-                masterIvrsByDc[dcName] = new Set(getRevenueMasterRowsForDc(dcName).map((row) => normalizeRevenueIvrs(row.ivrsNo)).filter(Boolean));
-            });
-
-            let uploadedRows = 0;
-            let selectedMonthRows = 0;
-            let matchedMasterRows = 0;
-            let outOfMonthRows = 0;
-            let masterNotMatchedRows = 0;
-            let missingDate = 0;
-
-            getRevenueCategoryPaymentSourceRows().forEach((paymentRow) => {
-                    const dcName = getRevenueUploadedPaidRowDcName(paymentRow);
-                    const ivrs = getRevenueUploadedPaidRowIvrs(paymentRow);
-                    if (!dcName || !ivrs || !targetDcs.has(dcName)) return;
-
-                    uploadedRows += 1;
-                    const targetMonthKey = mode === "MONTHLY"
-                        ? normalizeRevenueMonthFilterKey(filterValue)
-                        : getRevenueMonthKey(filterValue || getCurrentDateDDMMYYYY());
-                    const paidDate = normalizeRevenuePaidDate(getRevenueUploadedPaidRowDate(paymentRow), targetMonthKey);
-                    if (!paidDate) {
-                        missingDate += 1;
-                        return;
-                    }
-
-                    if (!isRevenueUploadedPaidInCategoryPeriod(paymentRow, mode, filterValue)) {
-                        outOfMonthRows += 1;
-                        return;
-                    }
-
-                    selectedMonthRows += 1;
-                    if (masterIvrsByDc[dcName]?.has(ivrs)) {
-                        matchedMasterRows += 1;
-                    } else {
-                        masterNotMatchedRows += 1;
-                    }
-            });
-
-            let otherPaidCount = 0, otherUnpaidCount = 0, otherPaidAmount = 0, otherUnpaidAmount = 0;
-            (rows || []).forEach((row) => {
-                if (row.type === "SUB_TOTAL" || row.type === "SUBDN_TOTAL") return;
-                const other = row.categories?.OTHER;
-                if (!other) return;
-                otherPaidCount += Number(other.paid || 0);
-                otherUnpaidCount += Number(other.unpaid || 0);
-                otherPaidAmount += Number(other.paidAmount || 0);
-                otherUnpaidAmount += Number(other.unpaidAmount || 0);
-            });
-
-            return {
-                uploadedUnique: uploadedRows,
-                selectedMonth: selectedMonthRows,
-                matchedMaster: matchedMasterRows,
-                outOfMonth: outOfMonthRows,
-                masterNotMatched: masterNotMatchedRows,
-                missingDate,
-                otherPaidCount,
-                otherUnpaidCount,
-                otherPaidAmount,
-                otherUnpaidAmount
-            };
-        }
 
         function buildRevenueCategorySummaryRows(mode, filterValue, govtFilter = "") {
             const paidInfoByDc = buildRevenueCategoryUploadedPaidInfo(mode, filterValue);
@@ -7278,62 +7096,13 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
 
-        async function downloadProgressRevenueCategorySummary(fmt) {
-            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
-            setProgressCategoryDownloadState(true, `${downloadTypeLabel} download in progress... please wait`);
-            try {
-                const rawVal = document.getElementById("report-date").value;
-                const parsed = parseSummarySelection(rawVal, summaryMode);
-                const reportType = summaryMode === "MONTHLY" ? "MONTHLY" : "DAILY";
-                const filterValue = getRevenueProgressFilterValue(parsed.daily, parsed.monthly);
-                const reconciliation = await prepareRevenueCategoryReportData_(
-                    getRevenueCategoryTargetDcs(), reportType, filterValue
-                );
-                const rows = buildRevenueCategorySummaryRows(reportType, filterValue, progressCategoryGovtFilter);
-                // USER-APPROVED correction #8: invariant mismatch mile to Excel/PDF
-                // silently nahi niklegi - saaf error (DC/HQ naam + difference) dikhega.
-                const invariantMismatches = checkRevenueCategorySummaryInvariant_(rows);
-                if (invariantMismatches.length) {
-                    const detail = invariantMismatches.slice(0, 5).map((m) => `${m.name} (${m.diff > 0 ? "+" : ""}${m.diff})`).join(", ");
-                    throw new Error(`Does not match Paid+Unpaid Unique Master Consumers - ${detail}${invariantMismatches.length > 5 ? " etc." : ""}`);
-                }
-                // ISOLATED ADDITION (2026-09-17, USER-APPROVED condition): backend abhi
-                // purana/reconciliation-unsupported hai to legacy fallback totals
-                // "normal/correct report" ki tarah SILENT nahi dikhte - report ke andar
-                // (additive line, existing layout/columns bilkul unchanged) aur download-
-                // complete toast dono me saaf "STALE/LEGACY" warning jaata hai.
-                const staleWarning = reconciliation && reconciliation.supported === false
-                    ? "STALE/LEGACY - totals may be inaccurate (backend update pending)"
-                    : null;
-                const diagnostic = buildRevenueCategoryDiagnostic(reportType, filterValue, rows);
-                exportRevenueCategorySummary(fmt, rows, parsed.label, reportType, diagnostic, staleWarning);
-                setTimeout(() => setProgressCategoryDownloadState(false, staleWarning ? `${downloadTypeLabel} downloaded - STALE/LEGACY, totals may be inaccurate` : `${downloadTypeLabel} downloaded`), 500);
-            } catch (error) {
-                setProgressCategoryDownloadState(false, "Download failed");
-                showToast(error?.message || "Arrears Category Wise report download failed", false);
-            }
-        }
 
-        // Dropdown se jo bhi report type (Category Wise / Target vs Achievement / Top
-        // 20-50 Defaulters) select hai, usi ke hisaab se sahi download function call karta
-        // hai. Category Wise ke liye purani, poori tarah test-ki-hui exportRevenueCategory-
-        // Summary() hi chalti hai - Target/Defaulters ke liye alag, seedhe simple export.
-        function downloadProgressRevenueReportBox(fmt, forceGroupSummary) {
+        // Live Revenue Report dropdown (Target vs Achievement / Paid Count Summary) ka download.
+        function downloadProgressRevenueReportBox(fmt) {
+            // 2026-11-03 (UPDATE 156): Live Revenue Report me ab sirf 3 report - Paid by Staff, Target vs Achievement, Paid Count Summary.
             if (progressRevenueReportType === "TARGET") return downloadProgressRevenueTargetSummary(fmt);
-            if (progressRevenueReportType === "DEFAULTERS") return downloadProgressRevenueDefaultersSummary(fmt);
-            // USER REQUEST (2026-09-14): Freeze Report jaisa hi pattern - NP3/NP6/Since
-            // Connection ke DC level par ab "Summary Download" (HQ-wise, forceGroupSummary=true
-            // wala naya button) aur "Full List Download" (bilkul pehle jaisa) dono alag
-            // milte hain. Division/Circle par (jahan screen par bhi sirf summary dikhti
-            // hai) ab download bhi summary hi deta hai - poori list nahi - taaki screen
-            // aur download consistent rahein (downloadProgressRevenueNonPayeeSummary khud
-            // is check ko andar bhi karta hai, forceGroupSummary sirf DC level ke naye
-            // Summary button ke liye explicit shortcut hai).
-            if (progressRevenueReportType === "NONPAYEE_3M") return downloadProgressRevenueNonPayeeSummary(fmt, "3M", forceGroupSummary);
-            if (progressRevenueReportType === "NONPAYEE_6M") return downloadProgressRevenueNonPayeeSummary(fmt, "6M", forceGroupSummary);
-            if (progressRevenueReportType === "NONPAYEE_SINCE_CONNECTION") return downloadProgressRevenueNonPayeeSummary(fmt, "SINCE_CONNECTION", forceGroupSummary);
             if (progressRevenueReportType === "PAIDCOUNT") return downloadProgressRevenuePaidCountSummary(fmt);
-            return downloadProgressRevenueCategorySummary(fmt);
+            return showToast("No data available for the report", false);
         }
 
         function downloadProgressRevenueTargetSummary(fmt) {
@@ -7380,51 +7149,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             }
         }
 
-        // USER REQUEST (2026-08-13): pehle yahan "!row.paid" filter se koi bhi
-        // consumer jo cash list me kisi bhi amount se match ho gaya ho (chahe
-        // partial payment hi kyun na ho) poori tarah is list se bahar ho jaata
-        // tha - matlab uska bacha hua bakaya kabhi Defaulters me nahi dikhta tha.
-        // Ab row.pendingAmount (buildRevenueHqVillageConsumerRows me pehle se hi
-        // Net Bill - Paid, sirf positive, nikala hua) use karte hain - partial
-        // payment wale consumer bhi ab apne bache hue bakaya amount ke saath is
-        // list me sahi se dikhenge.
-        // BUG FIX/USER REQUEST (2026-09-13): Pehle "All (Govt + Non Govt)" chunne
-        // par dono ko MILAKAR ek hi list banti thi, phir Top N kaata jaata tha -
-        // isse agar Non Govt consumers ka pending amount generally zyada hota
-        // (jaisa aksar hota hai), to Govt consumers Top N me jagah hi nahi bana
-        // paate the (chahe wo apni Govt category me sabse bade bakayadaar hi
-        // kyun na hon). Ab "All" par DONO group (Non Govt aur Govt) ki APNI-APNI
-        // ALAG Top N list nikalte hain (jaisa GOVT/NONGOVT akela chunne par pehle
-        // se hota hai) - total upto 2xN consumer, pehle poori Non Govt Top N,
-        // fir poori Govt Top N (render/download dono me ek divider ke saath alag
-        // dikhte hain). Return shape ab { rows, nonGovtCount } hai -
-        // nonGovtCount > 0 hone par render/download ko pata chal jaata hai kahan
-        // se Govt group shuru hota hai.
-        function getProgressDefaultersFilteredRows(mode, filterValue) {
-            const consumerRows = buildRevenueHqVillageConsumerRows(mode, filterValue, true).filter((row) => row.pendingAmount > 0); // USER RULE 2026-09-26: paid = cash list
-            const govtFilter = progressDefaultersGovtFilter;
-            const sortDesc = (list) => list.slice().sort((a, b) => b.pendingAmount - a.pendingAmount);
-            if (govtFilter === "GOVT") {
-                return { rows: sortDesc(consumerRows.filter((row) => !!row.govtFlag)).slice(0, progressRevenueDefaultersLimit), nonGovtCount: 0 };
-            }
-            if (govtFilter === "NONGOVT") {
-                return { rows: sortDesc(consumerRows.filter((row) => !row.govtFlag)).slice(0, progressRevenueDefaultersLimit), nonGovtCount: 0 };
-            }
-            // USER REQUEST (2026-10-05): "All" me Govt+Non Govt milakar sirf Top N (2xN nahi) - screen aur download dono.
-            return { rows: sortDesc(consumerRows).slice(0, progressRevenueDefaultersLimit), nonGovtCount: 0 };
-        }
 
-        function setProgressDefaultersGovtFilter(value) {
-            progressDefaultersGovtFilter = value || "";
-            const body = document.getElementById("progress-revenue-body");
-            if (body) body.innerHTML = renderProgressRevenueBodyInner();
-        }
 
-        function setProgressCategoryGovtFilter(value) {
-            progressCategoryGovtFilter = value === "GOVT" || value === "NONGOVT" ? value : "";
-            const body = document.getElementById("progress-revenue-body");
-            if (body) body.innerHTML = renderProgressRevenueBodyInner();
-        }
 
         // Govt/Non Govt summary is built once per loaded report and kept on the report object,
         // so flipping the dropdown back and forth is instant (no recompute).
@@ -7441,54 +7167,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (body) body.innerHTML = renderProgressRevenueBodyInner();
         }
 
-        function downloadProgressRevenueDefaultersSummary(fmt) {
-            if (!lastRevenueProgressBoxData) return showToast("No data available for the report", false);
-            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
-            setProgressCategoryDownloadState(true, `${downloadTypeLabel} download in progress... please wait`);
-            try {
-                const { mode, filterValue } = lastRevenueProgressBoxData;
-                const { rows, nonGovtCount } = getProgressDefaultersFilteredRows(mode, filterValue);
-                if (!rows.length) { setProgressCategoryDownloadState(false, "No data available for download"); return; }
-                const headers = ["S.NO", "IVRS NO", "CONSUMER NAME", revenueHqLabelUpper(), revenueVillageLabelUpper(), "GOVT/NON GOVT", "MOBILE NO", "PENDING AMOUNT"];
-                // USER REQUEST (2026-09-13): "All" me screen jaisa hi - pehle poori
-                // Non Govt Top N (1 se numbering), ek "NON GOVT"/"GOVT" divider row,
-                // fir poori Govt Top N (1 se dobara numbering).
-                const showSplit = !progressDefaultersGovtFilter && nonGovtCount > 0 && nonGovtCount < rows.length;
-                const bodyRows = [];
-                if (showSplit) bodyRows.push([`NON GOVT - TOP ${nonGovtCount}`, "", "", "", "", "", "", ""]);
-                rows.forEach((row, index) => {
-                    if (showSplit && index === nonGovtCount) bodyRows.push([`GOVT - TOP ${rows.length - nonGovtCount}`, "", "", "", "", "", "", ""]);
-                    const displayIndex = showSplit && index >= nonGovtCount ? (index - nonGovtCount + 1) : (index + 1);
-                    bodyRows.push([displayIndex, row.ivrsNo || "", row.consumerName || "", row.hqName || "", row.village || "", row.govtFlag ? "GOVT" : "NON GOVT", row.mobileNo || "", formatProgressReportAmount(row.pendingAmount)]);
-                });
-                const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
-                const govtLabel = progressDefaultersGovtFilter === "GOVT" ? "Govt" : (progressDefaultersGovtFilter === "NONGOVT" ? "Non Govt" : "All");
-                const reportTitle = `Top ${progressRevenueDefaultersLimit} Defaulters - ${scope}`;
-                const rawVal = document.getElementById("report-date")?.value || "";
-                const parsed = parseSummarySelection(rawVal, summaryMode);
-                const periodLine = `Period: ${parsed.label || getTodayIsoDate()}  |  Type: ${govtLabel}`;
-                const fileName = `${reportTitle}-${parsed.label || getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
-                if (fmt === "PDF") {
-                    if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library could not be loaded"); return; }
-                    const { jsPDF } = window.jspdf;
-                    const doc = new jsPDF({ orientation: "landscape" });
-                    scPdfHeader_(doc, { title: reportTitle, lines: [`Scope: ${scope}`, periodLine] });
-                    doc.autoTable({ startY: 34, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
-                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
-                } else {
-                    const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
-                    const csv = [[reportTitle], [`Scope: ${scope}`], [periodLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
-                    const link = document.createElement("a");
-                    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-                    link.download = `${fileName}.csv`;
-                    link.click();
-                }
-                setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} downloaded`), 500);
-            } catch (error) {
-                setProgressCategoryDownloadState(false, "Download failed");
-                showToast(error?.message || "Top Defaulters download failed", false);
-            }
-        }
 
         function setProgressSummaryDownloadState(isDownloading, message = "") {
             const status = document.getElementById("progress-summary-download-status");
@@ -7793,304 +7471,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
         // ===== End Paid Count Summary =====
 
-        // Top 20/50 Defaulters ka data buildRevenueHqVillageConsumerRows() se aata hai - isi
-        // function ka data "HQ / Village Wise Paid-Unpaid" list section aur dedicated "Top
-        // 20/50 Defaulters" report dono use karte hain. Yahan par (Daily/Progress Report ki
-        // Revenue tab me) bhi wahi consumer-level unpaid rows lekar, jo scope (DC/Division/
-        // Circle) abhi active hai usi ke hisaab se top defaulters nikalte hain.
-        function renderRevenueProgressDefaultersSummaryHtml(mode, filterValue) {
-            const { rows, nonGovtCount } = getProgressDefaultersFilteredRows(mode, filterValue);
-            let html = `
-                <div style="font-size:0.75rem; font-weight:950; color:#9f1239; text-align:center;">Top ${progressRevenueDefaultersLimit} Defaulters (Arrears after Cash List)</div>
-                <div style="display:flex; gap:8px; width:100%; margin:9px auto 0;">
-                    <div onclick="setProgressDefaultersLimit(20)" style="flex:1; height:28px; line-height:28px; text-align:center; border-radius:999px; cursor:pointer; font-size:0.6rem; font-weight:950; background:${progressRevenueDefaultersLimit === 20 ? "#9f1239" : "#ffe4e6"}; color:${progressRevenueDefaultersLimit === 20 ? "#ffffff" : "#9f1239"};">TOP 20</div>
-                    <div onclick="setProgressDefaultersLimit(50)" style="flex:1; height:28px; line-height:28px; text-align:center; border-radius:999px; cursor:pointer; font-size:0.6rem; font-weight:950; background:${progressRevenueDefaultersLimit === 50 ? "#9f1239" : "#ffe4e6"}; color:${progressRevenueDefaultersLimit === 50 ? "#ffffff" : "#9f1239"};">TOP 50</div>
-                </div>
-                <select onchange="setProgressDefaultersGovtFilter(this.value)" style="width:100%; height:38px; margin:5px auto 0; display:block; border:1.5px solid #fda4af; border-radius:12px; padding:0 12px; font-size:0.72rem; font-weight:900; color:#0f172a; background:#ffffff;">
-                    <option value="">All (Govt + Non Govt)</option>
-                    <option value="GOVT" ${progressDefaultersGovtFilter === "GOVT" ? "selected" : ""}>Govt</option>
-                    <option value="NONGOVT" ${progressDefaultersGovtFilter === "NONGOVT" ? "selected" : ""}>Non Govt</option>
-                </select>
-                <div class="summary-wrapper" style="margin-top:8px;"><div class="summary-table-header" style="grid-template-columns: 0.4fr 1.3fr 1fr;"><div>#</div><div>CONSUMER</div><div>PENDING</div></div>
-            `;
-            if (!rows.length) {
-                html += `${scEmptyState_(`No consumer with arrears found in this scope.`)}`;
-            } else {
-                // USER REQUEST (2026-09-13): "All" me dono group (Non Govt + Govt)
-                // alag-alag dikhte hain - ek divider line ke saath, aur har group
-                // ki apni numbering 1 se shuru (poori Non Govt Top N, phir poori
-                // Govt Top N).
-                const showSplit = !progressDefaultersGovtFilter && nonGovtCount > 0 && nonGovtCount < rows.length;
-                if (showSplit) {
-                    html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div style="text-align:center; font-weight:900; color:#166534; background:#f0fdf4; border-radius:8px; padding:5px;">NON GOVT - TOP ${nonGovtCount}</div></div>`;
-                }
-                rows.forEach((row, index) => {
-                    if (showSplit && index === nonGovtCount) {
-                        html += `<div class="summary-table-row" style="grid-template-columns: 1fr;"><div style="text-align:center; font-weight:900; color:#9f1239; background:#fff1f2; border-radius:8px; padding:5px; margin-top:6px;">GOVT - TOP ${rows.length - nonGovtCount}</div></div>`;
-                    }
-                    const displayIndex = showSplit && index >= nonGovtCount ? (index - nonGovtCount + 1) : (index + 1);
-                    html += `<div class="summary-table-row" style="grid-template-columns: 0.4fr 1.3fr 1fr;"><div class="font-black">${displayIndex}</div><div>${escapeHtml(row.consumerName || "-")}<br><span style="font-size:0.56rem; color:#64748b;">${escapeHtml(row.hqName)} / ${escapeHtml(row.village)}</span></div><div class="text-rose-700 font-black">${formatProgressReportAmount(row.pendingAmount)}</div></div>`;
-                });
-            }
-            html += `</div>`;
-            return html;
-        }
-
-        // "LAST PAYMENT DATE" master-data column ke aadhar par 3 naye Non Payee aging
-        // report types - purane STAFF/CATEGORY/TARGET/DEFAULTERS jaisa hi dropdown-driven
-        // flow, wahi lastRevenueProgressBoxData (mode/filterValue) reuse hota hai. Inke
-        // saath HQ/Village/Category/Net Bill Slab/Govt-NonGovt - "Pending DO List" jaisa
-        // filter set bhi rahega, taaki koi bhi combination nikal sake.
-        let progressNonPayeeFilterState = { dc: "", hq: "", village: "", category: "", slab: "", govt: "" };
-
-        function resetProgressNonPayeeFilterState() {
-            progressNonPayeeFilterState = { dc: "", hq: "", village: "", category: "", slab: "", govt: "" };
-        }
-
-        function setProgressNonPayeeFilter(key, value) {
-            if (!(key in progressNonPayeeFilterState)) return;
-            progressNonPayeeFilterState[key] = value || "";
-            // DC badalne par HQ/Village dono reset - warna purani DC ki HQ/Village select
-            // rah jaati hai jo nayi DC me exist hi nahi karti.
-            if (key === "dc") { progressNonPayeeFilterState.hq = ""; progressNonPayeeFilterState.village = ""; }
-            if (key === "hq") progressNonPayeeFilterState.village = "";
-            const body = document.getElementById("progress-revenue-body");
-            if (body) body.innerHTML = renderProgressRevenueBodyInner();
-        }
-
-        function isProgressNonPayeeNetBillInSlab(row, slabValue) {
-            if (!slabValue) return true;
-            const amount = Number(row.pendingAmount || 0);
-            if (slabValue === "0-500") return amount >= 0 && amount <= 500;
-            if (slabValue === "500-1000") return amount > 500 && amount <= 1000;
-            if (slabValue === "1000-5000") return amount > 1000 && amount <= 5000;
-            if (slabValue === "5000-10000") return amount > 5000 && amount <= 10000;
-            if (slabValue === "10000-25000") return amount > 10000 && amount <= 25000;
-            if (slabValue === "25000+") return amount > 25000;
-            return true;
-        }
-
-        function getProgressNonPayeeFilteredRows(mode, filterValue, bucket) {
-            const allRows = buildRevenueNonPayeeRows(mode, filterValue, bucket, true); // USER RULE 2026-09-26: paid = cash list
-            const f = progressNonPayeeFilterState;
-            const rows = allRows.filter((row) => (
-                (!f.dc || normalizeDcName(row.dcName) === normalizeDcName(f.dc))
-                && (!f.hq || normalizeLookupValue(row.hqName) === normalizeLookupValue(f.hq))
-                && (!f.village || normalizeLookupValue(row.village) === normalizeLookupValue(f.village))
-                && (!f.category || normalizeLookupValue(row.tariffCategory) === normalizeLookupValue(f.category))
-                && isProgressNonPayeeNetBillInSlab(row, f.slab)
-                && (!f.govt || (f.govt === "GOVT" ? !!row.govtFlag : !row.govtFlag))
-            ));
-            return { allRows, rows };
-        }
-
-        function buildProgressNonPayeeOptionsHtml(values, selectedValue, placeholder) {
-            const options = [`<option value="">${escapeHtml(placeholder)}</option>`].concat(
-                (values || []).map((v) => `<option value="${escapeHtml(v)}" ${v === selectedValue ? "selected" : ""}>${escapeHtml(v)}</option>`)
-            );
-            return options.join("");
-        }
-
-        function renderRevenueProgressNonPayeeSummaryHtml(mode, filterValue, bucket) {
-            const { allRows, rows } = getProgressNonPayeeFilteredRows(mode, filterValue, bucket);
-            const f = progressNonPayeeFilterState;
-            const bucketLabel = getRevenueNonPayeeBucketLabel(bucket);
-            const totalPending = rows.reduce((sum, r) => sum + Number(r.pendingAmount || 0), 0);
-            // Division/Circle level me ek hi HQ naam alag-alag DC me repeat ho sakta hai,
-            // isliye HQ/Village se pehle DC chunna zaroori hai - warna baaki dropdown sahi
-            // se kaam nahi karte. DC-level view me pehle se ek hi DC scope me hai, isliye
-            // wahan yeh extra dropdown dikhane ki zaroorat nahi.
-            const showDcDropdown = activeViewLevel !== "DC";
-            const dcScoped = allRows.filter((row) => !f.dc || normalizeDcName(row.dcName) === normalizeDcName(f.dc));
-            const villageScoped = dcScoped.filter((row) => !f.hq || normalizeLookupValue(row.hqName) === normalizeLookupValue(f.hq));
-            const dcOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(allRows, "dcName"), f.dc, "All DC");
-            const hqOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(dcScoped, "hqName"), f.hq, revenueHqAllLabel(f.dc || activeDC));
-            const villageOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(villageScoped, "village"), f.village, revenueVillageAllLabel(f.dc || activeDC));
-            const categoryOptionsHtml = buildProgressNonPayeeOptionsHtml(getRevenueUniqueValues(allRows, "tariffCategory"), f.category, "All Categories");
-            const selectStyle = "width:100%; height:38px; margin:5px auto 0; display:block; border:1.5px solid #fb923c; border-radius:14px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#0f172a; background:#ffffff;";
-            let html = `
-                <div style="font-size:0.75rem; font-weight:950; color:#9f1239; text-align:center;">${escapeHtml(bucketLabel)}</div>
-                ${showDcDropdown ? `<select onchange="setProgressNonPayeeFilter('dc', this.value)" style="${selectStyle}">${dcOptionsHtml}</select>` : ""}
-                <select onchange="setProgressNonPayeeFilter('hq', this.value)" style="${selectStyle}">${hqOptionsHtml}</select>
-                <select onchange="setProgressNonPayeeFilter('village', this.value)" style="${selectStyle}">${villageOptionsHtml}</select>
-                <select onchange="setProgressNonPayeeFilter('category', this.value)" style="${selectStyle}">${categoryOptionsHtml}</select>
-                <select onchange="setProgressNonPayeeFilter('slab', this.value)" style="${selectStyle}">
-                    <option value="">All Net Bill Slabs</option>
-                    <option value="0-500" ${f.slab === "0-500" ? "selected" : ""}>₹0 - ₹500</option>
-                    <option value="500-1000" ${f.slab === "500-1000" ? "selected" : ""}>₹500 - ₹1,000</option>
-                    <option value="1000-5000" ${f.slab === "1000-5000" ? "selected" : ""}>₹1,000 - ₹5,000</option>
-                    <option value="5000-10000" ${f.slab === "5000-10000" ? "selected" : ""}>₹5,000 - ₹10,000</option>
-                    <option value="10000-25000" ${f.slab === "10000-25000" ? "selected" : ""}>₹10,000 - ₹25,000</option>
-                    <option value="25000+" ${f.slab === "25000+" ? "selected" : ""}>₹25,000 Above</option>
-                </select>
-                <select onchange="setProgressNonPayeeFilter('govt', this.value)" style="${selectStyle}">
-                    <option value="">All (Govt + Non Govt)</option>
-                    <option value="GOVT" ${f.govt === "GOVT" ? "selected" : ""}>Govt</option>
-                    <option value="NONGOVT" ${f.govt === "NONGOVT" ? "selected" : ""}>Non Govt</option>
-                </select>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; width:100%; margin:10px auto 0;">
-                    <div style="background:#fff1f2; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Consumers</div><div style="font-size:0.95rem; font-weight:950; color:#9f1239; margin-top:2px;">${rows.length}</div></div>
-                    <div style="background:#fff1f2; border-radius:12px; padding:8px 4px; text-align:center;"><div style="font-size:0.54rem; font-weight:850; color:#9f1239; text-transform:uppercase;">Total Pending Amt</div><div style="font-size:0.85rem; font-weight:950; color:#9f1239; margin-top:2px;">${formatProgressReportDisplayAmount(totalPending)}</div></div>
-                </div>
-                ${renderRevenueNonPayeeGroupSummaryHtml(rows)}
-                ${activeViewLevel === "DC" ? `
-                <div style="font-size:0.56rem; font-weight:850; color:#64748b; text-align:center; margin-top:10px;">SUMMARY DOWNLOAD (${escapeHtml(revenueHqLabelUpper())} WISE)</div>
-                <div class="btn-export-row" style="margin-top:4px;">
-                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS', true)">Summary Excel</button>
-                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF', true)">Summary PDF</button>
-                </div>
-                <div style="font-size:0.56rem; font-weight:850; color:#64748b; text-align:center; margin-top:10px;">FULL LIST DOWNLOAD</div>
-                <div class="btn-export-row" style="margin-top:4px;">
-                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">Full List Excel</button>
-                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">Full List PDF</button>
-                </div>
-                ` : `
-                <div class="btn-export-row" style="margin-top:10px;">
-                    <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">${escapeHtml(getProgressRevenueReportTypeLabel())} Excel</button>
-                    <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">${escapeHtml(getProgressRevenueReportTypeLabel())} PDF</button>
-                </div>
-                `}
-                <div id="progress-category-download-status" style="display:none; text-align:center; font-weight:900; border-radius:14px; padding:8px 10px; width:100%; margin-top:8px;"></div>
-            `;
-            // USER REQUEST (2026-09-13): Division/Circle adhikari sirf SUMMARY
-            // dekhte hain - Non Payee 3M/6M/Since Connection ki poori consumer-
-            // list ab sirf DC level par hi dikhegi (upar wale "Consumers"/"Total
-            // Pending" tiles aur HQ/DC-wise summary table hi Division/Circle par
-            // dikhenge). DC level ka list-wala UI bilkul untouched hai.
-            if (activeViewLevel === "DC") {
-                html += `<div class="summary-wrapper" style="margin-top:10px;"><div class="summary-table-header" style="grid-template-columns: 1.3fr 0.7fr 1fr;"><div>CONSUMER</div><div>${bucket === "SINCE_CONNECTION" ? "TYPE" : "MONTHS"}</div><div>PENDING</div></div>`;
-                if (!rows.length) {
-                    html += `${scEmptyState_(`No consumer found in this filter (or LAST PAYMENT DATE column in master sheet is not updated yet).`)}`;
-                } else {
-                    const scLimNp_ = scListLimit_(200); // STATUS PACK 3a
-                    rows.slice(0, scLimNp_).forEach((row) => {
-                        const middleCell = bucket === "SINCE_CONNECTION" ? "Never Paid" : `${row.monthsSincePayment} mo`;
-                        html += `<div class="summary-table-row" style="grid-template-columns: 1.3fr 0.7fr 1fr;"><div>${escapeHtml(row.consumerName || "-")}<br><span style="font-size:0.56rem; color:#64748b;">${escapeHtml(row.hqName)} / ${escapeHtml(row.village)}</span></div><div class="font-black">${escapeHtml(middleCell)}</div><div class="text-rose-700 font-black">${formatProgressReportAmount(row.pendingAmount)}</div></div>`;
-                    });
-                    if (rows.length > scLimNp_) html += scListMoreNoteHtml_(rows.length, scLimNp_);
-                }
-                html += `</div>`;
-            }
-            return html;
-        }
-
-        // USER REQUEST (2026-09-14): Freeze Report jaisa hi pattern - Non Payee 3M/6M/
-        // Since Connection ke Division/Circle level par ab (jaisa screen par bhi sirf
-        // summary dikhti hai) download bhi HQ/DC-wise SUMMARY hi deta hai, poori
-        // consumer-list nahi (pehle yahan bhi poori list download hoti thi, jo screen
-        // se inconsistent tha). DC level pehle jaisa hi (poori list) - naye "Summary
-        // Download" button ke through wahan bhi yahi summary alag se milti hai.
-        function downloadProgressRevenueNonPayeeGroupSummary(fmt, bucket) {
-            if (!lastRevenueProgressBoxData) return showToast("No data available for the report", false);
-            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
-            setProgressCategoryDownloadState(true, `${downloadTypeLabel} download in progress... please wait`);
-            try {
-                const { mode, filterValue } = lastRevenueProgressBoxData;
-                const { rows } = getProgressNonPayeeFilteredRows(mode || "DAILY", filterValue || "", bucket);
-                if (!rows.length) { setProgressCategoryDownloadState(false, "No data available for download"); return; }
-                const summary = buildRevenueNonPayeeGroupSummary(rows, progressNonPayeeFilterState.dc);
-                const headers = [summary.colLabel, "TOTAL CONSUMER", "PENDING AMOUNT"];
-                const bodyRows = summary.rows.map((r) => [r.name, r.count, formatProgressReportAmount(r.pendingTotal)]);
-                const rowTypeFlags = summary.rows.map((r) => (r.type === "GRAND_TOTAL" ? 2 : (r.type === "SUB_TOTAL" ? 1 : 0)));
-                const showDcColumn = activeViewLevel !== "DC";
-                const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
-                const f = progressNonPayeeFilterState;
-                const filterLine = `${showDcColumn ? `DC: ${f.dc || "All"}  |  ` : ""}HQ: ${f.hq || "All"}  |  Village: ${f.village || "All"}  |  Category: ${f.category || "All"}  |  Net Bill Slab: ${f.slab || "All"}  |  Type: ${f.govt === "GOVT" ? "Govt" : (f.govt === "NONGOVT" ? "Non Govt" : "All")}`;
-                const reportTitle = `${getRevenueNonPayeeBucketLabel(bucket)} - ${scope} - Summary`;
-                const asOfLine = `As of: ${formatRevenueDateIndian(normalizeRevenueReportDate(getCurrentDateDDMMYYYY()))}`;
-                const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
-                if (fmt === "PDF") {
-                    if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library could not be loaded"); return; }
-                    const { jsPDF } = window.jspdf;
-                    const doc = new jsPDF({ orientation: "landscape" });
-                    const scNpY = scPdfHeader_(doc, { title: reportTitle, lines: [`Scope: ${scope}`, filterLine, asOfLine], focus: { dc: progressNonPayeeFilterState.dc, hq: progressNonPayeeFilterState.hq } });
-                    doc.autoTable({
-                        startY: scNpY, head: [headers], body: bodyRows, theme: "grid",
-                        ...scSummaryFitOnePage_(scNpY, bodyRows.length, 7, 1.5), // 2026-09-27: ek page
-                        headStyles: { fillColor: [159, 18, 57] },
-                        didParseCell: function (hookData) {
-                            if (hookData.section === "body") {
-                                const flag = rowTypeFlags[hookData.row.index];
-                                if (flag === 2) { hookData.cell.styles.fillColor = [219, 234, 254]; hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [159, 18, 57]; }
-                                else if (flag === 1) { hookData.cell.styles.fontStyle = "bold"; hookData.cell.styles.textColor = [194, 65, 12]; }
-                            }
-                        }
-                    });
-                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
-                } else {
-                    const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
-                    const csv = [[scPdfFocusTitle_(reportTitle, { dc: progressNonPayeeFilterState.dc, hq: progressNonPayeeFilterState.hq })], [`Scope: ${scope}`], [filterLine], [asOfLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
-                    const link = document.createElement("a");
-                    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-                    link.download = `${fileName}.csv`;
-                    link.click();
-                }
-                setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} downloaded`), 500);
-            } catch (error) {
-                setProgressCategoryDownloadState(false, "Download failed");
-                showToast(error?.message || "Non Payee summary download failed", false);
-            }
-        }
-
-        function downloadProgressRevenueNonPayeeSummary(fmt, bucket, forceGroupSummary) {
-            if (forceGroupSummary || activeViewLevel !== "DC") return downloadProgressRevenueNonPayeeGroupSummary(fmt, bucket);
-            if (!lastRevenueProgressBoxData) return showToast("No data available for the report", false);
-            const downloadTypeLabel = fmt === "PDF" ? "PDF" : "Excel";
-            setProgressCategoryDownloadState(true, `${downloadTypeLabel} download in progress... please wait`);
-            try {
-                const { mode, filterValue } = lastRevenueProgressBoxData;
-                const { rows } = getProgressNonPayeeFilteredRows(mode || "DAILY", filterValue || "", bucket);
-                if (!rows.length) { setProgressCategoryDownloadState(false, "No data available for download"); return; }
-                const showDcColumn = activeViewLevel !== "DC";
-                const headers = [
-                    "S.NO",
-                    ...(showDcColumn ? ["DC NAME"] : []),
-                    "IVRS NO", "CONSUMER NAME", revenueHqLabelUpper(), revenueVillageLabelUpper(), "TARRIF CATEGORY", "GOVT/NON GOVT", "MOBILE NO",
-                    bucket === "SINCE_CONNECTION" ? "STATUS" : "MONTHS SINCE PAYMENT", "LAST PAYMENT DATE", "PENDING AMOUNT"
-                ];
-                const bodyRows = rows.map((row, index) => [
-                    index + 1,
-                    ...(showDcColumn ? [row.dcName || ""] : []),
-                    row.ivrsNo || "", row.consumerName || "", row.hqName || "", row.village || "", row.tariffCategory || "",
-                    row.govtFlag ? "GOVT" : "NON GOVT", row.mobileNo || "",
-                    bucket === "SINCE_CONNECTION" ? "Never Paid" : `${row.monthsSincePayment}`,
-                    row.lastPaymentDate || "Never Paid",
-                    formatProgressReportAmount(row.pendingAmount)
-                ]);
-                const scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
-                const f = progressNonPayeeFilterState;
-                const filterLine = `${showDcColumn ? `DC: ${f.dc || "All"}  |  ` : ""}HQ: ${f.hq || "All"}  |  Village: ${f.village || "All"}  |  Category: ${f.category || "All"}  |  Net Bill Slab: ${f.slab || "All"}  |  Type: ${f.govt === "GOVT" ? "Govt" : (f.govt === "NONGOVT" ? "Non Govt" : "All")}`;
-                const reportTitle = `${getRevenueNonPayeeBucketLabel(bucket)} - ${scope}`;
-                const asOfLine = `As of: ${formatRevenueDateIndian(normalizeRevenueReportDate(getCurrentDateDDMMYYYY()))}`;
-                const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
-                if (fmt === "PDF") {
-                    if (!window.jspdf?.jsPDF) { setProgressCategoryDownloadState(false, "PDF library could not be loaded"); return; }
-                    const { jsPDF } = window.jspdf;
-                    const doc = new jsPDF({ orientation: "landscape" });
-                    scPdfHeader_(doc, { title: reportTitle, lines: [`Scope: ${scope}`, filterLine, asOfLine], focus: { dc: progressNonPayeeFilterState.dc, hq: progressNonPayeeFilterState.hq } });
-                    doc.autoTable({ startY: 39, head: [headers], body: bodyRows, theme: "grid", styles: { fontSize: 6, cellPadding: 1, overflow: "linebreak" }, headStyles: { fillColor: [159, 18, 57] } });
-                    savePdfDocumentForDevice(doc, `${fileName}.pdf`);
-                } else {
-                    const csvSafe = (value) => { const text = String(value ?? ""); return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; };
-                    const csv = [[scPdfFocusTitle_(reportTitle, { dc: progressNonPayeeFilterState.dc, hq: progressNonPayeeFilterState.hq })], [`Scope: ${scope}`], [filterLine], [asOfLine], [], headers, ...bodyRows].map((row) => row.map(csvSafe).join(",")).join("\n");
-                    const link = document.createElement("a");
-                    link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-                    link.download = `${fileName}.csv`;
-                    link.click();
-                }
-                setTimeout(() => setProgressCategoryDownloadState(false, `${downloadTypeLabel} downloaded`), 500);
-            } catch (error) {
-                setProgressCategoryDownloadState(false, "Download failed");
-                showToast(error?.message || "Non Payee report download failed", false);
-            }
-        }
-
         function setProgressRevenueReportType(value) {
-            const validValues = ["STAFF", "CATEGORY", "TARGET", "DEFAULTERS", "NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION", "PAIDCOUNT", "ARREARS_1L"];
+            const validValues = ["STAFF", "TARGET", "PAIDCOUNT"]; // UPDATE 156
             progressRevenueReportType = validValues.includes(value) ? value : "STAFF";
             resetArrears1LLiveFilter_(); // ISOLATED ADDITION (2026-09-23): Arrears Above 1 Lakh filters
-            resetProgressNonPayeeFilterState();
-            progressDefaultersGovtFilter = "";
             progressTargetGovtFilter = "";
             progressCategoryGovtFilter = "";
             progressStaffTypeFilter = "";
@@ -8126,22 +7510,11 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (body) body.innerHTML = renderProgressRevenueBodyInner();
         }
 
-        function setProgressDefaultersLimit(limit) {
-            progressRevenueDefaultersLimit = limit === 50 ? 50 : 20;
-            const body = document.getElementById("progress-revenue-body");
-            if (body) body.innerHTML = renderProgressRevenueBodyInner();
-        }
 
         function getProgressRevenueReportTypeLabel() {
             if (progressRevenueReportType === "TARGET") return "Target vs Achievement";
-            if (progressRevenueReportType === "DEFAULTERS") return `Top ${progressRevenueDefaultersLimit} Defaulters`;
-            if (progressRevenueReportType === "STAFF") return "Paid by Staff";
-            if (progressRevenueReportType === "NONPAYEE_3M") return "Non Payee From 3 Month";
-            if (progressRevenueReportType === "NONPAYEE_6M") return "Non Payee From 6 Month";
-            if (progressRevenueReportType === "NONPAYEE_SINCE_CONNECTION") return "Non Payee From Date of Connection";
             if (progressRevenueReportType === "PAIDCOUNT") return "Paid Count Summary";
-            if (progressRevenueReportType === "ARREARS_1L") return "Arrears Above 1 Lakh"; // ISOLATED ADDITION (2026-09-23)
-            return "Category Wise";
+            return "Paid by Staff";
         }
 
         // Daily Progress (DC/Division/Circle) me sirf summary dikhani hai - koi drill-down
@@ -8726,28 +8099,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return list.sort((a, b) => (a.dcName.localeCompare(b.dcName)) || ((isFreeze ? b.netBill - a.netBill : b.balance - a.balance)));
         }
 
-        // Live view me cash-list (Freeze paid-summary) cache is scope ke liye ek baar warm
-        // karte hain; tab tak "syncing" dikhta hai, fir body apne-aap dobara render hoti hai.
-        var arrears1LLiveWarmKey_ = "";
-        var arrears1LLiveWarming_ = false;
-        function renderArrears1LLiveHtml_() {
-            const scopeKey = `${activeViewLevel}|${activeDC}|${activeDiv}`;
-            if (arrears1LLiveWarmKey_ !== scopeKey) {
-                if (!arrears1LLiveWarming_) {
-                    arrears1LLiveWarming_ = true;
-                    Promise.resolve().then(() => warmRevenueFreezePaidSummaryCache_()).catch((err) => {
-                        console.error("[Arrears1L] Live cash-list warm failed:", err);
-                    }).then(() => {
-                        arrears1LLiveWarming_ = false;
-                        arrears1LLiveWarmKey_ = scopeKey;
-                        const body = document.getElementById("progress-revenue-body");
-                        if (body && progressRevenueReportType === "ARREARS_1L") body.innerHTML = renderProgressRevenueBodyInner();
-                    });
-                }
-                return `<div style="text-align:center; font-size:0.72rem; font-weight:900; color:#1d4ed8; padding:20px 0;">MATCHING CASH LIST... PLEASE WAIT<div class="app-sync-spinner"></div></div>`;
-            }
-            return renderArrears1LBodyHtml_(false, buildArrears1LLiveRows_());
-        }
 
         function setArrears1LLiveFilter(key, value) {
             if (!arrears1LLiveFilter_ || !(key in arrears1LLiveFilter_)) resetArrears1LLiveFilter_();
@@ -9219,14 +8570,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function renderRevenueProgressNonStaffBoxHtml() {
             const data = lastRevenueProgressBoxData || {};
             let bodyHtml;
-            // Non Payee (3M/6M/Since Connection) me consumer list bahut lambi ho sakti hai
-            // (hazaaron rows) - isliye in teeno ke liye Excel/PDF buttons aur download-status
-            // ab renderRevenueProgressNonPayeeSummaryHtml() ke andar hi, summary cards (Consumers/
-            // Total Pending) ke turant baad, list se PEHLE render ho jaate hain - taki user ko
-            // download karne ke liye poori list scroll na karni pade. Isliye yahan (list ke baad)
-            // dobara buttons nahi jodte, warna do baar dikhte. Baaki Category/Target/Defaulters
-            // pehle jaisे hi (bodyHtml ke NEECHE) buttons rakhte hain - wahan list chhoti hoti hai.
-            const isNonPayeeType = ["NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION", "ARREARS_1L"].includes(progressRevenueReportType); // ARREARS_1L (2026-09-23): apne download buttons khud render karta hai
+            // UPDATE 156 (2026-11-03): Live me sirf Target vs Achievement + Paid Count Summary (Paid by Staff alag render hota hai).
             if (progressRevenueReportType === "TARGET") {
                 // USER REQUEST (2026-08-13): Govt/Non-Govt filter - jab select ho, tab
                 // hi tree ko us filter ke saath dobara (local, bina naye fetch ke)
@@ -9237,17 +8581,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     : data.hqVillageSummaryData;
                 lastRevenueProgressTargetSummaryData = targetSummaryData;
                 bodyHtml = targetSummaryData ? renderRevenueProgressTargetSummaryHtml(targetSummaryData) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">No data found.</div>`;
-            } else if (progressRevenueReportType === "DEFAULTERS") {
-                bodyHtml = renderRevenueProgressDefaultersSummaryHtml(data.mode || "DAILY", data.filterValue || "");
-            } else if (progressRevenueReportType === "NONPAYEE_3M") {
-                bodyHtml = renderRevenueProgressNonPayeeSummaryHtml(data.mode || "DAILY", data.filterValue || "", "3M");
-            } else if (progressRevenueReportType === "NONPAYEE_6M") {
-                bodyHtml = renderRevenueProgressNonPayeeSummaryHtml(data.mode || "DAILY", data.filterValue || "", "6M");
-            } else if (progressRevenueReportType === "NONPAYEE_SINCE_CONNECTION") {
-                bodyHtml = renderRevenueProgressNonPayeeSummaryHtml(data.mode || "DAILY", data.filterValue || "", "SINCE_CONNECTION");
-            } else if (progressRevenueReportType === "ARREARS_1L") {
-                // ISOLATED ADDITION (2026-09-23): Arrears Above 1 Lakh (Live)
-                bodyHtml = renderArrears1LLiveHtml_();
             } else if (progressRevenueReportType === "PAIDCOUNT") {
                 bodyHtml = renderRevenueProgressPaidCountSummaryHtml(buildProgressPaidCountSummaryData(
                     data.mode || "DAILY",
@@ -9256,16 +8589,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     progressPaidCountPaymentFilter
                 ));
             } else {
-                const catSummary_ = getProgressGovtSummaryData_(data, progressCategoryGovtFilter);
-                const catGovtSelect_ = `<select onchange="setProgressCategoryGovtFilter(this.value)" style="width:100%; height:38px; margin:0 auto 10px; display:block; border:1.5px solid #93c5fd; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#0f172a; background:#ffffff;">
-                    <option value="">All (Govt + Non Govt)</option>
-                    <option value="GOVT" ${progressCategoryGovtFilter === "GOVT" ? "selected" : ""}>Govt</option>
-                    <option value="NONGOVT" ${progressCategoryGovtFilter === "NONGOVT" ? "selected" : ""}>Non Govt</option>
-                </select>`;
-                bodyHtml = catGovtSelect_ + (catSummary_ ? renderRevenueProgressHqVillageSummaryHtml(catSummary_) : `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">Category Wise Paid/Unpaid Summary</div>`);
+                bodyHtml = `<div style="font-size:0.75rem; font-weight:950; color:#1d4ed8; text-align:center;">No data found.</div>`;
             }
             const typeLabel = getProgressRevenueReportTypeLabel();
-            const bottomButtonsHtml = isNonPayeeType ? "" : `
+            const bottomButtonsHtml = `
                     <div class="btn-export-row" style="margin-top:8px;">
                         <button class="btn-unique btn-excel-unique" onclick="downloadProgressRevenueReportBox('XLS')">${escapeHtml(typeLabel)} Excel</button>
                         <button class="btn-unique btn-pdf-unique" onclick="downloadProgressRevenueReportBox('PDF')">${escapeHtml(typeLabel)} PDF</button>
@@ -9279,7 +8606,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         function renderProgressRevenueBodyInner() {
-            if (["CATEGORY", "TARGET", "DEFAULTERS", "NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION", "PAIDCOUNT", "ARREARS_1L"].includes(progressRevenueReportType)) {
+            if (["TARGET", "PAIDCOUNT"].includes(progressRevenueReportType)) {
                 return renderRevenueProgressNonStaffBoxHtml();
             }
             const staffData = lastRevenueProgressStaffData || { rows: [], label: "" };
@@ -9288,7 +8615,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
         function renderRevenueProgressSummary(rows, label, hqVillageSummaryData = null, revenueMode = "DAILY", revenueFilterValue = "") {
             // 2026-10-20 (USER REQUEST): Top 20/50, Non Payee 3M/6M/Since Connection, Arrears Above 1 Lakh ab sirf Freeze report me (Live me confusion tha)
-            if (["DEFAULTERS", "NONPAYEE_3M", "NONPAYEE_6M", "NONPAYEE_SINCE_CONNECTION", "ARREARS_1L", "CATEGORY"].includes(progressRevenueReportType)) progressRevenueReportType = "STAFF"; // CATEGORY: 2026-10-29 Freeze report me shift
+            if (!["STAFF", "TARGET", "PAIDCOUNT"].includes(progressRevenueReportType)) progressRevenueReportType = "STAFF"; // UPDATE 156 - // CATEGORY: 2026-10-29 Freeze report me shift
             lastRevenueProgressBoxData = { hqVillageSummaryData, mode: revenueMode, filterValue: revenueFilterValue };
             lastRevenueProgressStaffData = { rows, label };
             const selectHtml = `
@@ -13770,34 +13097,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             }
         }
 
-        async function loadShmsData(forceRefresh = false) {
-            if (!forceRefresh && shmsDataLoaded && shmsRows.length) return true;
-            try {
-                const csvText = await loadRemoteText(shmsCsvUrl);
-                shmsRows = parseShmsCsv(csvText);
-                shmsSubstations = Array.from(new Set(shmsRows.map((row) => row.substation).filter(Boolean)));
-                shmsDataLoaded = shmsRows.length > 0;
-                return shmsDataLoaded;
-            } catch (_) {
-                shmsRows = [];
-                shmsSubstations = [];
-                shmsDataLoaded = false;
-                return false;
-            }
-        }
 
-        function parseShmsCsv(csvText) {
-            const lines = (csvText || "").split(/\r?\n/).filter((line) => line.trim());
-            if (lines.length < 2) return [];
-            return lines.slice(1).map((line) => {
-                const cols = splitCsvLine(line);
-                const substation = String(cols[0] || "").replace(/\s+/g, " ").trim();
-                const feeder = String(cols[1] || "").replace(/\s+/g, " ").trim();
-                const meterNo = String(cols[2] || "").trim();
-                if (!substation || !feeder) return null;
-                return { substation, feeder, meterNo };
-            }).filter(Boolean);
-        }
 
         // BUG FIX (2026-09-14) - USER-REPORTED: Feeder Reading me ek substation
         // (jaise Chhapara ke substation) khud karte hi saari purani dates "Entry
@@ -17226,80 +16526,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             }).filter(Boolean);
         }
 
-        function getSavedShmsOperator() {
-            try {
-                const raw = localStorage.getItem("shmsOperatorProfile");
-                if (!raw) return null;
-                const parsed = JSON.parse(raw);
-                const fullName = String(parsed?.fullName || "").replace(/\s+/g, " ").trim();
-                const mobileNo = String(parsed?.mobileNo || "").replace(/\D/g, "");
-                if (!fullName || mobileNo.length < 10) return null;
-                return { fullName, mobileNo, remember: true };
-            } catch (_) {
-                return null;
-            }
-        }
 
-        function updateShmsOperatorUi() {
-            const loginBlock = document.getElementById("shms-operator-login-block");
-            const summaryBlock = document.getElementById("shms-operator-summary-block");
-            const summaryText = document.getElementById("shms-operator-summary");
-            const flowBlock = document.getElementById("shms-flow-block");
-            const rememberInput = document.getElementById("shms-remember-operator");
 
-            if (activeShmsOperator) {
-                if (loginBlock) loginBlock.style.display = "none";
-                if (summaryBlock) summaryBlock.style.display = "block";
-                if (flowBlock) flowBlock.style.display = "block";
-                if (summaryText) summaryText.innerText = `${activeShmsOperator.fullName} | ${activeShmsOperator.mobileNo}`;
-            } else {
-                if (loginBlock) loginBlock.style.display = "block";
-                if (summaryBlock) summaryBlock.style.display = "none";
-                if (flowBlock) flowBlock.style.display = "none";
-                if (summaryText) summaryText.innerText = "";
-                if (rememberInput) rememberInput.checked = true;
-            }
-        }
 
-        function saveShmsOperator() {
-            const nameInput = document.getElementById("shms-operator-name");
-            const mobileInput = document.getElementById("shms-operator-mobile");
-            const rememberInput = document.getElementById("shms-remember-operator");
-
-            const fullName = String(nameInput?.value || "").replace(/\s+/g, " ").trim();
-            const mobileNo = String(mobileInput?.value || "").replace(/\D/g, "");
-
-            if (!fullName) return showToast("Please enter the operator's full name", false);
-            if (mobileNo.length < 10) return showToast("Please enter a valid mobile number", false);
-
-            activeShmsOperator = {
-                fullName,
-                mobileNo,
-                remember: !!rememberInput?.checked
-            };
-
-            if (activeShmsOperator.remember) {
-                localStorage.setItem("shmsOperatorProfile", JSON.stringify(activeShmsOperator));
-            } else {
-                localStorage.removeItem("shmsOperatorProfile");
-            }
-
-            updateShmsOperatorUi();
-            showToast("Operator login saved", true);
-        }
-
-        function editShmsOperator() {
-            const nameInput = document.getElementById("shms-operator-name");
-            const mobileInput = document.getElementById("shms-operator-mobile");
-            const rememberInput = document.getElementById("shms-remember-operator");
-
-            if (nameInput) nameInput.value = activeShmsOperator?.fullName || "";
-            if (mobileInput) mobileInput.value = activeShmsOperator?.mobileNo || "";
-            if (rememberInput) rememberInput.checked = activeShmsOperator?.remember !== false;
-
-            activeShmsOperator = null;
-            updateShmsOperatorUi();
-        }
 
         function getSavedFeederOperator() {
             try {
@@ -18157,83 +17386,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             updateStmComplaintProgressiveUi();
         }
 
-        async function loadShmsProgressData(forceRefresh = false) {
-            if (!forceRefresh && shmsProgressLoaded && shmsProgressRows.length) return true;
-            loadRecentShmsSubmittedEntries_();
-            const previousShmsProgressRows = Array.isArray(shmsProgressRows) ? shmsProgressRows.slice() : [];
-            // SPEED/RELIABILITY FIX (2026-09-15, USER-REPORTED): pehle yahan bare
-            // fetch().json() tha - koi timeout na hone ki wajah se weak network par
-            // yeh request hamesha ke liye "latak" sakti thi (Feeder/STM/PeakLoad
-            // jaisi 45s-timeout + 2-retry safety yahan nahi thi). Ab wahi proven
-            // loadRemoteJson(...,45000) + 2-attempt pattern reuse kiya hai.
-            let data = null, lastShmsProgressErr = null;
-            for (let attempt = 1; attempt <= 2 && data === null; attempt++) {
-                try {
-                    data = await loadRemoteJson(`${shmsSubmitScriptUrl}?action=getSummary&t=${Date.now()}`, 45000);
-                } catch (err) {
-                    lastShmsProgressErr = err;
-                    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2000));
-                }
-            }
-            try {
-                if (data === null) throw lastShmsProgressErr || new Error("SHMS summary load fail");
-                const summaryRows = Array.isArray(data)
-                    ? data
-                    : Array.isArray(data?.data)
-                        ? data.data
-                        : Array.isArray(data?.rows)
-                            ? data.rows
-                            : Array.isArray(data?.result)
-                                ? data.result
-                                : [];
-                shmsProgressRows = summaryRows.map((row) => {
-                    const submittedAt = normalizeShmsSubmittedAt_(row.submitted_at || row.submittedAt || "");
-                    const resolvedDate = resolveShmsEffectiveDate_(row.date, submittedAt);
-                    const dateKey = buildShmsDateKey_(resolvedDate);
-                    const expectedDateKey = getShmsExpectedDateKeyFromSubmittedAt_(submittedAt);
-                    return {
-                        substation: String(row.substation || row.sub_station || row.station || "").trim(),
-                        feeder: String(row.feeder || "").trim(),
-                        eventType: String(row.event_type || row.eventType || "").trim(),
-                        date: resolvedDate,
-                        timeFrom: normalizeShmsTime_(row.time_from || row.timeFrom || ""),
-                        timeTo: normalizeShmsTime_(row.time_to || row.timeTo || ""),
-                        totalDuration: String(row.total_duration || row.totalDuration || "").trim(),
-                        reason: String(row.reason || "").trim(),
-                        meterNo: String(row.meter_no || row.meterNo || "").trim(),
-                        operatorName: String(row.operator_name || row.operatorName || "").trim(),
-                        operatorMobile: String(row.operator_mobile || row.operatorMobile || "").trim(),
-                        submittedAt: submittedAt,
-                        dateKey,
-                        expectedDateKey
-                    };
-                });
-                reconcileRecentShmsSubmittedEntries_(shmsProgressRows);
-                shmsProgressRows = mergeShmsProgressRows_(shmsProgressRows, getRecentShmsSubmittedRows_());
-                shmsPendingTrackerRows = shmsProgressRows.slice();
-                shmsProgressLoaded = true;
-                shmsProgressStale = false; // ITEM-8 FIX (2026-09-15): fresh fetch safal
-                return true;
-            } catch (_) {
-                // RELIABILITY FIX (2026-09-15, USER-FLAGGED risk): pehle fetch fail
-                // hone par pichla successfully-loaded data bhi khaali kar diya jaata
-                // tha (screen par pehle se sahi dikh raha data bhi gayab ho jaata
-                // tha). Ab agar pehle se koi valid data tha, use hi wapas rakhte
-                // hain - sirf tab khaali karte hain jab kabhi koi data mila hi na ho.
-                if (previousShmsProgressRows.length) {
-                    shmsProgressRows = previousShmsProgressRows;
-                    shmsPendingTrackerRows = shmsProgressRows.slice();
-                    shmsProgressLoaded = true;
-                    shmsProgressStale = true; // ITEM-8 FIX (2026-09-15): purana cached data dikha rahe hain
-                    return true;
-                }
-                shmsProgressRows = [];
-                shmsPendingTrackerRows = [];
-                shmsProgressLoaded = false;
-                shmsProgressStale = false;
-                return false;
-            }
-        }
 
         function normalizeShmsSheetDate_(value) {
             const raw = String(value || "").trim();
@@ -18250,88 +17402,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return raw;
         }
 
-        function parseShmsDateCandidates_(value) {
-            const raw = String(value || "").trim();
-            if (!raw) return [];
 
-            const normalized = normalizeShmsSheetDate_(raw);
-            const match = normalized.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-            if (!match) {
-                const fallback = new Date(raw);
-                return Number.isNaN(fallback.getTime()) ? [] : [fallback];
-            }
 
-            const first = Number(match[1]);
-            const second = Number(match[2]);
-            const year = Number(match[3]);
-            const candidates = [];
 
-            const ddmmyyyy = new Date(year, second - 1, first);
-            if (!Number.isNaN(ddmmyyyy.getTime())) candidates.push(ddmmyyyy);
 
-            if (first <= 12 && second <= 12 && first !== second) {
-                const mmddyyyy = new Date(year, first - 1, second);
-                if (!Number.isNaN(mmddyyyy.getTime())) candidates.push(mmddyyyy);
-            }
-
-            return candidates;
-        }
-
-        function formatShmsDateObject_(dateObj) {
-            if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return "";
-            const day = String(dateObj.getDate()).padStart(2, "0");
-            const month = String(dateObj.getMonth() + 1).padStart(2, "0");
-            const year = dateObj.getFullYear();
-            return `${day}/${month}/${year}`;
-        }
-
-        function resolveShmsEffectiveDate_(dateValue, submittedAtValue) {
-            const candidates = parseShmsDateCandidates_(dateValue);
-            if (!candidates.length) return normalizeShmsSheetDate_(dateValue);
-
-            const submittedRaw = normalizeShmsSubmittedAt_(submittedAtValue || "");
-            if (submittedRaw) {
-                const submittedDate = new Date(submittedRaw);
-                if (!Number.isNaN(submittedDate.getTime())) {
-                    const submittedOnly = new Date(
-                        submittedDate.getFullYear(),
-                        submittedDate.getMonth(),
-                        submittedDate.getDate()
-                    ).getTime();
-                    const best = candidates
-                        .map((candidate) => ({
-                            candidate,
-                            diff: Math.abs(
-                                new Date(candidate.getFullYear(), candidate.getMonth(), candidate.getDate()).getTime() - submittedOnly
-                            )
-                        }))
-                        .sort((a, b) => a.diff - b.diff)[0];
-                    if (best?.candidate) return formatShmsDateObject_(best.candidate);
-                }
-            }
-
-            return formatShmsDateObject_(candidates[0]);
-        }
-
-        function normalizeShmsTime_(value) {
-            const raw = String(value || "").trim();
-            if (!raw) return "";
-            if (/^\d{2}:\d{2}$/.test(raw)) return raw;
-            if (/^\d{2}:\d{2}:\d{2}$/.test(raw)) return raw.slice(0, 5);
-            const isoMatch = raw.match(/T(\d{2}):(\d{2})/);
-            if (isoMatch) {
-                return `${isoMatch[1]}:${isoMatch[2]}`;
-            }
-            const directMatch = raw.match(/(\d{1,2}):(\d{2})/);
-            if (directMatch) {
-                return `${String(directMatch[1]).padStart(2, "0")}:${directMatch[2]}`;
-            }
-            return raw;
-        }
-
-        function normalizeShmsSubstationKey_(value) {
-            return String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-        }
 
         function buildShmsDateKey_(value) {
             const raw = String(value || "").trim();
@@ -18351,13 +17425,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return normalized;
         }
 
-        function buildShmsDateKeyFromDateObj_(dateObj) {
-            if (!(dateObj instanceof Date) || Number.isNaN(dateObj.getTime())) return "";
-            const day = String(dateObj.getDate()).padStart(2, "0");
-            const month = String(dateObj.getMonth() + 1).padStart(2, "0");
-            const year = dateObj.getFullYear();
-            return `${year}-${month}-${day}`;
-        }
 
         function buildShmsMonthKeyFromDateKey_(dateKey) {
             const raw = String(dateKey || "").trim();
@@ -18366,220 +17433,19 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return `${match[2]}/${match[1]}`;
         }
 
-        function getShmsExpectedDateKeyFromSubmittedAt_(value) {
-            const raw = String(value || "").trim();
-            if (!raw) return "";
-            const submitted = new Date(raw);
-            if (Number.isNaN(submitted.getTime())) return "";
-            const expected = new Date(submitted.getFullYear(), submitted.getMonth(), submitted.getDate() - 1);
-            return buildShmsDateKeyFromDateObj_(expected);
-        }
 
-        function getShmsCurrentDateTimeLabel() {
-            const now = new Date();
-            const day = String(now.getDate()).padStart(2, "0");
-            const month = String(now.getMonth() + 1).padStart(2, "0");
-            const year = now.getFullYear();
-            const hours = String(now.getHours()).padStart(2, "0");
-            const minutes = String(now.getMinutes()).padStart(2, "0");
-            return `${day}/${month}/${year} ${hours}:${minutes}`;
-        }
 
-        function parseShmsSubmittedAtDate_(value) {
-            const raw = String(value || "").trim();
-            if (!raw) return null;
 
-            const directDateTimeMatch = raw.match(
-                /^(\d{2})[\/-](\d{2})[\/-](\d{4})(?:\s*(?:-\s*)?(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i
-            );
-            if (directDateTimeMatch) {
-                let hours = Number(directDateTimeMatch[4] || 0);
-                const minutes = Number(directDateTimeMatch[5] || 0);
-                const seconds = Number(directDateTimeMatch[6] || 0);
-                const meridiem = String(directDateTimeMatch[7] || "").toUpperCase();
-                if (meridiem === "PM" && hours < 12) hours += 12;
-                if (meridiem === "AM" && hours === 12) hours = 0;
-                const parsed = new Date(
-                    Number(directDateTimeMatch[3]),
-                    Number(directDateTimeMatch[2]) - 1,
-                    Number(directDateTimeMatch[1]),
-                    Number.isNaN(hours) ? 0 : hours,
-                    Number.isNaN(minutes) ? 0 : minutes,
-                    Number.isNaN(seconds) ? 0 : seconds,
-                    0
-                );
-                if (!Number.isNaN(parsed.getTime())) return parsed;
-            }
 
-            const isoDateTimeMatch = raw.match(
-                /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2}))?)?/
-            );
-            if (isoDateTimeMatch) {
-                const parsed = new Date(raw);
-                if (!Number.isNaN(parsed.getTime())) return parsed;
-            }
 
-            const fallback = new Date(raw);
-            if (!Number.isNaN(fallback.getTime())) return fallback;
-            return null;
-        }
 
-        function normalizeShmsSubmittedAt_(value) {
-            const parsed = parseShmsSubmittedAtDate_(value);
-            return parsed ? parsed.toISOString() : String(value || "").trim();
-        }
 
-        function formatShmsSubmittedAtDisplay(value) {
-            const raw = String(value || "").trim();
-            if (!raw) return "";
-            const date = parseShmsSubmittedAtDate_(raw) || new Date(raw);
-            if (Number.isNaN(date.getTime())) return raw;
-            const day = String(date.getDate()).padStart(2, "0");
-            const month = String(date.getMonth() + 1).padStart(2, "0");
-            const year = date.getFullYear();
-            const hours = String(date.getHours()).padStart(2, "0");
-            const minutes = String(date.getMinutes()).padStart(2, "0");
-            return `${day}/${month}/${year} ${hours}:${minutes}`;
-        }
 
-        function buildShmsLocalProgressRows_(entries) {
-            return (Array.isArray(entries) ? entries : []).map((entry) => {
-                const submittedAt = normalizeShmsSubmittedAt_(entry.submitted_at || entry.submittedAt || "");
-                const resolvedDate = resolveShmsEffectiveDate_(entry.date || entry.eventDate || "", submittedAt);
-                const dateKey = buildShmsDateKey_(resolvedDate);
-                const expectedDateKey = getShmsExpectedDateKeyFromSubmittedAt_(submittedAt);
-                return {
-                    substation: String(entry.substation || "").trim(),
-                    feeder: String(entry.feeder || "").trim(),
-                    eventType: String(entry.event_type || entry.eventType || "").trim(),
-                    date: resolvedDate,
-                    timeFrom: normalizeShmsTime_(entry.time_from || entry.timeFrom || ""),
-                    timeTo: normalizeShmsTime_(entry.time_to || entry.timeTo || ""),
-                    totalDuration: String(entry.total_duration || entry.totalDuration || "").trim(),
-                    reason: String(entry.reason || "").trim(),
-                    meterNo: String(entry.meter_no || entry.meterNo || "").trim(),
-                    operatorName: String(entry.operator_name || entry.operatorName || "").trim(),
-                    operatorMobile: String(entry.operator_mobile || entry.operatorMobile || "").trim(),
-                    submittedAt: submittedAt,
-                    dateKey,
-                    expectedDateKey
-                };
-            }).filter((row) => row.substation && row.date);
-        }
 
-        function getShmsProgressRowKey_(row) {
-            return [
-                normalizeShmsSubstationKey_(row.substation),
-                String(row.feeder || "").trim().toUpperCase(),
-                buildShmsDateKey_(row.date),
-                String(row.timeFrom || "").trim(),
-                String(row.timeTo || "").trim(),
-                String(row.reason || "").trim().toUpperCase(),
-                String(row.submittedAt || "").trim()
-            ].join("|");
-        }
 
-        function getShmsProgressSyncKey_(row) {
-            if (!row) return "";
-            const dateKey = String(row.dateKey || buildShmsDateKey_(row.date) || "").trim();
-            const expectedDateKey = String(
-                row.expectedDateKey || getShmsExpectedDateKeyFromSubmittedAt_(row.submittedAt || "")
-            ).trim();
-            const effectiveDateKey = dateKey || expectedDateKey || getShmsSubmittedDateKey_(row.submittedAt || "");
-            return [
-                normalizeShmsSubstationKey_(row.substation),
-                String(row.feeder || "").trim().toUpperCase(),
-                String(row.eventType || "").trim().toUpperCase(),
-                effectiveDateKey,
-                String(row.timeFrom || "").trim(),
-                String(row.timeTo || "").trim(),
-                String(row.reason || "").trim().toUpperCase()
-            ].join("|");
-        }
 
-        function mergeShmsProgressRows_(baseRows, extraRows) {
-            const merged = [];
-            const seen = new Set();
-            [...(Array.isArray(baseRows) ? baseRows : []), ...(Array.isArray(extraRows) ? extraRows : [])].forEach((row) => {
-                if (!row || !row.substation) return;
-                const key = getShmsProgressRowKey_(row);
-                if (seen.has(key)) return;
-                seen.add(key);
-                merged.push(row);
-            });
-            return merged;
-        }
 
-        function loadRecentShmsSubmittedEntries_() {
-            try {
-                const raw = localStorage.getItem(shmsRecentSubmittedStorageKey);
-                const parsed = JSON.parse(raw || "[]");
-                const nowTs = Date.now();
-                shmsRecentSubmittedEntries = Array.isArray(parsed)
-                    ? parsed.filter((entry) => {
-                        const submittedRaw = normalizeShmsSubmittedAt_(entry.submitted_at || entry.submittedAt || "");
-                        const submittedTs = submittedRaw ? new Date(submittedRaw).getTime() : NaN;
-                        return !Number.isNaN(submittedTs) && (nowTs - submittedTs) <= shmsRecentSubmittedTtlMs;
-                    }).slice(-200)
-                    : [];
-                persistRecentShmsSubmittedEntries_();
-            } catch (_) {
-                shmsRecentSubmittedEntries = [];
-            }
-        }
 
-        function persistRecentShmsSubmittedEntries_() {
-            try {
-                localStorage.setItem(shmsRecentSubmittedStorageKey, JSON.stringify(shmsRecentSubmittedEntries.slice(-200)));
-            } catch (_) {}
-        }
-
-        function getRecentShmsSubmittedRows_() {
-            if (!Array.isArray(shmsRecentSubmittedEntries) || !shmsRecentSubmittedEntries.length) {
-                loadRecentShmsSubmittedEntries_();
-            }
-            return buildShmsLocalProgressRows_(shmsRecentSubmittedEntries);
-        }
-
-        function saveRecentShmsSubmittedEntries_(entries) {
-            if (Array.isArray(entries) && entries.length) {
-                const nextEntries = shmsRecentSubmittedEntries.concat(entries);
-                const deduped = [];
-                const seen = new Set();
-                nextEntries.slice().reverse().forEach((entry) => {
-                    const row = buildShmsLocalProgressRows_([entry])[0];
-                    const key = getShmsProgressSyncKey_(row) || getShmsProgressRowKey_(row || {});
-                    if (!key || seen.has(key)) return;
-                    seen.add(key);
-                    deduped.unshift(entry);
-                });
-                shmsRecentSubmittedEntries = deduped.slice(-200);
-            }
-            persistRecentShmsSubmittedEntries_();
-        }
-
-        function reconcileRecentShmsSubmittedEntries_(serverRows) {
-            const serverKeys = new Set((Array.isArray(serverRows) ? serverRows : []).map((row) => getShmsProgressSyncKey_(row)).filter(Boolean));
-            if (!serverKeys.size) return;
-
-            const localRows = buildShmsLocalProgressRows_(shmsRecentSubmittedEntries);
-            const nextEntries = [];
-
-            shmsRecentSubmittedEntries.forEach((entry, index) => {
-                const localRow = localRows[index];
-                if (!localRow) {
-                    nextEntries.push(entry);
-                    return;
-                }
-                const key = getShmsProgressSyncKey_(localRow);
-                if (!serverKeys.has(key)) {
-                    nextEntries.push(entry);
-                }
-            });
-
-            shmsRecentSubmittedEntries = nextEntries.slice(-200);
-            persistRecentShmsSubmittedEntries_();
-        }
 
         function getYesterdayDateParts() {
             const now = new Date();
@@ -18594,159 +17460,14 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             };
         }
 
-        function getTodayDateParts() {
-            const now = new Date();
-            const day = String(now.getDate()).padStart(2, "0");
-            const month = String(now.getMonth() + 1).padStart(2, "0");
-            const year = now.getFullYear();
-            return {
-                label: `${day}/${month}/${year}`,
-                iso: `${year}-${month}-${day}`,
-                dateObj: new Date(now.getFullYear(), now.getMonth(), now.getDate())
-            };
-        }
 
-        function getShmsPendingCutoff() {
-            const now = new Date();
-            return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 30, 0, 0);
-        }
 
-        function setShmsPendingStatus(message) {
-            const node = document.getElementById("shms-pending-status");
-            if (!node) return;
-            if (message === "SYNCING DATA... PLEASE WAIT") {
-                node.style.display = "block";
-                renderSyncingProgress(node, () => node.isConnected && document.getElementById("shms-pending-status") === node);
-                return;
-            }
-            node.innerText = message || "";
-            node.style.display = message ? "block" : "none";
-        }
 
-        function getShmsPendingTrackerRows() {
-            const baseRows = shmsPendingTrackerRows.length ? shmsPendingTrackerRows : shmsProgressRows;
-            const localRows = getRecentShmsSubmittedRows_();
-            return mergeShmsProgressRows_(baseRows, localRows);
-        }
 
-        function getShmsSubmittedDateKey_(value) {
-            const submitted = parseShmsSubmittedAtDate_(value || "");
-            if (Number.isNaN(submitted.getTime())) return "";
-            return buildShmsDateKeyFromDateObj_(submitted);
-        }
 
-        function getShmsPendingSubstations() {
-            const source = shmsSubstations.length ? shmsSubstations : shmsRows.map((row) => row.substation).filter(Boolean);
-            return Array.from(new Set(source.map((item) => String(item || "").trim()).filter(Boolean)));
-        }
 
-        function buildShmsPendingStatuses() {
-            const today = getTodayDateParts();
-            const cutoff = getShmsPendingCutoff();
-            const now = new Date();
-            const progressRows = getShmsPendingTrackerRows();
-            const substations = getShmsPendingSubstations();
-            const targetDateKey = buildShmsDateKey_(today.label);
 
-            return substations.map((substation) => {
-                const substationKey = normalizeShmsSubstationKey_(substation);
-                const entries = progressRows.filter((row) => {
-                    if (normalizeShmsSubstationKey_(row.substation) !== substationKey) return false;
-                    const submittedDateKey = getShmsSubmittedDateKey_(row.submittedAt || "");
-                    return submittedDateKey === targetDateKey;
-                });
-                if (!entries.length) {
-                    return {
-                        substation,
-                        status: now <= cutoff ? "Pending" : "Pending",
-                        badgeClass: now <= cutoff ? "background:#fef3c7; color:#92400e;" : "background:#fee2e2; color:#b91c1c;",
-                        meta: now <= cutoff ? "Entry is expected today before 09:30 AM" : "Make Entry by 09:30 AM",
-                        count: 0
-                    };
-                }
 
-                const submittedTimes = entries
-                    .map((row) => {
-                        if (!row.submittedAt) return null;
-                        const submitted = parseShmsSubmittedAtDate_(row.submittedAt) || new Date(row.submittedAt);
-                        return Number.isNaN(submitted.getTime()) ? null : submitted;
-                    })
-                    .filter(Boolean);
-
-                const firstSubmitted = submittedTimes.length
-                    ? submittedTimes.sort((a, b) => a.getTime() - b.getTime())[0]
-                    : null;
-
-                const hasLate = firstSubmitted ? firstSubmitted > cutoff : false;
-
-                return {
-                    substation,
-                    status: hasLate ? "Late" : "Done",
-                    badgeClass: hasLate ? "background:#ffedd5; color:#c2410c;" : "background:#dcfce7; color:#166534;",
-                    meta: hasLate ? "Today's entry was submitted after 09:30 AM" : "Today's entry received",
-                    count: entries.length
-                };
-            });
-        }
-
-        function renderShmsPendingDashboard() {
-            const targetNode = document.getElementById("shms-pending-target-label");
-            const deadlineNode = document.getElementById("shms-pending-deadline-label");
-            const summaryNode = document.getElementById("shms-pending-summary-cards");
-            const listNode = document.getElementById("shms-pending-list");
-            if (!targetNode || !deadlineNode || !summaryNode || !listNode) return;
-
-            const today = getTodayDateParts();
-            const statuses = buildShmsPendingStatuses();
-            const done = statuses.filter((item) => item.status === "Done").length;
-            const late = statuses.filter((item) => item.status === "Late").length;
-            const pending = statuses.filter((item) => item.status === "Pending").length;
-
-            targetNode.innerText = `Expected Entry Date: ${today.label}`;
-            deadlineNode.innerText = "Today's entry is expected before 09:30 AM";
-
-            summaryNode.innerHTML = [
-                { label: "Done", value: done, bg: "#dcfce7", color: "#166534" },
-                { label: "Late", value: late, bg: "#ffedd5", color: "#c2410c" },
-                { label: "Pending", value: pending, bg: "#fee2e2", color: "#b91c1c" }
-            ].map((item) => `
-                <div style="background:${item.bg}; color:${item.color}; border-radius:16px; padding:12px 8px; text-align:center; font-weight:900;">
-                    <div style="font-size:12px; text-transform:uppercase;">${item.label}</div>
-                    <div style="font-size:24px; line-height:1.1; margin-top:4px;">${item.value}</div>
-                </div>
-            `).join("");
-
-            listNode.innerHTML = statuses.map((item) => `
-                <div style="background:#ffffff; border:1.5px solid #ccfbf1; border-radius:18px; padding:12px 14px; box-shadow:0 8px 20px rgba(13,148,136,0.08);">
-                    <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
-                        <div>
-                            <div style="font-size:14px; font-weight:900; color:#0f172a;">${item.substation}</div>
-                            <div style="font-size:11px; font-weight:800; color:#475569; margin-top:4px;">${item.meta}</div>
-                        </div>
-                        <div style="${item.badgeClass} border-radius:999px; padding:6px 12px; font-size:11px; font-weight:900; text-transform:uppercase; white-space:nowrap;">${item.status}</div>
-                    </div>
-                    <div style="font-size:11px; font-weight:800; color:#0d9488; margin-top:8px;">Entries Found: ${item.count}</div>
-                </div>
-            `).join("");
-        }
-
-        async function initShmsPendingDashboard() {
-            setShmsPendingStatus("SYNCING DATA... PLEASE WAIT");
-            const [masterLoaded, progressLoaded] = await Promise.all([
-                loadShmsData(true),
-                loadShmsProgressData(true)
-            ]);
-            if (!masterLoaded) {
-                setShmsPendingStatus("SHMS feeder master could not be loaded");
-                return;
-            }
-            if (!progressLoaded) {
-                setShmsPendingStatus("SHMS submitted data could not be loaded");
-                return;
-            }
-            setShmsPendingStatus("");
-            renderShmsPendingDashboard();
-        }
 
         async function initShmsProgressDashboard() {
             const input = document.getElementById("shms-progress-date");
@@ -18756,19 +17477,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 input.value = yesterday.iso;
                 input.max = getTodayIsoDate();
             }
-            setShmsProgressStatus("SYNCING DATA... PLEASE WAIT");
-            const loaded = await loadShmsProgressData(true);
-            if (!loaded) {
-                setShmsProgressStatus("SHMS progress data could not be loaded");
-                const summary = document.getElementById("shms-progress-summary");
-                if (summary) summary.style.display = "none";
-                return;
-            }
-            setShmsProgressStatus("");
-            // setReportSource() neeche khud renderShmsProgressSummary(true) call
-            // karta hai (tab-switch/dashboard-open par fresh fetch ke liye) - pehle
-            // yahan ek redundant extra call bhi hota tha (double network hit ka
-            // risk), ab hata diya (2026-09-15).
+            // UPDATE 157 (2026-11-03): SHMS hata diya - ab SHMS data load nahi hota (Feeder/STM/Peak Load apna data khud laate hain).
             setReportSource(progressReportSource);
         }
 
@@ -18810,34 +17519,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             renderShmsProgressSummary();
         }
 
-        function getShmsProgressFilterLabel() {
-            const raw = document.getElementById("shms-progress-date")?.value || "";
-            if (!raw) return "";
-            if (shmsProgressMode === "MONTHLY") {
-                const [year, month] = raw.split("-");
-                return `${month}/${year}`;
-            }
-            return formatShmsDateDisplay(raw);
-        }
 
-        function getFilteredShmsProgressRows() {
-            const label = getShmsProgressFilterLabel();
-            if (!label) return [];
-            const sourceRows = mergeShmsProgressRows_(shmsProgressRows, getRecentShmsSubmittedRows_());
-            if (shmsProgressMode === "MONTHLY") {
-                return sourceRows.filter((row) => {
-                    const rowMonthKey = buildShmsMonthKeyFromDateKey_(row.dateKey || buildShmsDateKey_(row.date));
-                    const expectedMonthKey = buildShmsMonthKeyFromDateKey_(row.expectedDateKey || getShmsExpectedDateKeyFromSubmittedAt_(row.submittedAt));
-                    return rowMonthKey === label || expectedMonthKey === label;
-                });
-            }
-            const labelKey = buildShmsDateKey_(label);
-            return sourceRows.filter((row) => {
-                const rowDateKey = row.dateKey || buildShmsDateKey_(row.date);
-                const submittedExpectedKey = row.expectedDateKey || getShmsExpectedDateKeyFromSubmittedAt_(row.submittedAt);
-                return rowDateKey === labelKey || submittedExpectedKey === labelKey;
-            });
-        }
 
         // STALE-RENDER PROTECTION (2026-09-15, USER-REPORTED): pehle report
         // source (SHMS/FEEDER/STM/PEAKLOAD) fast switch karne par, purani tab ki
@@ -18868,16 +17550,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 await renderStmComplaintReportSummary(forceRefresh, isShmsProgressRenderValid);
                 return;
             }
-            const filtered = getFilteredShmsProgressRows();
-            if (!isShmsProgressRenderValid()) return;
-            const label = getShmsProgressFilterLabel();
-            summary.style.display = label ? "block" : "none";
-            // ITEM-8 FIX (2026-09-15): naya fetch fail hone par purana (cached)
-            // data dikhne par chhota staleness note - sirf display text.
-            const staleSuffix = (filtered.length && shmsProgressStale)
-                ? " (⚠ new data could not be loaded, showing the previously loaded data)"
-                : "";
-            summary.innerText = label ? `${filtered.length} entries ready for ${label}${staleSuffix}` : "";
+            // UPDATE 157 (2026-11-03): SHMS hata diya - ab default Feeder Reading.
+            await renderFeederReportSummary(forceRefresh, isShmsProgressRenderValid);
         }
 
         async function saveShmsBlob(fileName, blob, mimeType) {
@@ -19578,9 +18252,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // USER REQUEST (2026-09-14): pehle sirf SHMS/FEEDER 2 option the, ab
             // STM Complaint aur Daily Hourly Peak Load bhi (Sub DN Chhapara ke
             // menu ke sabhi 4 module) isi Daily Progress toggle me add kiye.
-            const validSources = ["SHMS", "FEEDER", "STM", "PEAKLOAD"];
-            progressReportSource = validSources.includes(source) ? source : "SHMS";
-            document.getElementById("progress-shms-btn")?.classList.toggle("active", progressReportSource === "SHMS");
+            const validSources = ["FEEDER", "STM", "PEAKLOAD"]; // UPDATE 157 (2026-11-03): SHMS removed
+            progressReportSource = validSources.includes(source) ? source : "FEEDER";
             document.getElementById("progress-feeder-btn")?.classList.toggle("active", progressReportSource === "FEEDER");
             document.getElementById("progress-stm-btn")?.classList.toggle("active", progressReportSource === "STM");
             document.getElementById("progress-peakload-btn")?.classList.toggle("active", progressReportSource === "PEAKLOAD");
@@ -19591,7 +18264,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     STM: "STM COMPLAINT REPORT",
                     PEAKLOAD: "DAILY HOURLY PEAK LOAD REPORT"
                 };
-                titleNode.innerText = titleMap[progressReportSource] || "SHMS DAILY PROGRESS";
+                titleNode.innerText = titleMap[progressReportSource] || "FEEDER READING REPORT";
             }
             // Tab (SHMS/Feeder/STM/PeakLoad) switch karna ek explicit "fresh data
             // do" signal hai - isliye yahi ek jagah hai jahan force refresh hota
@@ -19778,457 +18451,24 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (progressReportSource === "STM") {
                 return downloadStmComplaintReport(fmt);
             }
-            try {
-                setShmsProgressStatus("SYNCING DATA... PLEASE WAIT");
-                const loaded = await loadShmsProgressData(true);
-                setShmsProgressStatus("");
-                if (!loaded) return showToast("SHMS progress data could not be loaded", false);
-
-                const filtered = getFilteredShmsProgressRows();
-                const label = getShmsProgressFilterLabel();
-                if (!label) return showToast("Please select a date or month first", false);
-
-                const headers = [
-                    "S.NO",
-                    "33/11 KV Substation",
-                    "33 or 11 KV Feeder",
-                    "Un-Planned/Planned",
-                    "Date",
-                    "Time From",
-                    "Time To",
-                    "Total Duration",
-                    "Reason",
-                    "Meter No",
-                    "NAME OF OPERATOR",
-                    "MOBILE NO",
-                    "SUBMITTED AT"
-                ];
-
-                const rows = filtered.map((row, index) => [
-                    index + 1,
-                    row.substation,
-                    row.feeder,
-                    row.eventType,
-                    row.date,
-                    row.timeFrom,
-                    row.timeTo,
-                    row.totalDuration,
-                    row.reason,
-                    row.meterNo,
-                    row.operatorName,
-                    row.operatorMobile,
-                    formatShmsSubmittedAtDisplay(row.submittedAt)
-                ]);
-
-                const safeLabel = label.replace(/[\/\s]/g, "_");
-
-                if (fmt === "XLS") {
-                    const csvRows = [
-                        ["SHMS DAILY PROGRESS REPORT"],
-                        [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`],
-                        [],
-                        headers,
-                        ...rows
-                    ];
-                    const csv = csvRows.map((row) => row.map((cell) => {
-                        const value = String(cell ?? "");
-                        return /[",\n]/.test(value) ? `"${value.replace(/"/g, "\"\"")}"` : value;
-                    }).join(",")).join("\n");
-                    await saveShmsBlob(
-                        `SHMS_${shmsProgressMode}_${safeLabel}.csv`,
-                        new Blob([csv], { type: "text/csv;charset=utf-8" }),
-                        "text/csv;charset=utf-8"
-                    );
-                    return showToast(rows.length ? "Excel report request has been sent. If the file does not appear in preview, please check in the browser or GitHub version." : "Blank Excel report request has been sent. If the file does not appear in preview, please check in the browser or GitHub version.", true);
-                }
-
-                if (!window.jspdf || !window.jspdf.jsPDF) {
-                    return showToast("PDF library could not be loaded", false);
-                }
-
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF("l", "mm", "a4");
-                scPdfHeader_(doc, { title: "SHMS DAILY PROGRESS REPORT", lines: [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`], color: SC_PDF_THEME.progress }); // SC PDF KIT (scShmsProgressDownloadCore_)
-                doc.autoTable({
-                    startY: 32,
-                    head: [headers],
-                    body: rows.length ? rows : [["", "", "", "", "", "", "", "", "", "", "", ""]],
-                    theme: "grid",
-                    headStyles: { fillColor: [17, 24, 39], halign: "center" },
-                    styles: { fontSize: 7, cellPadding: 2, halign: "center" },
-                    columnStyles: {
-                        0: { halign: "left" },
-                        1: { halign: "left" },
-                        7: { halign: "left" },
-                        9: { halign: "left" },
-                        11: { halign: "left" }
-                    }
-                });
-                scPdfFinalize_(doc); const pdfBlob = doc.output("blob");
-                await saveShmsBlob(
-                    `SHMS_${shmsProgressMode}_${safeLabel}.pdf`,
-                    pdfBlob,
-                    "application/pdf"
-                );
-                showToast(rows.length ? "PDF report request has been sent. If the file does not appear in preview, please check in the browser or GitHub version." : "Blank PDF report request has been sent. If the file does not appear in preview, please check in the browser or GitHub version.", true);
-            } catch (error) {
-                setShmsProgressStatus("");
-                showToast(error?.message || "Download failed", false);
-            }
+            return downloadFeederReport(fmt); // UPDATE 157: SHMS removed
         }
 
-        async function initShmsEntry() {
-            resetShmsForm();
-            activeShmsOperator = getSavedShmsOperator();
-            updateShmsOperatorUi();
-            setShmsStatus("SYNCING DATA... PLEASE WAIT");
-            const substationMenu = document.getElementById("shms-substation-menu");
-            const feederMenu = document.getElementById("shms-feeder-menu");
-            const dateInput = document.getElementById("shms-event-date");
-            if (!substationMenu || !feederMenu) return;
-            if (dateInput) {
-                dateInput.max = getTodayIsoDate();
-            }
 
-            const loaded = await loadShmsData(true);
-            substationMenu.innerHTML = "";
-            feederMenu.innerHTML = "";
 
-            if (!loaded) {
-                setShmsStatus("SHMS CSV could not be loaded");
-                return;
-            }
 
-            shmsSubstations.forEach((substation) => {
-                const item = document.createElement("div");
-                item.className = "option-item";
-                item.innerText = substation;
-                item.onclick = () => selectShmsSubstation(substation);
-                substationMenu.appendChild(item);
-            });
 
-            setShmsStatus("");
-        }
 
-        function selectShmsSubstation(substation) {
-            const feederMenu = document.getElementById("shms-feeder-menu");
-            const feederLabel = document.getElementById("shms-feeder-label");
-            const eventLabel = document.getElementById("shms-event-label");
-            const substationLabel = document.getElementById("shms-substation-label");
-            const feederBlock = document.getElementById("shms-feeder-block");
-            const eventBlock = document.getElementById("shms-event-block");
-            const dateBlock = document.getElementById("shms-date-block");
-            const timeBlock = document.getElementById("shms-time-block");
-            const noteBlock = document.getElementById("shms-note-block");
-            selectedShmsSubstation = substation || "";
-            selectedShmsRow = null;
-            selectedShmsEventType = "";
-            if (substationLabel) substationLabel.innerText = selectedShmsSubstation || "Select 33/11 KV Substation";
-            if (feederLabel) feederLabel.innerText = "Select 33KV or 11KV Feeder";
-            if (eventLabel) eventLabel.innerText = "Select Event Type";
-            if (eventBlock) eventBlock.style.display = "none";
-            if (dateBlock) dateBlock.style.display = "none";
-            if (timeBlock) timeBlock.style.display = "none";
-            if (noteBlock) noteBlock.style.display = "none";
-            resetShmsDateTimeInputs();
-            if (!feederMenu) return;
-            toggleShmsDropdown("substation", false);
 
-            feederMenu.innerHTML = "";
-            if (!selectedShmsSubstation) {
-                if (feederBlock) feederBlock.style.display = "none";
-                return;
-            }
 
-            if (feederBlock) feederBlock.style.display = "block";
 
-            const feeders = shmsRows.filter((row) => row.substation === selectedShmsSubstation);
-            const uniqueMap = new Map();
 
-            feeders.forEach((row) => {
-                const feederKey = String(row.feeder || "").replace(/\s+/g, " ").trim().toUpperCase();
-                if (!feederKey) return;
-                if (!uniqueMap.has(feederKey)) {
-                    uniqueMap.set(feederKey, row);
-                } else {
-                    const existing = uniqueMap.get(feederKey);
-                    if ((!existing.meterNo || existing.meterNo === "-") && row.meterNo) {
-                        uniqueMap.set(feederKey, row);
-                    }
-                }
-            });
 
-            const uniqueFeeders = Array.from(uniqueMap.values()).sort((a, b) => a.feeder.localeCompare(b.feeder));
 
-            uniqueFeeders.forEach((row) => {
-                const item = document.createElement("div");
-                item.className = "option-item";
-                item.innerText = row.feeder;
-                item.onclick = () => selectShmsFeeder(row);
-                feederMenu.appendChild(item);
-            });
-        }
 
-        function selectShmsFeeder(row) {
-            const feederLabel = document.getElementById("shms-feeder-label");
-            const eventBlock = document.getElementById("shms-event-block");
-            const dateBlock = document.getElementById("shms-date-block");
-            const timeBlock = document.getElementById("shms-time-block");
-            const noteBlock = document.getElementById("shms-note-block");
-            if (!row) {
-                selectedShmsRow = null;
-                if (eventBlock) eventBlock.style.display = "none";
-                if (dateBlock) dateBlock.style.display = "none";
-                if (timeBlock) timeBlock.style.display = "none";
-                if (noteBlock) noteBlock.style.display = "none";
-                resetShmsDateTimeInputs();
-                return;
-            }
 
-            selectedShmsRow = row;
-            if (feederLabel) feederLabel.innerText = row.feeder || "Select 33KV or 11KV Feeder";
-            toggleShmsDropdown("feeder", false);
-            if (eventBlock) eventBlock.style.display = selectedShmsRow ? "block" : "none";
-            if (dateBlock) dateBlock.style.display = "none";
-            if (timeBlock) timeBlock.style.display = "none";
-            if (noteBlock) noteBlock.style.display = "none";
-            resetShmsDateTimeInputs();
-        }
 
-        function selectShmsEventType(value) {
-            selectedShmsEventType = value || "";
-            const eventLabel = document.getElementById("shms-event-label");
-            const dateBlock = document.getElementById("shms-date-block");
-            const timeBlock = document.getElementById("shms-time-block");
-            const noteBlock = document.getElementById("shms-note-block");
-            const noteInput = document.getElementById("shms-note-input");
-            if (eventLabel) eventLabel.innerText = selectedShmsEventType || "Select Event Type";
-            if (dateBlock) dateBlock.style.display = selectedShmsEventType ? "block" : "none";
-            if (timeBlock) timeBlock.style.display = "none";
-            if (noteBlock) noteBlock.style.display = "none";
-            if (noteInput) {
-                noteInput.placeholder = selectedShmsEventType === "Breakdown"
-                    ? "Write the reason for the breakdown..."
-                    : selectedShmsEventType === "Shutdown"
-                        ? "Write by whom the shutdown was taken and the reason..."
-                        : "Write the details here...";
-            }
-            resetShmsDateTimeInputs();
-            toggleShmsDropdown("event", false);
-        }
 
-        function handleShmsDateChange() {
-            const dateValue = document.getElementById("shms-event-date")?.value || "";
-            const fullRunBlock = document.getElementById("shms-fullrun-block");
-            const timeBlock = document.getElementById("shms-time-block");
-            const durationBlock = document.getElementById("shms-duration-block");
-            const noteBlock = document.getElementById("shms-note-block");
-            const isFullRun = !!document.getElementById("shms-fullrun-check")?.checked;
-            if (fullRunBlock) fullRunBlock.style.display = dateValue ? "block" : "none";
-            if (timeBlock) timeBlock.style.display = dateValue && !isFullRun ? "block" : "none";
-            if (durationBlock) durationBlock.style.display = "none";
-            if (noteBlock) noteBlock.style.display = "none";
-            const fromTime = document.getElementById("shms-from-time");
-            const toTime = document.getElementById("shms-to-time");
-            const durationInput = document.getElementById("shms-duration");
-            if (fromTime) fromTime.value = "";
-            if (toTime) toTime.value = "";
-            if (durationInput) durationInput.value = "";
-            if (isFullRun) {
-                handleShmsFullRunToggle();
-            }
-        }
-
-        function isShmsFullRunChecked_() {
-            return !!document.getElementById("shms-fullrun-check")?.checked;
-        }
-
-        function handleShmsFullRunToggle() {
-            const isFullRun = isShmsFullRunChecked_();
-            const dateValue = document.getElementById("shms-event-date")?.value || "";
-            const timeBlock = document.getElementById("shms-time-block");
-            const durationBlock = document.getElementById("shms-duration-block");
-            const durationInput = document.getElementById("shms-duration");
-            const noteBlock = document.getElementById("shms-note-block");
-            const addBlock = document.getElementById("shms-add-block");
-            const fromInput = document.getElementById("shms-from-time");
-            const toInput = document.getElementById("shms-to-time");
-
-            if (fromInput && isFullRun) fromInput.value = "";
-            if (toInput && isFullRun) toInput.value = "";
-            if (timeBlock) timeBlock.style.display = dateValue && !isFullRun ? "block" : "none";
-            if (durationBlock) durationBlock.style.display = isFullRun ? "block" : "none";
-            if (durationInput) durationInput.value = isFullRun ? "No Interruption Today" : "";
-            if (noteBlock) noteBlock.style.display = isFullRun ? "block" : "none";
-            if (addBlock) addBlock.style.display = "none";
-        }
-
-        function normalizeShmsTimeInput(rawValue) {
-            const raw = String(rawValue || "").trim();
-            if (!raw) return "";
-
-            const digits = raw.replace(/\D/g, "").slice(0, 4);
-            if (!digits) return "";
-
-            if (raw.includes(":")) {
-                const parts = raw.split(":");
-                const hour = String(parts[0] || "").replace(/\D/g, "").slice(0, 2);
-                const minute = String(parts[1] || "").replace(/\D/g, "").slice(0, 2);
-                if (hour.length === 2 && minute.length === 2) {
-                    const h = Number(hour);
-                    const m = Number(minute);
-                    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return `${hour}:${minute}`;
-                }
-            }
-
-            if (digits.length <= 2) return digits;
-
-            let hour = digits.slice(0, 2);
-            let minute = digits.slice(2, 4);
-            if (minute.length < 2) return `${hour}:${minute}`;
-
-            let h = Number(hour);
-            let m = Number(minute);
-            if (Number.isNaN(h) || Number.isNaN(m)) return "";
-            if (h > 23 || m > 59) return `${hour}:${minute}`;
-            return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-        }
-
-        function isValidShmsTimeValue(value) {
-            const raw = String(value || "").trim();
-            if (!/^\d{2}:\d{2}$/.test(raw)) return false;
-            const [hours, minutes] = raw.split(":").map(Number);
-            if ([hours, minutes].some(Number.isNaN)) return false;
-            return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
-        }
-
-        function handleShmsTimeTyping(input) {
-            if (!input) return;
-            const normalized = normalizeShmsTimeInput(input.value);
-            input.value = normalized;
-            const durationBlock = document.getElementById("shms-duration-block");
-            const noteBlock = document.getElementById("shms-note-block");
-            const addBlock = document.getElementById("shms-add-block");
-            if (durationBlock) durationBlock.style.display = "none";
-            if (noteBlock) noteBlock.style.display = "none";
-            if (addBlock) addBlock.style.display = "none";
-        }
-
-        function handleShmsTimeChange() {
-            const fromInput = document.getElementById("shms-from-time");
-            const toInput = document.getElementById("shms-to-time");
-            const fromTime = normalizeShmsTimeInput(fromInput?.value || "");
-            const toTime = normalizeShmsTimeInput(toInput?.value || "");
-            const durationBlock = document.getElementById("shms-duration-block");
-            const durationInput = document.getElementById("shms-duration");
-            const noteBlock = document.getElementById("shms-note-block");
-            const addBlock = document.getElementById("shms-add-block");
-            if (fromInput) fromInput.value = fromTime;
-            if (toInput) toInput.value = toTime;
-            if ((fromTime && !isValidShmsTimeValue(fromTime)) || (toTime && !isValidShmsTimeValue(toTime))) {
-                if (durationBlock) durationBlock.style.display = "none";
-                if (durationInput) durationInput.value = "";
-                if (noteBlock) noteBlock.style.display = "none";
-                if (addBlock) addBlock.style.display = "none";
-                showToast("Invalid time. Please enter in 24-hour format, from 00:00 to 23:59", false);
-                return;
-            }
-            const durationText = calculateShmsDuration(fromTime, toTime);
-            if (durationBlock) durationBlock.style.display = durationText ? "block" : "none";
-            if (durationInput) durationInput.value = durationText;
-            if (noteBlock) noteBlock.style.display = durationText ? "block" : "none";
-            if (addBlock) addBlock.style.display = "none";
-        }
-
-        function calculateShmsDuration(fromTime, toTime) {
-            if (!fromTime || !toTime) return "";
-            const [fromHour, fromMin] = fromTime.split(":").map(Number);
-            const [toHour, toMin] = toTime.split(":").map(Number);
-            if ([fromHour, fromMin, toHour, toMin].some(Number.isNaN)) return "";
-
-            let fromTotal = (fromHour * 60) + fromMin;
-            let toTotal = (toHour * 60) + toMin;
-            if (toTotal < fromTotal) {
-                toTotal += 24 * 60;
-            }
-
-            const diff = toTotal - fromTotal;
-            const hrs = Math.floor(diff / 60);
-            const mins = diff % 60;
-            return `${hrs} Hr ${mins} Min`;
-        }
-
-        function handleShmsNoteInput() {
-            const note = (document.getElementById("shms-note-input")?.value || "").trim();
-            const fromTime = document.getElementById("shms-from-time")?.value || "";
-            const toTime = document.getElementById("shms-to-time")?.value || "";
-            const isFullRun = isShmsFullRunChecked_();
-            const addBlock = document.getElementById("shms-add-block");
-            if (addBlock) addBlock.style.display = note && (isFullRun || (fromTime && toTime)) ? "block" : "none";
-        }
-
-        function resetShmsDateTimeInputs() {
-            const dateInput = document.getElementById("shms-event-date");
-            const fullRunCheck = document.getElementById("shms-fullrun-check");
-            const fromTime = document.getElementById("shms-from-time");
-            const toTime = document.getElementById("shms-to-time");
-            const durationInput = document.getElementById("shms-duration");
-            const noteInput = document.getElementById("shms-note-input");
-            const addBlock = document.getElementById("shms-add-block");
-            if (dateInput) dateInput.value = "";
-            if (fullRunCheck) fullRunCheck.checked = false;
-            if (fromTime) fromTime.value = "";
-            if (toTime) toTime.value = "";
-            if (durationInput) durationInput.value = "";
-            if (noteInput) noteInput.value = "";
-            if (addBlock) addBlock.style.display = "none";
-        }
-
-        function setShmsStatus(message) {
-            const statusNode = document.getElementById("shms-load-status");
-            if (!statusNode) return;
-            if (message === "SYNCING DATA... PLEASE WAIT") {
-                statusNode.style.display = "block";
-                renderSyncingProgress(statusNode, () => statusNode.isConnected && document.getElementById("shms-load-status") === statusNode);
-                return;
-            }
-            statusNode.innerText = message || "";
-            statusNode.style.display = message ? "block" : "none";
-        }
-
-        function resetShmsForm() {
-            selectedShmsRow = null;
-            selectedShmsSubstation = "";
-            selectedShmsEventType = "";
-            const substationLabel = document.getElementById("shms-substation-label");
-            const feederLabel = document.getElementById("shms-feeder-label");
-            const eventLabel = document.getElementById("shms-event-label");
-            const feederMenu = document.getElementById("shms-feeder-menu");
-            const feederBlock = document.getElementById("shms-feeder-block");
-            const eventBlock = document.getElementById("shms-event-block");
-            const dateBlock = document.getElementById("shms-date-block");
-            const fullRunBlock = document.getElementById("shms-fullrun-block");
-            const timeBlock = document.getElementById("shms-time-block");
-            const durationBlock = document.getElementById("shms-duration-block");
-            const noteBlock = document.getElementById("shms-note-block");
-            const addBlock = document.getElementById("shms-add-block");
-            if (substationLabel) substationLabel.innerText = "Select 33/11 KV Substation";
-            if (feederLabel) feederLabel.innerText = "Select 33KV or 11KV Feeder";
-            if (eventLabel) eventLabel.innerText = "Select Event Type";
-            if (feederMenu) feederMenu.innerHTML = "";
-            if (feederBlock) feederBlock.style.display = "none";
-            if (eventBlock) eventBlock.style.display = "none";
-            if (dateBlock) dateBlock.style.display = "none";
-            if (fullRunBlock) fullRunBlock.style.display = "none";
-            if (timeBlock) timeBlock.style.display = "none";
-            if (durationBlock) durationBlock.style.display = "none";
-            if (noteBlock) noteBlock.style.display = "none";
-            if (addBlock) addBlock.style.display = "none";
-            toggleShmsDropdown("substation", false);
-            toggleShmsDropdown("feeder", false);
-            toggleShmsDropdown("event", false);
-            resetShmsDateTimeInputs();
-        }
 
         function initFeederReading() {
             const substationMenu = document.getElementById("feeder-substation-menu");
@@ -20661,136 +18901,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             }
         }
 
-        function addShmsEntryToList() {
-            const note = (document.getElementById("shms-note-input")?.value || "").trim();
-            const eventDate = document.getElementById("shms-event-date")?.value || "";
-            const fromTime = document.getElementById("shms-from-time")?.value || "";
-            const toTime = document.getElementById("shms-to-time")?.value || "";
-            const totalDuration = document.getElementById("shms-duration")?.value || "";
-            const isFullRun = isShmsFullRunChecked_();
-
-            if (!activeShmsOperator) return showToast("Please save operator login first", false);
-            if (!selectedShmsSubstation) return showToast("Please select a substation", false);
-            if (!selectedShmsRow) return showToast("Please select a feeder", false);
-            if (!selectedShmsEventType) return showToast("Please select Event Type", false);
-            if (!eventDate) return showToast("Please select a date", false);
-            if (!isFullRun && (!fromTime || !toTime)) return showToast("Please select the time for which it remained off", false);
-            if (!isFullRun && (!isValidShmsTimeValue(fromTime) || !isValidShmsTimeValue(toTime))) {
-                return showToast("Invalid time. Please enter in 24-hour format, from 00:00 to 23:59", false);
-            }
-            if (!note) return showToast("Please enter details", false);
-
-            shmsPendingEntries.push({
-                substation: selectedShmsSubstation,
-                feeder: selectedShmsRow.feeder || "",
-                meterNo: selectedShmsRow.meterNo || "",
-                eventType: isFullRun ? "24 Hr Running" : selectedShmsEventType,
-                eventDate,
-                fromTime: isFullRun ? "NIL" : fromTime,
-                toTime: isFullRun ? "NIL" : toTime,
-                totalDuration: isFullRun ? "NIL" : totalDuration,
-                note,
-                isFullRun,
-                operatorName: activeShmsOperator.fullName,
-                operatorMobile: activeShmsOperator.mobileNo
-            });
-
-            renderShmsPendingList();
-            showToast("Entry added", true);
-            resetShmsForm();
-        }
-
-        function renderShmsPendingList() {
-            const listBlock = document.getElementById("shms-list-block");
-            const submitBlock = document.getElementById("shms-submit-block");
-            const listContent = document.getElementById("shms-list-content");
-            if (!listBlock || !submitBlock || !listContent) return;
-
-            if (!shmsPendingEntries.length) {
-                listBlock.style.display = "none";
-                submitBlock.style.display = "none";
-                listContent.innerHTML = "";
-                return;
-            }
-
-            listBlock.style.display = "block";
-            submitBlock.style.display = "block";
-            listContent.innerHTML = shmsPendingEntries.map((item, index) => `
-                <div style="background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:14px; padding:10px 12px; text-align:left;">
-                    <div style="font-size:12px; font-weight:900; color:#0f172a;">${item.substation} | ${item.feeder}</div>
-                    <div style="font-size:11px; font-weight:800; color:#475569; margin-top:4px;">${item.eventType} | ${formatShmsDateDisplay(item.eventDate)} | ${item.isFullRun ? "24 Hr Running" : `${item.fromTime} - ${item.toTime}`}</div>
-                    <div style="font-size:11px; font-weight:800; color:#4338ca; margin-top:4px;">Duration: ${item.isFullRun ? "No Interruption Today" : (item.totalDuration || "-")}</div>
-                    <div style="font-size:11px; font-weight:700; color:#7c2d12; margin-top:4px;">${item.note}</div>
-                    <button onclick="removeShmsPendingEntry(${index})" style="margin-top:8px; background:#fee2e2; color:#b91c1c; border:none; border-radius:999px; padding:6px 10px; font-size:10px; font-weight:900; text-transform:uppercase;">Remove</button>
-                </div>
-            `).join("");
-        }
-
-        function removeShmsPendingEntry(index) {
-            shmsPendingEntries.splice(index, 1);
-            renderShmsPendingList();
-        }
-
-        async function submitShmsEntries() {
-            if (!shmsPendingEntries.length) {
-                return showToast("Please add an entry first", false);
-            }
-
-            const submitBtn = document.querySelector("#shms-submit-block button");
-            setActionButtonState(submitBtn, "processing", "Submit");
-
-            try {
-                const entries = shmsPendingEntries.map((item) => ({
-                    substation: item.substation || "",
-                    feeder: item.feeder || "",
-                    event_type: item.eventType || "",
-                    date: item.eventDate || "",
-                    time_from: item.fromTime || "",
-                    time_to: item.toTime || "",
-                    total_duration: item.totalDuration || "",
-                    reason: item.note || "",
-                    meter_no: item.meterNo || "",
-                    operator_name: item.operatorName || "",
-                    operator_mobile: item.operatorMobile || "",
-                    submitted_at: getShmsCurrentDateTimeLabel()
-                }));
-
-                const payload = new URLSearchParams();
-                payload.append("entries_json", JSON.stringify(entries));
-                // OFFLINE QUEUE 3: client_uuid - retry par backend dohri row nahi banata
-                const scOffqId = generateClientUuid_();
-                payload.append("client_uuid", scOffqId);
-                const scFirst = entries[0] || {};
-                const scRes = await scOffqLiveSubmit_("SHMS", `SHMS__${scOffqId}`, `${entries.length} entry - ${scFirst.substation || ""} / ${scFirst.feeder || ""} / ${scFirst.event_type || ""} (${scFirst.date || ""})`, shmsSubmitScriptUrl, "application/x-www-form-urlencoded;charset=UTF-8", payload.toString());
-                if (scRes.kind === "queuefail") throw new Error(SC_OFFQ_FAIL_MSG_);
-                if (scRes.kind === "rejected") throw new Error(scRes.message || "SHMS submit error occurred");
-                if (scRes.kind === "queued") {
-                    shmsPendingEntries = [];
-                    renderShmsPendingList();
-                    resetShmsForm();
-                    setActionButtonState(submitBtn, "done", "Submit");
-                    showToast(SC_OFFQ_SAVED_MSG_, true);
-                    return;
-                }
-
-                saveRecentShmsSubmittedEntries_(entries);
-                shmsProgressRows = mergeShmsProgressRows_(shmsProgressRows, buildShmsLocalProgressRows_(entries));
-                shmsPendingTrackerRows = shmsProgressRows.slice();
-                shmsProgressLoaded = true;
-                shmsPendingEntries = [];
-                renderShmsPendingList();
-                resetShmsForm();
-                renderShmsPendingDashboard();
-                renderShmsProgressSummary();
-                setActionButtonState(submitBtn, "done", "Submit");
-                showToast("SHMS entries submitted", true);
-            } catch (error) {
-                setActionButtonState(submitBtn, "failed", "Submit");
-                showToast(error?.message || "SHMS submit was blocked or a network issue occurred", false);
-            } finally {
-                setTimeout(() => setActionButtonState(submitBtn, "idle", "Submit"), 900);
-            }
-        }
 
         function formatShmsDateDisplay(value) {
             const raw = String(value || "").trim();
@@ -20803,27 +18913,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return raw;
         }
 
-        function toggleShmsDropdown(type, forceState = null) {
-            const trigger = document.getElementById(`shms-${type}-trigger`);
-            const menu = document.getElementById(`shms-${type}-menu`);
-            if (!trigger || !menu) return;
-
-            if (type === "feeder" && !selectedShmsSubstation) return;
-            if (type === "event" && !selectedShmsRow) return;
-
-            const willShow = forceState === null ? !menu.classList.contains("show") : forceState;
-            ["substation", "feeder", "event"].forEach((name) => {
-                const otherTrigger = document.getElementById(`shms-${name}-trigger`);
-                const otherMenu = document.getElementById(`shms-${name}-menu`);
-                if (otherTrigger) otherTrigger.classList.remove("active");
-                if (otherMenu) otherMenu.classList.remove("show");
-            });
-
-            if (willShow) {
-                trigger.classList.add("active");
-                menu.classList.add("show");
-            }
-        }
 
         function toggleFeederDropdown(type, forceState = null) {
             const trigger = document.getElementById(`feeder-${type}-trigger`);
@@ -20845,18 +18934,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         document.addEventListener("click", (event) => {
-            ["substation", "feeder", "event"].forEach((name) => {
-                const trigger = document.getElementById(`shms-${name}-trigger`);
-                const menu = document.getElementById(`shms-${name}-menu`);
-                if (!trigger || !menu) return;
-                const clickedInsideTrigger = trigger.contains(event.target);
-                const clickedInsideMenu = menu.contains(event.target);
-                if (!clickedInsideTrigger && !clickedInsideMenu) {
-                    trigger.classList.remove("active");
-                    menu.classList.remove("show");
-                }
-            });
-
             ["substation"].forEach((name) => {
                 const trigger = document.getElementById(`feeder-${name}-trigger`);
                 const menu = document.getElementById(`feeder-${name}-menu`);
@@ -31696,12 +29773,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 .sort((a, b) => (b.monthsSincePayment - a.monthsSincePayment) || (b.pendingAmount - a.pendingAmount));
         }
 
-        function getRevenueNonPayeeBucketLabel(bucket) {
-            if (bucket === "6M") return "Non Payee From 6 Month";
-            if (bucket === "5Y") return "Non Payee From 5 Years";
-            if (bucket === "SINCE_CONNECTION") return "Non Payee From Date of Connection";
-            return "Non Payee From 3 Month";
-        }
 
         function initRevenueHqVillageListDropdowns() {
             const hqSelect = document.getElementById("revenue-hq-village-list-hq");
@@ -35115,9 +33186,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (id === "staff-admin") {
                     initStaffAdmin();
                 }
-                if (id === "shms-entry") {
-                    initShmsEntry();
-                }
                 if (id === "feeder-reading") {
                     initFeederReading();
                 }
@@ -35138,9 +33206,6 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 }
                 if (id === "shms-progress") {
                     initShmsProgressDashboard();
-                }
-                if (id === "shms-pending") {
-                    initShmsPendingDashboard();
                 }
                 if (id === "dc-dashboard") {
                     try { prefetchStaffContacts_(activeDC); } catch (_) {} // 2026-09-24 staff contact speed
@@ -35185,9 +33250,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (id === "data-health") headerTitle = "DATA HEALTH REPORT";
                 if (id === "vr-download-log") headerTitle = "VR DOWNLOAD LOG";
                 if (id === "stock-material") headerTitle = "STOCK MATERIAL";
-                if (id === "shms-entry") headerTitle = "SHMS ENTRY";
                 if (id === "shms-progress") headerTitle = "DAILY PROGRESS";
-                if (id === "shms-pending") headerTitle = "PENDING ENTRY";
                 if (id === "court-case") headerTitle = "LOK ADALAT NOTICE";
                 if (id === "revenue-collection") headerTitle = "REVENUE COLLECTION";
                 if (id === "revenue-live-progress") headerTitle = "LIVE PROGRESS";
@@ -35267,17 +33330,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #38bdf8 0%, #0369a1 100%)";
                 } else if (id === "staff-admin") {
                     header.className = "app-header bg-orange-grad";
-                } else if (id === "shms-entry") {
-                    document.documentElement.style.setProperty("--theme-color", "#4338ca");
-                    document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #6366f1 0%, #312e81 100%)");
-                    header.className = "app-header bg-indigo-grad";
-                    if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #6366f1 0%, #312e81 100%)";
                 } else if (id === "shms-progress") {
-                    document.documentElement.style.setProperty("--theme-color", "#0d9488");
-                    document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)");
-                    header.className = "app-header bg-teal-grad";
-                    if (searchBtn) searchBtn.style.background = "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)";
-                } else if (id === "shms-pending") {
                     document.documentElement.style.setProperty("--theme-color", "#0d9488");
                     document.documentElement.style.setProperty("--theme-grad", "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)");
                     header.className = "app-header bg-teal-grad";
@@ -35350,10 +33403,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 switchView("dc-selection");
             } else if (act === "staff-admin-view" || act === "data-health-view") {
                 switchView("subdn-chhapara");
-            } else if (act === "stock-material-view" || act === "shms-entry-view" || act === "shms-progress-view" || act === "shms-pending-view" || act === "feeder-reading-view" || act === "daily-hourly-peak-load-view" || act === "vehicle-reading-view" || act === "stm-complaint-view") {
-                if (act === "shms-entry-view") {
-                    resetShmsForm();
-                }
+            } else if (act === "stock-material-view" || act === "shms-progress-view" || act === "feeder-reading-view" || act === "daily-hourly-peak-load-view" || act === "vehicle-reading-view" || act === "stm-complaint-view") {
                 if (act === "feeder-reading-view") {
                     resetFeederReading();
                 }
