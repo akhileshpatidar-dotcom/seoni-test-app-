@@ -17138,16 +17138,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (!selectedPeakLoadSubstation) return showToast("Please select a substation first", false);
 
             const submitBtn = document.getElementById("peak-load-submit-btn");
-            let pendingDateKeys = [];
-            try {
-                pendingDateKeys = await getPeakLoadMissingDateKeys(selectedPeakLoadSubstation, selectedPeakLoadDateIso || getTodayIsoDate());
-            } catch (_) {
-                return showToast("Peak load submitted history could not be loaded, please check internet and try again", false);
-            }
-            if (pendingDateKeys.length) {
-                const pendingDates = pendingDateKeys.map(formatPeakLoadDateKeyForAlert).join(", ");
-                return showToast(`Your entry for ${pendingDates} is not done`, false);
-            }
+            // UPDATE 169 (2026-11-11, USER REQUEST): earlier-date pending entries no longer BLOCK submit (the pending-dates alert is still shown
+            // when the substation is selected). This also avoids loading the full history on every submit.
             const totalFeeders = getPeakLoadFeederRows(selectedPeakLoadSubstation).length;
             if (!totalFeeders) return showToast("No 11 KV feeders found for this substation", false);
             if (peakLoadEntries.length < totalFeeders) {
