@@ -13612,17 +13612,40 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (!label) return [];
             if (shmsProgressMode === "MONTHLY") {
                 return peakLoadReportRows.filter((row) => {
+                    if (!scPeakSubMatch_(row["33/11 KV SUBSTATION"])) return false;
                     const dateKey = buildFeederDateKey_(row["DATE (DD-MM-YYYY)"] || "");
                     return buildShmsMonthKeyFromDateKey_(dateKey) === label;
                 });
             }
             // UPDATE 166 FIX: label is DD/MM/YYYY; buildShmsDateKey_ misread it as MM/DD (day/month swap). buildFeederDateKey_ reads DD/MM/YYYY correctly.
             const dailyKey = buildFeederDateKey_(label);
-            return peakLoadReportRows.filter((row) => buildFeederDateKey_(row["DATE (DD-MM-YYYY)"] || "") === dailyKey);
+            return peakLoadReportRows.filter((row) => scPeakSubMatch_(row["33/11 KV SUBSTATION"]) && buildFeederDateKey_(row["DATE (DD-MM-YYYY)"] || "") === dailyKey);
         }
 
         // UPDATE 166 (2026-11-11, USER REQUEST): Daily Hourly Peak Load report type "Max Load - Feeder Wise": every 11 KV feeder of every
         // substation once, with the highest PEAK LOAD (A) entered in the selected day (Daily) or month (Monthly), plus the date/time it happened.
+        // UPDATE 170 (2026-11-11, USER REQUEST): substation selector (All / one substation) for the Peak Load report - screen + downloads.
+        let peakLoadReportSub = "ALL";
+        function scPeakSubMatch_(sub) {
+            return peakLoadReportSub === "ALL" || normalizeFeederSubstationKey_(sub) === normalizeFeederSubstationKey_(peakLoadReportSub);
+        }
+        function scFillPeakSubOptions_() {
+            const sel = document.getElementById("shms-peakload-sub-select");
+            if (!sel) return;
+            const names = Array.from(new Set((peakLoadRows || []).map((r) => r.substation).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+            const sig = names.join("|");
+            if (sel.dataset.sig !== sig) {
+                sel.innerHTML = `<option value="ALL">All Substations</option>` + names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+                sel.dataset.sig = sig;
+            }
+            sel.value = names.includes(peakLoadReportSub) ? peakLoadReportSub : "ALL";
+            if (sel.value === "ALL") peakLoadReportSub = "ALL";
+        }
+        function setPeakLoadReportSub(value) {
+            peakLoadReportSub = value || "ALL";
+            renderShmsProgressSummary(false);
+        }
+
         function setPeakLoadReportType(value) {
             peakLoadReportType = value === "MAXLOAD" ? "MAXLOAD" : "HOURLY";
             const sel = document.getElementById("shms-peakload-type-select");
@@ -13647,7 +13670,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 g.entries += 1;
                 if (g.max === null || v > g.max) { g.max = v; g.date = row["DATE (DD-MM-YYYY)"] || ""; g.time = row["TIME (HH:MM)"] || ""; }
             });
-            return Array.from(map.values()).sort((a, b) => a.substation.localeCompare(b.substation) || a.feeder.localeCompare(b.feeder, undefined, { numeric: true }));
+            return Array.from(map.values()).filter((r) => scPeakSubMatch_(r.substation)).sort((a, b) => a.substation.localeCompare(b.substation) || a.feeder.localeCompare(b.feeder, undefined, { numeric: true }));
         }
 
         function renderPeakLoadMaxTableHtml_(maxRows, label) {
@@ -13674,6 +13697,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const needsFetch = forceRefresh || !peakLoadWindowCovers_();
             const progress = needsFetch ? renderSyncingProgress(summary, isStillValid, "SYNCING DATA... PLEASE WAIT") : null;
             const scTpMasterP_ = loadPeakLoadData(false).catch(() => false); // UPDATE 165: master substation list, loaded in parallel
+            scTpMasterP_.then(() => scFillPeakSubOptions_()); // UPDATE 170
             await loadPeakLoadReportData(forceRefresh);
             if (!isStillValid()) { if (progress) progress.stop(); return; }
             const label = getFeederReportFilterLabel();
@@ -13725,12 +13749,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const bodyRows = isMax_
                     ? buildPeakLoadMaxRows_(rows).map((r, index) => [index + 1, r.substation, r.feeder, r.max === null ? "-" : r.max, r.max === null ? "-" : r.date, r.max === null ? "-" : r.time, r.entries])
                     : rows.map((row, index) => [index + 1, ...headers.slice(1).map((key) => String(row[key] ?? ""))]);
-                const safeLabel = label.replace(/[\\/:*?"<>|]+/g, "_");
+                const scSubTag_ = peakLoadReportSub !== "ALL" ? `_${String(peakLoadReportSub).replace(/\s+/g, "_")}` : "";
+                const scSubLine_ = peakLoadReportSub !== "ALL" ? `SUBSTATION - ${peakLoadReportSub}` : "ALL SUBSTATIONS";
+                const safeLabel = label.replace(/[\\/:*?"<>|]+/g, "_") + scSubTag_;
 
                 if (fmt === "XLS") {
                     const csvRows = [
                         [plTitle_],
                         [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`],
+                        [scSubLine_],
                         [],
                         headers,
                         ...bodyRows
@@ -13749,7 +13776,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF("l", "mm", "a4");
-                scPdfHeader_(doc, { title: plTitle_, lines: [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`], color: SC_PDF_THEME.progress }); // SC PDF KIT (downloadPeakLoadReport)
+                scPdfHeader_(doc, { title: plTitle_, lines: [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`, scSubLine_], color: SC_PDF_THEME.progress }); // SC PDF KIT (downloadPeakLoadReport)
                 doc.autoTable({
                     startY: 29,
                     head: [headers],
