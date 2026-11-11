@@ -428,6 +428,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // Excel/PDF) me, existing peakLoadSubmitScriptUrl?action=getSummary endpoint
         // (pehle se hi loadPeakLoadSubmittedRows() me istemal hota tha) se hi.
         let peakLoadReportRows = [];
+        let peakLoadReportType = "HOURLY"; // UPDATE 166: "HOURLY" (all rows) | "MAXLOAD" (feeder-wise max load)
         let peakLoadReportLoaded = false;
         let peakLoadReportLoadMessage = "";
         // NEW FEATURE (2026-09-14): STM Complaint report ke liye same pattern -
@@ -13568,8 +13569,52 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     return buildShmsMonthKeyFromDateKey_(dateKey) === label;
                 });
             }
-            const dailyKey = buildShmsDateKey_(label);
+            // UPDATE 166 FIX: label is DD/MM/YYYY; buildShmsDateKey_ misread it as MM/DD (day/month swap). buildFeederDateKey_ reads DD/MM/YYYY correctly.
+            const dailyKey = buildFeederDateKey_(label);
             return peakLoadReportRows.filter((row) => buildFeederDateKey_(row["DATE (DD-MM-YYYY)"] || "") === dailyKey);
+        }
+
+        // UPDATE 166 (2026-11-11, USER REQUEST): Daily Hourly Peak Load report type "Max Load - Feeder Wise": every 11 KV feeder of every
+        // substation once, with the highest PEAK LOAD (A) entered in the selected day (Daily) or month (Monthly), plus the date/time it happened.
+        function setPeakLoadReportType(value) {
+            peakLoadReportType = value === "MAXLOAD" ? "MAXLOAD" : "HOURLY";
+            const sel = document.getElementById("shms-peakload-type-select");
+            if (sel) sel.value = peakLoadReportType;
+            renderShmsProgressSummary(false);
+        }
+
+        function buildPeakLoadMaxRows_(rows) {
+            const map = new Map();
+            const put = (sub, feeder, meter) => {
+                const key = normalizeFeederSubstationKey_(sub) + "|" + normalizeFeederSubstationKey_(feeder);
+                if (!map.has(key)) map.set(key, { substation: String(sub).replace(/\s+/g, " ").trim(), feeder: String(feeder).replace(/\s+/g, " ").trim(), meterNo: String(meter || "").trim(), max: null, date: "", time: "", entries: 0 });
+                return map.get(key);
+            };
+            (peakLoadRows || []).forEach((r) => { if (r.substation && r.feeder) put(r.substation, r.feeder, r.meterNo); });
+            (rows || []).forEach((row) => {
+                const sub = row["33/11 KV SUBSTATION"], fd = row["11 KV FEEDER"];
+                if (!sub || !fd) return;
+                const g = put(sub, fd, row["METER NO"]);
+                const v = parseFloat(String(row["PEAK LOAD (A)"] || "").replace(/,/g, ""));
+                if (!isFinite(v)) return;
+                g.entries += 1;
+                if (g.max === null || v > g.max) { g.max = v; g.date = row["DATE (DD-MM-YYYY)"] || ""; g.time = row["TIME (HH:MM)"] || ""; }
+            });
+            return Array.from(map.values()).sort((a, b) => a.substation.localeCompare(b.substation) || a.feeder.localeCompare(b.feeder, undefined, { numeric: true }));
+        }
+
+        function renderPeakLoadMaxTableHtml_(maxRows, label) {
+            if (!maxRows.length) return "";
+            let lastSub = "";
+            const body = maxRows.map((r) => {
+                const first = r.substation !== lastSub;
+                lastSub = r.substation;
+                const has = r.max !== null;
+                const when = has ? `${escapeHtml(r.date)}${r.time ? " " + escapeHtml(r.time) : ""}` : "-";
+                return `<tr style="${first ? "border-top:2px solid #0d9488;" : "border-top:1px solid #e2e8f0;"}"><td style="padding:5px 6px; font-weight:900; text-align:left; color:#134e4a;">${first ? escapeHtml(r.substation) : ""}</td><td style="padding:5px 6px; text-align:left; font-weight:700;">${escapeHtml(r.feeder)}</td><td style="padding:5px 6px; text-align:right; font-weight:900; color:${has ? "#b91c1c" : "#94a3b8"};">${has ? escapeHtml(String(r.max)) : "No entry"}</td><td style="padding:5px 6px; text-align:center; font-size:10px; color:#475569;">${when}</td></tr>`;
+            }).join("");
+            const withData = maxRows.filter((r) => r.max !== null).length;
+            return `<div style="margin-top:10px; border:1.5px solid #cbd5e1; border-radius:16px; overflow:hidden; background:#fff;"><div style="background:#0d9488; color:#fff; text-align:center; font-size:12px; font-weight:900; padding:8px;">MAX LOAD - FEEDER WISE (${escapeHtml(label)})<br><span style="font-size:10px; font-weight:700;">${withData} of ${maxRows.length} feeders have entries</span></div><div style="overflow-x:auto;"><table style="width:100%; border-collapse:collapse; font-size:11px;"><thead><tr style="background:#f1f5f9; font-size:10px; font-weight:900; color:#334155;"><th style="padding:6px; text-align:left;">SUBSTATION</th><th style="padding:6px; text-align:left;">11 KV FEEDER</th><th style="padding:6px; text-align:right;">MAX LOAD (A)</th><th style="padding:6px; text-align:center;">DATE / TIME</th></tr></thead><tbody>${body}</tbody></table></div></div>`;
         }
 
         async function renderPeakLoadReportSummary(forceRefresh = false, isStillValid = () => true) {
@@ -13605,7 +13650,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     : `0 peak load entries ready for ${label}`);
             const scTpHtml_ = await scTodayEntryPendingHtml_("PEAKLOAD", scTpMasterP_);
             if (!isStillValid()) return;
-            summary.innerHTML = `<div style="margin-top:14px; background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:16px; padding:14px; text-align:center; font-size:13px; font-weight:900; color:#0f172a;">${debugMessage}</div>` + scTpHtml_;
+            const scMaxHtml_ = peakLoadReportType === "MAXLOAD" ? renderPeakLoadMaxTableHtml_(buildPeakLoadMaxRows_(rows), label) : ""; // UPDATE 166 (master already awaited above)
+            summary.innerHTML = `<div style="margin-top:14px; background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:16px; padding:14px; text-align:center; font-size:13px; font-weight:900; color:#0f172a;">${debugMessage}</div>` + scMaxHtml_ + scTpHtml_;
         }
 
         async function downloadPeakLoadReport(fmt) {
@@ -13622,13 +13668,21 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const label = getFeederReportFilterLabel();
                 if (!label) return showToast("Please select a date or month first", false);
 
-                const headers = ["S.NO", "33/11 KV SUBSTATION", "11 KV FEEDER", "METER NO", "DATE (DD-MM-YYYY)", "TIME (HH:MM)", "PEAK LOAD (A)", "NAME OF OPERATOR"];
-                const bodyRows = rows.map((row, index) => [index + 1, ...headers.slice(1).map((key) => String(row[key] ?? ""))]);
+                const isMax_ = peakLoadReportType === "MAXLOAD"; // UPDATE 166
+                if (isMax_) { try { await loadPeakLoadData(false); } catch (_) {} }
+                const plTitle_ = isMax_ ? "MAX LOAD - FEEDER WISE REPORT" : "DAILY HOURLY PEAK LOAD REPORT";
+                const plPrefix_ = isMax_ ? "PEAKLOAD_MAXLOAD" : "PEAKLOAD";
+                const headers = isMax_
+                    ? ["S.NO", "33/11 KV SUBSTATION", "11 KV FEEDER", "MAX LOAD (A)", "DATE (DD-MM-YYYY)", "TIME (HH:MM)", "NO. OF ENTRIES"]
+                    : ["S.NO", "33/11 KV SUBSTATION", "11 KV FEEDER", "METER NO", "DATE (DD-MM-YYYY)", "TIME (HH:MM)", "PEAK LOAD (A)", "NAME OF OPERATOR"];
+                const bodyRows = isMax_
+                    ? buildPeakLoadMaxRows_(rows).map((r, index) => [index + 1, r.substation, r.feeder, r.max === null ? "-" : r.max, r.max === null ? "-" : r.date, r.max === null ? "-" : r.time, r.entries])
+                    : rows.map((row, index) => [index + 1, ...headers.slice(1).map((key) => String(row[key] ?? ""))]);
                 const safeLabel = label.replace(/[\\/:*?"<>|]+/g, "_");
 
                 if (fmt === "XLS") {
                     const csvRows = [
-                        ["DAILY HOURLY PEAK LOAD REPORT"],
+                        [plTitle_],
                         [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`],
                         [],
                         headers,
@@ -13638,7 +13692,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         const value = String(cell ?? "");
                         return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
                     }).join(",")).join("\n");
-                    await saveShmsBlob(`PEAKLOAD_${shmsProgressMode}_${safeLabel}.csv`, new Blob([csv], { type: "text/csv;charset=utf-8" }), "text/csv;charset=utf-8");
+                    await saveShmsBlob(`${plPrefix_}_${shmsProgressMode}_${safeLabel}.csv`, new Blob([csv], { type: "text/csv;charset=utf-8" }), "text/csv;charset=utf-8");
                     return showToast(bodyRows.length ? "Excel report request has been sent. If the file does not appear in preview, please check in the browser or GitHub version." : "Blank Excel report request has been sent. If the file does not appear in preview, please check in the browser or GitHub version.", true);
                 }
 
@@ -13648,7 +13702,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF("l", "mm", "a4");
-                scPdfHeader_(doc, { title: "DAILY HOURLY PEAK LOAD REPORT", lines: [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`], color: SC_PDF_THEME.progress }); // SC PDF KIT (downloadPeakLoadReport)
+                scPdfHeader_(doc, { title: plTitle_, lines: [shmsProgressMode === "MONTHLY" ? `MONTH - ${label}` : `DATE - ${label}`], color: SC_PDF_THEME.progress }); // SC PDF KIT (downloadPeakLoadReport)
                 doc.autoTable({
                     startY: 29,
                     head: [headers],
@@ -13663,7 +13717,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     }
                 });
                 scPdfFinalize_(doc); const pdfBlob = doc.output("blob");
-                await saveShmsBlob(`PEAKLOAD_${shmsProgressMode}_${safeLabel}.pdf`, pdfBlob, "application/pdf");
+                await saveShmsBlob(`${plPrefix_}_${shmsProgressMode}_${safeLabel}.pdf`, pdfBlob, "application/pdf");
                 showToast(bodyRows.length ? "PDF report request has been sent. If the file does not appear in preview, please check in the browser or GitHub version." : "Blank PDF report request has been sent. If the file does not appear in preview, please check in the browser or GitHub version.", true);
             } catch (error) {
                 setShmsProgressStatus("");
@@ -18298,6 +18352,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             document.getElementById("progress-feeder-btn")?.classList.toggle("active", progressReportSource === "FEEDER");
             document.getElementById("progress-stm-btn")?.classList.toggle("active", progressReportSource === "STM");
             document.getElementById("progress-peakload-btn")?.classList.toggle("active", progressReportSource === "PEAKLOAD");
+            const scPlWrap_ = document.getElementById("shms-peakload-type-wrap"); // UPDATE 166: report-type dropdown only for Peak Load
+            if (scPlWrap_) scPlWrap_.style.display = progressReportSource === "PEAKLOAD" ? "block" : "none";
             const titleNode = document.querySelector("#shms-progress-view .title-text-bold");
             if (titleNode) {
                 const titleMap = {
