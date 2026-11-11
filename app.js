@@ -13581,6 +13581,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // par force hota hai, baaki toggle sirf loaded data re-filter karta hai.
             const needsFetch = forceRefresh || !peakLoadReportLoaded || !peakLoadReportRows.length;
             const progress = needsFetch ? renderSyncingProgress(summary, isStillValid, "SYNCING DATA... PLEASE WAIT") : null;
+            const scTpMasterP_ = loadPeakLoadData(false).catch(() => false); // UPDATE 165: master substation list, loaded in parallel
             await loadPeakLoadReportData(forceRefresh);
             if (!isStillValid()) { if (progress) progress.stop(); return; }
             const label = getFeederReportFilterLabel();
@@ -13602,7 +13603,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 : (peakLoadReportLoadMessage
                     ? `0 peak load entries ready for ${label}<br><span style="display:block; margin-top:6px; font-size:11px; color:#b91c1c;">${peakLoadReportLoadMessage}</span>`
                     : `0 peak load entries ready for ${label}`);
-            summary.innerHTML = `<div style="margin-top:14px; background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:16px; padding:14px; text-align:center; font-size:13px; font-weight:900; color:#0f172a;">${debugMessage}</div>`;
+            const scTpHtml_ = await scTodayEntryPendingHtml_("PEAKLOAD", scTpMasterP_);
+            if (!isStillValid()) return;
+            summary.innerHTML = `<div style="margin-top:14px; background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:16px; padding:14px; text-align:center; font-size:13px; font-weight:900; color:#0f172a;">${debugMessage}</div>` + scTpHtml_;
         }
 
         async function downloadPeakLoadReport(fmt) {
@@ -13961,7 +13964,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 circle: idx(["Circle"]), division: idx(["Division"]), dc: idx(["DC"]),
                 pn: idx(["Panchanama_No", "Panchnama_No", "Panchanama Number", "Panchnama Number"]),
                 name: idx(["Consumer_Name", "Person Name"]), ez: idx(["EZ_no", "EZ Number"]), cno: idx(["Consumer_No"]),
-                insp: idx(["inspection_date", "Inspection Date"]), tariff: idx(["Tariff_Name"]), caseName: idx(["Case_Name"]),
+                insp: idx(["inspection_date", "Inspection Date"]), tariff: idx(["Tariff_Name"]), tcode: idx(["Tariff_Code"]), caseName: idx(["Case_Name"]),
                 billed: idx(["Billed_amount", "Billed Amount"]), rebate: idx(["Court_Rebate", "court_rebate"]),
                 pay: idx(["payment", "Payment amount", "Payment Received"]), status: idx(["Case_Status"]), statusDt: idx(["Case_Status_Dt"])
             };
@@ -13975,7 +13978,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (!pn) continue;
                 const status = txt(row, c.status);
                 if (/^disposed/i.test(status)) skippedDisposed++; // backend: naya Disposed case nahi jodta, purane ko band kar deta hai
-                rows.push([txt(row, c.circle), txt(row, c.division), txt(row, c.dc), pn, txt(row, c.name), txt(row, c.ez), txt(row, c.cno), txt(row, c.insp), txt(row, c.tariff), txt(row, c.caseName), cleanOmvigAmount_(row[c.billed]), c.rebate > -1 ? cleanOmvigAmount_(row[c.rebate]) : 0, cleanOmvigAmount_(row[c.pay]), status, (/^disposed/i.test(status) ? txt(row, c.statusDt) : "")]);
+                rows.push([txt(row, c.circle), txt(row, c.division), txt(row, c.dc), pn, txt(row, c.name), txt(row, c.ez), txt(row, c.cno), txt(row, c.insp), (txt(row, c.tariff) + (txt(row, c.tcode) ? "||" + txt(row, c.tcode) : "")), txt(row, c.caseName), cleanOmvigAmount_(row[c.billed]), c.rebate > -1 ? cleanOmvigAmount_(row[c.rebate]) : 0, cleanOmvigAmount_(row[c.pay]), status, (/^disposed/i.test(status) ? txt(row, c.statusDt) : "")]);
             }
             return { rows, skippedDisposed };
         }
@@ -14239,7 +14242,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 ez_no: String(row[6] || "").trim(),
                 consumer_name: String(row[7] || "").trim(),
                 consumer_no: String(row[8] || "").trim(),
-                tariff_name: String(row[9] || "").trim(),
+                tariff_name: String(row[9] || "").split("||")[0].trim(), // UPDATE 163: sheet cell may be "TARIFF NAME||TARIFF CODE"
+                tariff_code: (String(row[9] || "").split("||")[1] || "").replace(/\s+/g, " ").trim(),
                 case_name: String(row[10] || "").trim(),
                 balanced_amount: cleanOmvigAmount_(row[11]),
                 // UPDATE 139: history-mode rows carry billed/rebate/status/first_seen (index 12..15)
@@ -15021,11 +15025,27 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // USER REQUEST (2026-10-02): PART PAID case Pending hi rahega.
         // Sirf poori balanced amount cover hone par case Paid hoga; part payment
         // ki bachi hui rashi Pending amount me shamil rahegi.
+        // UPDATE 162 (2026-11-05, USER REQUEST): CATEGORY column (LV-1 .. LV-6) in the O&M/VIG download list, derived from Tariff Name.
+        function omvigCategoryFromTariff_(tariffName) {
+            const t = String(tariffName || "").toUpperCase();
+            if (!t.trim()) return "-";
+            if (/NON[\s-]*DOMESTIC/.test(t)) return "LV-2";
+            if (/DOMESTIC/.test(t)) return "LV-1";
+            if (/PUBLIC WATER|STREET/.test(t)) return "LV-3";
+            if (/INDUSTR/.test(t)) return "LV-4";
+            if (/AGRICULT/.test(t)) return "LV-5";
+            if (/VEHICLE|RICKSHAW/.test(t)) return "LV-6";
+            return "-";
+        }
+
         function filterOmvigRowsByStatus_(rows, status) {
             // UPDATE 140: PART PAID bhi Paid me (jitna aaya), bacha hua Pending me - Power BI se match.
-            if (status === "PAID") return rows.filter((r) => Number(r.paidAmountNow || 0) > 0);
-            if (status === "PENDING") return rows.filter((r) => Number(r.remainingPending || 0) > 0.5);
-            return rows;
+            // UPDATE 158: result remembers the unfiltered rows (.allRows) so summaries can keep the true TOTAL.
+            let res = rows;
+            if (status === "PAID") res = rows.filter((r) => Number(r.paidAmountNow || 0) > 0);
+            else if (status === "PENDING") res = rows.filter((r) => Number(r.remainingPending || 0) > 0.5);
+            if (res !== rows) res.allRows = rows;
+            return res;
         }
 
         // DC/Division/Circle summaries me bhi wahi rule: fully settled = Paid,
@@ -15047,9 +15067,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const g = { name: dcName || "-", totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0 };
             rowsWithStatus.forEach((r) => {
                 g.totalCount += 1;
-                if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
-                if (omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
-                if (omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
+                const stF_ = rowsWithStatus.allRows ? omvigFilterStatus : ""; // UPDATE 160: under Paid/Pending filter the other bucket stays 0
+                if (stF_ !== "PENDING" && omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
+                if (stF_ !== "PAID" && omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (stF_ !== "PENDING" && omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
             });
             return g;
         }
@@ -15060,9 +15081,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // 0 rahega, sirf jo status choose kiya wahi count/amount dikhega,
         // niche ki list se exactly match karega.
         function buildOmvigStatusSummaryRow_(filteredRows, dcName, status) {
-            const g = { name: dcName || "-", totalCount: filteredRows.length, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0 };
+            const g = { name: dcName || "-", totalCount: (filteredRows.allRows || filteredRows).length, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0 };
             filteredRows.forEach((r) => {
-                if (omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
+                if (status === "PAID" && omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
                 if (status === "PAID") { g.paidCount += 1; g.paidAmount += Number(r.paidAmountNow) || 0; }
                 else { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
             });
@@ -15076,14 +15097,19 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function buildOmvigDivisionDcSummaryRows_(rowsWithStatus, divisionName) {
             const emptyGroup = (key) => ({ name: key, totalCount: 0, paidCount: 0, paidAmount: 0, pendingCount: 0, pendingAmount: 0, partCount: 0, partAmount: 0 });
             const map = {};
+            (rowsWithStatus.allRows || rowsWithStatus).forEach((r) => { // UPDATE 158: TOTAL always from unfiltered rows
+                const key = normalizeDcName(r.dc_name) || "-";
+                if (!map[key]) map[key] = emptyGroup(key);
+                map[key].totalCount += 1;
+            });
             rowsWithStatus.forEach((r) => {
                 const key = normalizeDcName(r.dc_name) || "-";
                 if (!map[key]) map[key] = emptyGroup(key);
                 const g = map[key];
-                g.totalCount += 1;
-                if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
-                if (omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
-                if (omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
+                const stF_ = rowsWithStatus.allRows ? omvigFilterStatus : ""; // UPDATE 160: under Paid/Pending filter the other bucket stays 0
+                if (stF_ !== "PENDING" && omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
+                if (stF_ !== "PAID" && omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (stF_ !== "PENDING" && omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
             });
             return getDivisionDcNames(divisionName).map((dcName) => map[normalizeDcName(dcName)] || emptyGroup(normalizeDcName(dcName)));
         }
@@ -15107,14 +15133,19 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 pendingPercent: g.totalCount ? (100 - Number(((g.paidCount / g.totalCount) * 100).toFixed(1))).toFixed(1) : "0.0"
             });
             const map = {};
+            ((rowsWithStatus && rowsWithStatus.allRows) || rowsWithStatus || []).forEach((r) => { // UPDATE 158: TOTAL always from unfiltered rows
+                const key = normalizeDcName(r.dc_name) || "-";
+                if (!map[key]) map[key] = emptyGroup(key);
+                map[key].totalCount += 1;
+            });
             (rowsWithStatus || []).forEach((r) => {
                 const key = normalizeDcName(r.dc_name) || "-";
                 if (!map[key]) map[key] = emptyGroup(key);
                 const g = map[key];
-                g.totalCount += 1;
-                if (omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
-                if (omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
-                if (omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
+                const stF_ = rowsWithStatus.allRows ? omvigFilterStatus : ""; // UPDATE 160: under Paid/Pending filter the other bucket stays 0
+                if (stF_ !== "PENDING" && omvigIsInPaidBucket_(r)) { g.paidCount += 1; g.paidAmount += omvigPaidBucketAmount_(r); }
+                if (stF_ !== "PAID" && omvigIsInPendingBucket_(r)) { g.pendingCount += 1; g.pendingAmount += Number(r.remainingPending || 0); }
+                if (stF_ !== "PENDING" && omvigIsPartRow_(r)) { g.partCount += 1; g.partAmount += Number(r.paidAmountNow || 0); }
             });
 
             const rows = [];
@@ -15132,7 +15163,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 });
                 rows.push({ ...withPercents(divTotal), type: "SUB_TOTAL" });
                 grand.totalCount += divTotal.totalCount; grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
-                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += (divTotal.partAmount || 0); grand.partAmount += divTotal.partAmount;
+                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += (divTotal.partAmount || 0); // UPDATE 159: removed duplicate add (GRAND TOTAL part-paid amount was doubled)
             });
             rows.push({ ...withPercents(grand), type: "GRAND_TOTAL" });
             return rows;
@@ -15725,8 +15756,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function omvigDailyDcSummaryGroupFiltered_(dcSummaryMap, dcName, status) {
             const base = omvigDailyDcSummaryGroup_(dcSummaryMap, dcName);
             if (!status) return base;
-            if (status === "PAID") return { ...base, totalCount: base.paidCount, pendingCount: 0, pendingAmount: 0 };
-            return { ...base, totalCount: base.pendingCount, paidCount: 0, paidAmount: 0 };
+            if (status === "PAID") return { ...base, pendingCount: 0, pendingAmount: 0 }; // UPDATE 158: TOTAL stays true total
+            return { ...base, paidCount: 0, paidAmount: 0, partCount: 0, partAmount: 0 }; // UPDATE 158/160: TOTAL stays true total
+        }
+
+        // UPDATE 158: Daily single-DC row under Paid/Pending filter - TOTAL from backend dcSummaryMap (true total), not from the filtered list.
+        function omvigDailyStatusRow_(dcSummaryMap, filteredRows, dcName, status) {
+            const g = buildOmvigStatusSummaryRow_(filteredRows, dcName, status);
+            const t = omvigDailyDcSummaryGroup_(dcSummaryMap, dcName);
+            return { ...g, totalCount: t.totalCount };
         }
 
         function omvigDailyDivisionDcSummaryRows_(dcSummaryMap, divisionName, status) {
@@ -15755,7 +15793,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 });
                 rows.push({ ...withPercents(divTotal), type: "SUB_TOTAL" });
                 grand.totalCount += divTotal.totalCount; grand.paidCount += divTotal.paidCount; grand.paidAmount += divTotal.paidAmount;
-                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += (divTotal.partAmount || 0); grand.partAmount += divTotal.partAmount;
+                grand.pendingCount += divTotal.pendingCount; grand.pendingAmount += divTotal.pendingAmount; grand.partCount += divTotal.partCount; grand.partAmount += (divTotal.partAmount || 0); // UPDATE 159: removed duplicate add (GRAND TOTAL part-paid amount was doubled)
             });
             rows.push({ ...withPercents(grand), type: "GRAND_TOTAL" });
             return rows;
@@ -15845,7 +15883,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             let summaryHtml, listHtml = "";
             if (omvigFilterStatus) {
                 const filteredRows = filterOmvigRowsByStatus_(rowsWithStatus, omvigFilterStatus);
-                summaryHtml = scOmSummaryTableHtml_("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, activeDC, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
+                summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyStatusRow_(dcSummaryMap, filteredRows, activeDC, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
                 listHtml = renderOmvigDcListHtml_(filteredRows);
             } else {
                 summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyDcSummaryGroup_(dcSummaryMap, activeDC)], "DC SUMMARY (AMOUNT IN LAKH)", omvigDailyPaidLbl_(), "PENDING");
@@ -15870,7 +15908,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             } else {
                 const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
                 const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
-                summaryHtml = scOmSummaryTableHtml_("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
+                summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyStatusRow_(dcSummaryMap, filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
             }
             return summaryHtml + dcSelectHtml + statusSelectHtml;
         }
@@ -15893,7 +15931,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 } else {
                     const dcRows = rowsWithStatus.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(omvigFilterDc));
                     const filteredRows = filterOmvigRowsByStatus_(dcRows, omvigFilterStatus);
-                    summaryHtml = scOmSummaryTableHtml_("DC NAME", [buildOmvigStatusSummaryRow_(filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
+                    summaryHtml = scOmSummaryTableHtml_("DC NAME", [omvigDailyStatusRow_(dcSummaryMap, filteredRows, omvigFilterDc, omvigFilterStatus)], `DC SUMMARY - ${omvigFilterStatus} (AMOUNT IN LAKH)`, omvigDailyPaidLbl_(), "PENDING");
                 }
             }
             return summaryHtml + divSelectHtml + dcSelectHtml + statusSelectHtml;
@@ -15974,17 +16012,18 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // par TOTAL row).
         function getOmvigDownloadSummaryRows_(scopedRows, finalRows) {
             const dcInScope = activeViewLevel === "DC" ? activeDC : omvigFilterDc;
+            const sumRows = omvigFilterStatus ? filterOmvigRowsByStatus_(scopedRows, omvigFilterStatus) : scopedRows; // UPDATE 158: summary follows status filter, TOTAL stays true total
             let rows;
             if (dcInScope) {
                 rows = omvigFilterStatus
-                    ? [buildOmvigStatusSummaryRow_(finalRows, dcInScope, omvigFilterStatus)]
+                    ? [buildOmvigStatusSummaryRow_(sumRows, dcInScope, omvigFilterStatus)]
                     : [buildOmvigSingleDcSummaryRow_(scopedRows, dcInScope)];
             } else if (activeViewLevel === "CIRCLE" && omvigFilterDivision) {
-                rows = appendOmvigTotalRow_(buildOmvigDivisionDcSummaryRows_(scopedRows, omvigFilterDivision));
+                rows = appendOmvigTotalRow_(buildOmvigDivisionDcSummaryRows_(sumRows, omvigFilterDivision));
             } else if (activeViewLevel === "DIVISION") {
-                rows = appendOmvigTotalRow_(buildOmvigDivisionDcSummaryRows_(scopedRows, activeDiv));
+                rows = appendOmvigTotalRow_(buildOmvigDivisionDcSummaryRows_(sumRows, activeDiv));
             } else {
-                rows = buildOmvigCircleDcWiseSummaryRows_(scopedRows);
+                rows = buildOmvigCircleDcWiseSummaryRows_(sumRows);
             }
             return rows.map((r) => ({
                 ...r,
@@ -16003,7 +16042,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             let rows;
             if (dcInScope) {
                 rows = omvigFilterStatus
-                    ? [buildOmvigStatusSummaryRow_(finalRows, dcInScope, omvigFilterStatus)]
+                    ? [omvigDailyStatusRow_(dcSummaryMap, finalRows, dcInScope, omvigFilterStatus)]
                     : [omvigDailyDcSummaryGroup_(dcSummaryMap, dcInScope)];
             } else if (activeViewLevel === "CIRCLE" && omvigFilterDivision) {
                 rows = appendOmvigTotalRow_(omvigDailyDivisionDcSummaryRows_(dcSummaryMap, omvigFilterDivision));
@@ -16035,13 +16074,13 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     .map((r, i) => ({ r, i }))
                     .sort((x, y) => ((Number(y.r.balanced_amount) || 0) - (Number(x.r.balanced_amount) || 0)) || (x.i - y.i))
                     .map((x) => x.r);
-                const totalCount = rowsWithStatus.length;
+                const totalCount = scopedRows.length; // UPDATE 159: top box TOTAL = true total (not the status-filtered list)
                 // USER REQUEST (2026-09-16): PART PAID bhi ab "PAID" bucket me
                 // ginte hain (on-screen DC-wise summary table jaisa hi) - taaki
                 // is top box ka PAID/PENDING count niche wali DC-wise summary
                 // table se hamesha match kare.
-                const paidCount = rowsWithStatus.filter((r) => omvigIsInPaidBucket_(r)).length;
-                const pendingCount = rowsWithStatus.filter((r) => omvigIsInPendingBucket_(r)).length;
+                const paidCount = omvigFilterStatus === "PENDING" ? 0 : rowsWithStatus.filter((r) => omvigIsInPaidBucket_(r)).length; // UPDATE 160
+                const pendingCount = omvigFilterStatus === "PAID" ? 0 : rowsWithStatus.filter((r) => omvigIsInPendingBucket_(r)).length;
                 const paidPercent = totalCount ? ((paidCount / totalCount) * 100).toFixed(1) : "0.0";
                 const pendingPercent = totalCount ? (100 - Number(paidPercent)).toFixed(1) : "0.0";
                 let scope = activeViewLevel === "DC" ? `DC - ${activeDC}` : (activeViewLevel === "DIVISION" ? activeDiv : "SEONI CIRCLE");
@@ -16056,8 +16095,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const reportTitle = `O&M-VIG Report - ${scope}`;
                 const fileName = `${reportTitle}-${getTodayIsoDate()}`.replace(/[\\/:*?"<>|]+/g, "_");
 
-                const listHeaders = ["S.NO", "CIRCLE", "DIVISION", "DC", "CHECKED BY", "INSPECTION DATE", "PANCHANAMA NO", "EZ NO", "CONSUMER NAME", "CONSUMER NO", "TARIFF NAME", "CASE NAME", "BALANCED AMOUNT", "STATUS", "PAID AMT", "PAID DATE"];
-                const statusColIndex = 13; // 0-based, matches listHeaders order above
+                const listHeaders = ["S.NO", "CIRCLE", "DIVISION", "DC", "CHECKED BY", "INSPECTION DATE", "PANCHANAMA NO", "EZ NO", "CONSUMER NAME", "CONSUMER NO", "TARIFF NAME", "CATEGORY", "CASE NAME", "BALANCED AMOUNT", "STATUS", "PAID AMT", "PAID DATE"];
+                const statusColIndex = 14; // 0-based (UPDATE 162: CATEGORY column added after TARIFF NAME), matches listHeaders order above
                 // USER REQUEST (2026-09-14): Freeze NP jaisa hi - PAID row GREEN
                 // (PDF), PART PAID row RED (PDF); CSV plain text hai (colour
                 // support nahi), isliye wahan "++ PAID ++"/"** PART PAID **"
@@ -16067,12 +16106,12 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const paymentStateFlags = rowsWithStatus.map((r) => (r.isPaidNow ? 2 : (r.paidAmountNow > 0 ? 1 : 0)));
                 const listBodyRows = rowsWithStatus.map((r, index) => [
                     index + 1, r.circle, r.division, r.dc_name, r.checked_by, r.inspection_date, r.panchanama_no, r.ez_no,
-                    r.consumer_name, r.consumer_no, r.tariff_name, r.case_name, r.balanced_amount,
+                    r.consumer_name, r.consumer_no, r.tariff_name, (r.tariff_code || omvigCategoryFromTariff_(r.tariff_name)), r.case_name, r.balanced_amount,
                     r.isPaidNow ? "PAID" : (r.paidAmountNow > 0 ? "PART PAID" : "PENDING"),
                     r.isPaidNow ? r.balanced_amount : r.paidAmountNow, r.paidDateNow || ""
                 ]);
                 omNewList.forEach((nc) => { // NEW CASE rows (paid ke saath, alag rang)
-                    listBodyRows.push([listBodyRows.length + 1, "SEONI", nc.div, "-", "", "", nc.pn, "", "", "", "", nc.type === "NAYA" ? "NEW CASE (after freeze)" : "NEW CASE (not in freeze list)", "", "NEW CASE", Math.round(nc.amt * 100) / 100, nc.lastDmy]);
+                    listBodyRows.push([listBodyRows.length + 1, "SEONI", nc.div, "-", "", "", nc.pn, "", "", "", "", "", nc.type === "NAYA" ? "NEW CASE (after freeze)" : "NEW CASE (not in freeze list)", "", "NEW CASE", Math.round(nc.amt * 100) / 100, nc.lastDmy]);
                     paymentStateFlags.push(3);
                 });
 
@@ -16127,8 +16166,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // value hamesha ek hi jagah se shuru ho (pehle CONSUMER NO jaisa
                 // column hamesha CENTER tha, isliye alag-alag length ki values
                 // "idhar-udhar" dikhti thi).
-                const LEFT_ALIGN_COLS_ = [4, 6, 7, 8, 9, 10, 11];
-                const RIGHT_ALIGN_COLS_ = [12, 14];
+                const LEFT_ALIGN_COLS_ = [4, 6, 7, 8, 9, 10, 12];
+                const RIGHT_ALIGN_COLS_ = [13, 15];
                 const omvigColumnStyles_ = {};
                 LEFT_ALIGN_COLS_.forEach((i) => { omvigColumnStyles_[i] = { halign: "left" }; });
                 RIGHT_ALIGN_COLS_.forEach((i) => { omvigColumnStyles_[i] = { halign: "right" }; });
@@ -17516,7 +17555,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (monthlyBtn) {
                 monthlyBtn.classList.toggle("active", shmsProgressMode === "MONTHLY");
             }
-            renderShmsProgressSummary();
+            // UPDATE 161 (2026-11-05, USER REQUEST): Daily/Monthly switch now shows the SYNCING indicator and fetches fresh data (like the other reports).
+            renderShmsProgressSummary(true);
         }
 
 
@@ -17531,6 +17571,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         async function renderShmsProgressSummary(forceRefresh = false) {
             const summary = document.getElementById("shms-progress-summary");
             if (!summary) return;
+            summary.style.display = "block"; // UPDATE 164: summary box starts hidden (display:none) - show it now so the SYNCING progress is visible on tab click / first open
             const myShmsProgressToken = ++shmsProgressSummaryRenderToken;
             const isShmsProgressRenderValid = () => myShmsProgressToken === shmsProgressSummaryRenderToken;
             if (progressReportSource === "FEEDER") {
@@ -18325,6 +18366,33 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return allRows.filter((row) => buildFeederDateKey_(row["DATE(DD/MM/YYY)"] || row.date || "") === dailyKey);
         }
 
+        // UPDATE 165 (2026-11-11, USER REQUEST): Feeder Reading / Daily Hourly Peak Load report - after midnight (new day) show the NAMES of the
+        // substations whose operator has NOT yet made today's entry; a name disappears as soon as its entry is in the report data.
+        // Master substation list = feeder/peak-load master sheet; "done" = at least one row dated today in the submitted data.
+        async function scTodayEntryPendingHtml_(kind, masterPromise) {
+            try {
+                await masterPromise;
+                const todayKey = getTodayIsoDate();
+                let master = [], rows = [], dateField = "";
+                if (kind === "FEEDER") { master = Array.isArray(feederSubstations) ? feederSubstations : []; rows = feederReportRows || []; dateField = "DATE(DD/MM/YYY)"; }
+                else { master = Array.from(new Set((peakLoadRows || []).map((r) => r.substation).filter(Boolean))); rows = peakLoadReportRows || []; dateField = "DATE (DD-MM-YYYY)"; }
+                if (!master.length) return "";
+                const done = new Set();
+                rows.forEach((row) => { if (buildFeederDateKey_(row[dateField] || "") === todayKey) done.add(normalizeFeederSubstationKey_(row["33/11 KV SUBSTATION"])); });
+                const seen = new Set();
+                const pending = master.filter((n) => { const k = normalizeFeederSubstationKey_(n); if (!k || seen.has(k)) return false; seen.add(k); return !done.has(k); }).sort((a, b) => a.localeCompare(b));
+                const [y, m, d] = todayKey.split("-");
+                const label = `${d}/${m}/${y}`;
+                const what = kind === "FEEDER" ? "FEEDER READING" : "PEAK LOAD";
+                const total = seen.size;
+                if (!pending.length) {
+                    return `<div style="margin-top:10px; background:#f0fdf4; border:1.5px solid #86efac; border-radius:16px; padding:12px; text-align:center; font-size:12px; font-weight:900; color:#166534;">TODAY (${label}) - ${what} ENTRY DONE BY ALL ${total} SUBSTATIONS</div>`;
+                }
+                const items = pending.map((n, i) => `<div style="padding:3px 0; border-top:1px dashed #fda4af; font-size:12px; font-weight:800; color:#7f1d1d; text-align:left;">${i + 1}. ${escapeHtml(n)}</div>`).join("");
+                return `<div style="margin-top:10px; background:#fff1f2; border:1.5px solid #fda4af; border-radius:16px; padding:12px;"><div style="text-align:center; font-size:12px; font-weight:900; color:#9f1239; margin-bottom:6px;">TODAY (${label}) - ${what} ENTRY PENDING<br><span style="font-size:11px;">${pending.length} of ${total} substations</span></div>${items}</div>`;
+            } catch (_) { return ""; }
+        }
+
         async function renderFeederReportSummary(forceRefresh = false, isStillValid = () => true) {
             const summary = document.getElementById("shms-progress-summary");
             if (!summary) return;
@@ -18337,6 +18405,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // toggle sirf existing loaded data ko re-filter karta hai.
             const needsFetch = forceRefresh || !feederReportLoaded || !feederReportRows.length;
             const progress = needsFetch ? renderSyncingProgress(summary, isStillValid, "SYNCING DATA... PLEASE WAIT") : null;
+            const scTpMasterP_ = loadFeederData(false).catch(() => false); // UPDATE 165: master substation list, loaded in parallel
             await loadFeederReportData(forceRefresh);
             if (!isStillValid()) { if (progress) progress.stop(); return; }
             const label = getFeederReportFilterLabel();
@@ -18360,7 +18429,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 : (feederReportLoadMessage
                     ? `0 feeder entries ready for ${label}<br><span style="display:block; margin-top:6px; font-size:11px; color:#b91c1c;">${feederReportLoadMessage}</span>`
                     : `0 feeder entries ready for ${label}`);
-            summary.innerHTML = `<div style="margin-top:14px; background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:16px; padding:14px; text-align:center; font-size:13px; font-weight:900; color:#0f172a;">${debugMessage}</div>`;
+            const scTpHtml_ = await scTodayEntryPendingHtml_("FEEDER", scTpMasterP_);
+            if (!isStillValid()) return;
+            summary.innerHTML = `<div style="margin-top:14px; background:#f8fafc; border:1.5px solid #cbd5e1; border-radius:16px; padding:14px; text-align:center; font-size:13px; font-weight:900; color:#0f172a;">${debugMessage}</div>` + scTpHtml_;
         }
 
         async function downloadFeederReport(fmt) {
