@@ -2608,9 +2608,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (!rowDc) return false;
             if (activeViewLevel === "DC") return rowDc === normalizeDcName(activeDC);
             if (activeViewLevel === "DIVISION") {
-                return getDivisionDcNames(activeDiv).some((dc) => normalizeDcName(dc) === rowDc);
+                return scRevVisDivDcs_(activeDiv).some((dc) => normalizeDcName(dc) === rowDc);
             }
-            return getAllDcNames().some((dc) => normalizeDcName(dc) === rowDc);
+            return scRevVisAllDcs_().some((dc) => normalizeDcName(dc) === rowDc);
         }
 
         function addRevenueSummaryCount(group, row) {
@@ -2675,13 +2675,13 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (!hqNames.size) hqNames.add("GENERAL");
                 Array.from(hqNames).sort().forEach((hqName) => createGroup(`HQ||${hqName}`, hqName));
             } else if (activeViewLevel === "DIVISION") {
-                getDivisionDcNames(activeDiv).forEach((dcName) => {
+                scRevVisDivDcs_(activeDiv).forEach((dcName) => {
                     const normalizedDc = normalizeDcName(dcName);
                     createGroup(`DC||${normalizedDc}`, normalizedDc);
                 });
             } else {
                 Object.keys(divisionConfigs).forEach((divisionName) => {
-                    getDivisionDcNames(divisionName).forEach((dcName) => {
+                    scRevVisDivDcs_(divisionName).forEach((dcName) => {
                         const normalizedDc = normalizeDcName(dcName);
                         createGroup(`CIRCLE||${divisionName}||${normalizedDc}`, normalizedDc, { divisionName });
                     });
@@ -2819,8 +2819,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
         function getRevenueCategoryTargetDcs() {
             if (activeViewLevel === "DC") return [activeDC].filter(Boolean);
-            if (activeViewLevel === "DIVISION") return getDivisionDcNames(activeDiv);
-            return getAllDcNames();
+            if (activeViewLevel === "DIVISION") return scRevVisDivDcs_(activeDiv);
+            return scRevVisAllDcs_();
         }
 
         function getRevenueMasterRowsForDc(dcName) {
@@ -3001,15 +3001,16 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             { name: "LAST PAYMENT DATE", keys: ["LASTPAYMENTDATE"] },
             { name: "MOBILE NO", keys: ["MOBILENO", "MOBILE"] },
             { name: "ARREARS", keys: ["ARREARS"] },
-            { name: "NET BILL", keys: ["NETBILL"] }
+            { name: "NET BILL", keys: ["NETBILL"] },
+            { name: "LAST PAYMENT AMOUNT", keys: ["LASTPAYMENTAMOUNT"], optional: true } // UPDATE 176: instant-bill paid (amount of the last payment; with LAST PAYMENT DATE)
         ];
         // IVRS ke pehle 4 ank -> DC (owner ki di hui pakki list, 2026-10-19). Ek hi ank do DC par ho to wo "ambiguous" maana jata hai
         // aur is list se use nahi hota (purani master / file se seekhne wala tarika kaam karta hai).
         const SC_DIVMASTER_PREFIX_LIST_ = {
             "ARI": ["1302"], "BADALPAR": ["1309"], "BANDOL": ["1304"], "BARGHAT": ["1303"], "DHARNA": ["1317"], "GOPALGANJ": ["1310"],
-            "KANHIWADA": ["1328"], "KEOLARI": ["1322"], "KHAIRAPALARI": ["1319"], "KURAI": ["1311"], "MUNGWANI": ["1312"],
+            "KANHIWADA": ["1318"], "KEOLARI": ["1322"], "KHAIRAPALARI": ["1319"], "KURAI": ["1311"], "MUNGWANI": ["1312"],
             "PANDIYA CHHAPARA": ["1323"], "SEONI (T)": ["1412"], "SEONI (RES)": ["1313"], "UGALI": ["1324"],
-            "ADEGAON": ["1334"], "CHHAPARA-1": ["1140"], "CHHAPARA-2": ["1139"], "DHANORA": ["1125"], "DHUMA": ["1137"],
+            "ADEGAON": ["1134"], "CHHAPARA-1": ["1140"], "CHHAPARA-2": ["1139"], "DHANORA": ["1125"], "DHUMA": ["1137"],
             "GANESHGANJ": ["1123"], "GHANSORE": ["1115"], "KEDARPUR": ["1111"], "LAKHNADON": ["1121"]
         };
         const SC_DIVMASTER_PREFIX_ = (() => {
@@ -3103,6 +3104,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         const txt = res.ok ? await res.text() : "";
                         if (!txt || /^\s*</.test(txt) || !/DC\s*NAME/i.test(txt.slice(0, 40))) return;
                         const parsed = scDivMasterParseMeta_(txt, division);
+                        // UPDATE 177 (2026-11-13, USER REQUEST): META purana ho (tab khali kar di par META me ROWS/UPLOADED bacha ho) to bhi,
+                        // jis DC ki tab me sirf header hai usko "0 rows" maano - taaki Revenue side (Daily Brief/reports) me wo DC na dikhe.
+                        await Promise.all(Object.keys(parsed).filter((k) => parsed[k].state === "UPLOADED" && parsed[k].gid).map(async (k) => {
+                            try {
+                                const rr = await fetchWithTimeout(`https://docs.google.com/spreadsheets/d/${SC_DIVMASTER_SHEETS_[division]}/export?format=csv&gid=${parsed[k].gid}&range=A1:B3&t=${Date.now()}`, { cache: "no-store" }, 12000);
+                                const tt = rr.ok ? await rr.text() : "";
+                                if (tt && isHeaderOnlyMasterCsvText_(tt)) parsed[k].rows = 0;
+                            } catch (_) {}
+                        }));
                         Object.keys(meta).forEach((k) => { if (meta[k].division === division) delete meta[k]; });
                         Object.assign(meta, parsed);
                         any = true;
@@ -3139,6 +3149,16 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const m = scDivMasterMeta_[normalizeDcName(dcName)];
             return !!(m && m.state !== "UPLOADED");
         }
+        // UPDATE 175 (2026-11-12, USER REQUEST): a DC whose master is NOT uploaded (META state not UPLOADED, or 0 rows) is hidden from the REVENUE side:
+        // Daily Brief, Revenue live/freeze/paid-count/category reports and Division/Circle totals. O&M/VIG, uploads, admin screens and other modules are unchanged.
+        function scDcHiddenNoMaster_(dcName) {
+            const m = scDivMasterMeta_[normalizeDcName(dcName)];
+            return !!(m && (m.state !== "UPLOADED" || !(m.rows > 0)));
+        }
+        // UPDATE 178 (2026-11-13, USER REQUEST): no-master DC ab LIST me DIKHTA hai (naam rehta hai) par uska data ZERO dikhta hai
+        // (cash list ke AG/purane aankde bhi 0 - scCollectionFromRecon_ aur Daily Brief me scDcHiddenNoMaster_ se zero kiya jata hai).
+        function scRevVisDivDcs_(divisionName) { return getDivisionDcNames(divisionName); }
+        function scRevVisAllDcs_() { return getAllDcNames(); }
         let scDivMasterEnsureAt_ = 0;
         async function scDivMasterEnsureMeta_(dcName) {
             try {
@@ -4628,16 +4648,50 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         // hai (usme uski sabhi payments "payments" list me hoti hain) - isliye yahan har payment alag gini jaati hai.
         // Data wahi reconciliation (recon.byKey) jo Brief/Revenue reports pehle se load karte hain - koi naya network
         // call nahi. Sirf DISPLAY ke liye; Paid/Unpaid sthiti (PAID DATE RULE) ko yeh chhuta nahi.
+        // UPDATE 176 (2026-11-12, USER REQUEST): INSTANT BILL PAID. 22 tareekh se 10 tareekh ke beech instant bill par hui payment NGB cash list me nahi aati
+        // (wo purani bill file ke against nahi hoti) par 10 tareekh ke ledger/master me LAST PAYMENT DATE + LAST PAYMENT AMOUNT ke saath aa jati hai.
+        // Niyam: master me LAST PAYMENT DATE chalu mahine (1 se aaj) ki ho, LAST PAYMENT AMOUNT > 0 ho aur wo IVRS is mahine ki cash list me na ho
+        // -> DC ke COLLECTION total (count + amount) me jodte hain (Power BI se mel). IVRS search/cash list ka status NGB cash list ke anusaar hi rehta hai.
+        function scInstNote_(n, a) {
+            return Number(n) > 0 ? ` · includes instant-bill payments: ${Number(n).toLocaleString("en-IN")} / ${(Number(a) / 100000).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L` : "";
+        }
+        function scParseLpAmount_(v) {
+            if (typeof v === "number") return isFinite(v) ? v : 0;
+            const t = String(v === null || v === undefined ? "" : v).replace(/,/g, "").trim();
+            return (t !== "" && isFinite(Number(t))) ? Number(t) : 0;
+        }
+        function scInstantPaidForDc_(dcKey, monthKey, todayKey, cashIvrs) {
+            const res = { n: 0, a: 0, last: "" };
+            let rows = [];
+            try { rows = getRevenueMasterRowsForDc(dcKey) || []; } catch (_) { rows = []; }
+            const seen = new Set();
+            rows.forEach((row) => {
+                const mm = String(row.lastPaymentDate || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+                if (!mm) return;
+                const k = `${mm[1]}${mm[2]}${mm[3]}`;
+                if (k.slice(0, 6) !== monthKey || k > todayKey) return;
+                const amt = Number(row.lastPaymentAmount) || 0;
+                if (!(amt > 0)) return;
+                const iv = normalizeRevenueIvrs(row.ivrsNo);
+                if (!iv || seen.has(iv) || (cashIvrs && cashIvrs.has(iv))) return;
+                seen.add(iv);
+                res.n += 1; res.a += amt;
+                if (k > res.last) res.last = k;
+            });
+            return res;
+        }
         function scCollectionFromRecon_(recon, dcList, ym, todayIso) {
             const monthKey = String(ym || "").replace("-", "");
             const todayKey = String(todayIso || "").replace(/-/g, "");
             const out = {};
             (dcList || []).forEach((d) => { const k = normalizeDcName(d); if (k) out[k] = { n: 0, a: 0, last: "" }; });
             if (!recon || !recon.byKey) return out;
+            const cashIvrsByDc = {};
             recon.byKey.forEach((info, key) => {
                 const sep = key.indexOf("|");
                 if (sep < 0) return;
-                const o = out[key.slice(0, sep)];
+                const dcK = key.slice(0, sep);
+                const o = out[dcK];
                 if (!o) return;
                 const list = info && Array.isArray(info.payments) ? info.payments : null;
                 if (!list) return;
@@ -4648,7 +4702,19 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     o.n += 1;
                     o.a += Number((Array.isArray(pm) ? pm[1] : (pm && pm.amount)) || 0);
                     if (k > o.last) o.last = k;
+                    (cashIvrsByDc[dcK] = cashIvrsByDc[dcK] || new Set()).add(key.slice(sep + 1));
                 }
+            });
+            // UPDATE 176: instant bill paid (master LAST PAYMENT DATE/AMOUNT) - cash list me jo IVRS is mahine nahi aaye
+            Object.keys(out).forEach((dcK) => {
+                if (scDcHiddenNoMaster_(dcK)) { out[dcK] = { n: 0, a: 0, last: "" }; return; } // UPDATE 178: master nahi => data zero
+                try {
+                    const ins = scInstantPaidForDc_(dcK, monthKey, todayKey, cashIvrsByDc[dcK]);
+                    if (ins.n > 0) {
+                        out[dcK].n += ins.n; out[dcK].a += ins.a; out[dcK].instN = ins.n; out[dcK].instA = ins.a;
+                        if (ins.last > out[dcK].last) out[dcK].last = ins.last;
+                    }
+                } catch (_) {}
             });
             return out;
         }
@@ -4662,12 +4728,13 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const dcList = Array.from(new Set(getRevenueCategoryTargetDcs().map((d) => normalizeDcName(d)).filter(Boolean))).sort();
                 const rc = revenueCategoryReconciliationCache_.get(`${mode}|${filterValue}|${dcList.join(",")}`);
                 if (!rc || !rc.supported || !rc.byKey) return null;
-                if (rc.collMemo_ && rc.collMemo_.day === todayIso) return rc.collMemo_.val;
+                const scMemoSig_ = scMasterLpdSignature_();
+                if (rc.collMemo_ && rc.collMemo_.day === todayIso && rc.collMemo_.sig === scMemoSig_) return rc.collMemo_.val;
                 const per = scCollectionFromRecon_(rc, dcList, ym, todayIso);
-                let n = 0, a = 0, last = "";
-                Object.keys(per).forEach((k) => { n += per[k].n; a += per[k].a; if (per[k].last > last) last = per[k].last; });
-                const val = { n, a, last: last ? `${last.slice(6, 8)}-${last.slice(4, 6)}-${last.slice(0, 4)}` : "", dcCount: dcList.length };
-                rc.collMemo_ = { day: todayIso, val };
+                let n = 0, a = 0, last = "", iN = 0, iA = 0;
+                Object.keys(per).forEach((k) => { n += per[k].n; a += per[k].a; iN += Number(per[k].instN) || 0; iA += Number(per[k].instA) || 0; if (per[k].last > last) last = per[k].last; });
+                const val = { n, a, instN: iN, instA: iA, last: last ? `${last.slice(6, 8)}-${last.slice(4, 6)}-${last.slice(0, 4)}` : "", dcCount: dcList.length };
+                rc.collMemo_ = { day: todayIso, val, sig: scMemoSig_ };
                 return val;
             } catch (_) { return null; }
         }
@@ -4793,8 +4860,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
         function getRevenueFreezeTargetDcs() {
             if (activeViewLevel === "DC") return [activeDC].filter(Boolean);
-            if (activeViewLevel === "DIVISION") return getDivisionDcNames(activeDiv);
-            return getAllDcNames();
+            if (activeViewLevel === "DIVISION") return scRevVisDivDcs_(activeDiv);
+            return scRevVisAllDcs_();
         }
 
         // SPEED FIX (2026-09-15, USER-REPORTED slowness): pehle Division/Circle
@@ -5006,7 +5073,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function getRevenueFreezeRowsInScope(rows) {
             if (activeViewLevel === "DC") return rows.filter((r) => normalizeDcName(r.dc_name) === normalizeDcName(activeDC));
             if (activeViewLevel === "DIVISION") {
-                const dcSet = new Set(getDivisionDcNames(activeDiv).map((dc) => normalizeDcName(dc)));
+                const dcSet = new Set(scRevVisDivDcs_(activeDiv).map((dc) => normalizeDcName(dc)));
                 return rows.filter((r) => dcSet.has(normalizeDcName(r.dc_name)));
             }
             return rows;
@@ -5081,7 +5148,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
         function getFreezeSelectedDivisionDcSet_() {
             const div = activeViewLevel === "CIRCLE" && !isFreezeCategoryDefaultersType() ? (freezeNonPayeeFilterState.division || "") : "";
-            return div ? new Set(getDivisionDcNames(div).map((dc) => normalizeDcName(dc))) : null;
+            return div ? new Set(scRevVisDivDcs_(div).map((dc) => normalizeDcName(dc))) : null;
         }
 
         function setFreezeNonPayeeFilter(key, value) {
@@ -5666,7 +5733,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             });
 
             if (activeViewLevel === "DIVISION") {
-                const divDcRows = getDivisionDcNames(activeDiv).map((dcName) => {
+                const divDcRows = scRevVisDivDcs_(activeDiv).map((dcName) => {
                     const key = normalizeDcName(dcName);
                     return withPercents(map[key] || emptyGroup(key));
                 });
@@ -5682,7 +5749,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // USER REQUEST (2026-09-24): Circle par Division chuna ho to sirf us Division ki DC + total
             const selDiv_ = activeViewLevel === "CIRCLE" && !isFreezeCategoryDefaultersType() ? (freezeNonPayeeFilterState.division || "") : "";
             if (selDiv_) {
-                const dcRowsSel = getDivisionDcNames(selDiv_).map((dcName) => {
+                const dcRowsSel = scRevVisDivDcs_(selDiv_).map((dcName) => {
                     const key = normalizeDcName(dcName);
                     return withPercents(map[key] || emptyGroup(key));
                 });
@@ -5698,7 +5765,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const rows = [];
             const grand = emptyGroup("GRAND TOTAL");
             Object.keys(divisionConfigs).forEach((divisionName) => {
-                const dcRows = getDivisionDcNames(divisionName).map((dcName) => {
+                const dcRows = scRevVisDivDcs_(divisionName).map((dcName) => {
                     const key = normalizeDcName(dcName);
                     return withPercents(map[key] || emptyGroup(key));
                 });
@@ -7362,7 +7429,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                             <div style="flex:1; text-align:center; background:#ffffff; border-radius:10px; padding:7px 4px;"><div style="font-size:0.55rem; font-weight:900; color:#475569;">COUNT</div><div style="font-size:1.05rem; font-weight:950; color:#065f46;">${Number(ct_.n).toLocaleString("en-IN")}</div></div>
                             <div style="flex:1; text-align:center; background:#ffffff; border-radius:10px; padding:7px 4px;"><div style="font-size:0.55rem; font-weight:900; color:#475569;">AMOUNT</div><div style="font-size:1.05rem; font-weight:950; color:#065f46;">${formatProgressReportDisplayAmount(ct_.a)}</div></div>
                         </div>
-                        <div style="font-size:0.54rem; font-weight:800; color:#64748b; text-align:center; margin-top:6px;">Every cash list payment · from 1st to today${ct_.last ? " · till " + escapeHtml(ct_.last) : ""}</div>
+                        <div style="font-size:0.54rem; font-weight:800; color:#64748b; text-align:center; margin-top:6px;">Every cash list payment · from 1st to today${ct_.last ? " · till " + escapeHtml(ct_.last) : ""}${scInstNote_(ct_.instN, ct_.instA)}</div>
                     </div>`;
                 }
             } catch (_) { collCardHtml_ = ""; }
@@ -7881,7 +7948,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function applyArrears1LFilter_(rows, filter, isFreeze) {
             const f = filter || {};
             const dcKey = f.dc ? normalizeDcName(f.dc) : "";
-            const divSet_ = f.division ? new Set(getDivisionDcNames(f.division).map((d) => normalizeDcName(d))) : null;
+            const divSet_ = f.division ? new Set(scRevVisDivDcs_(f.division).map((d) => normalizeDcName(d))) : null;
             return (rows || []).filter((r) => (
                 (!dcKey || r.dcName === dcKey)
                 && (!f.division || divSet_.has(r.dcName))
@@ -7937,20 +8004,20 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const out = [];
             if (activeViewLevel === "DIVISION") {
                 const grand = newGroup(`${activeDiv} TOTAL`, "GRAND_TOTAL");
-                getDivisionDcNames(activeDiv).forEach((dc) => { const g = dcGroup(dc); out.push(g); addGroup(grand, g); });
+                scRevVisDivDcs_(activeDiv).forEach((dc) => { const g = dcGroup(dc); out.push(g); addGroup(grand, g); });
                 out.push(grand);
                 return { colLabel: "DC NAME", rows: out };
             }
             if (activeViewLevel === "CIRCLE" && selectedDiv) {
                 const gDiv = newGroup(`${selectedDiv} TOTAL`, "GRAND_TOTAL");
-                getDivisionDcNames(selectedDiv).forEach((dc) => { const g = dcGroup(dc); out.push(g); addGroup(gDiv, g); });
+                scRevVisDivDcs_(selectedDiv).forEach((dc) => { const g = dcGroup(dc); out.push(g); addGroup(gDiv, g); });
                 out.push(gDiv);
                 return { colLabel: "DC NAME", rows: out };
             }
             const circle = newGroup("SEONI CIRCLE TOTAL", "GRAND_TOTAL");
             Object.keys(divisionConfigs).forEach((divName) => {
                 const sub = newGroup(`${divName} TOTAL`, "SUB_TOTAL");
-                getDivisionDcNames(divName).forEach((dc) => { const g = dcGroup(dc); out.push(g); addGroup(sub, g); });
+                scRevVisDivDcs_(divName).forEach((dc) => { const g = dcGroup(dc); out.push(g); addGroup(sub, g); });
                 out.push(sub);
                 addGroup(circle, sub);
             });
@@ -7981,7 +8048,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 html += `<select onchange="${setter}('division', this.value)" style="${selectStyle}"><option value="">All Division</option>${divOptions}</select>`;
             }
             if (activeViewLevel !== "DC") {
-                const divDcSet_ = (isFreeze && f.division) ? new Set(getDivisionDcNames(f.division).map((d) => normalizeDcName(d))) : null;
+                const divDcSet_ = (isFreeze && f.division) ? new Set(scRevVisDivDcs_(f.division).map((d) => normalizeDcName(d))) : null;
                 const dcOptions = getRevenueCategoryTargetDcs().filter((dc) => !divDcSet_ || divDcSet_.has(normalizeDcName(dc))).map((dc) => {
                     const name = normalizeDcName(dc);
                     return `<option value="${escapeHtml(name)}" ${normalizeDcName(f.dc) === name && f.dc ? "selected" : ""}>${escapeHtml(name)}</option>`;
@@ -8320,13 +8387,13 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 layout = list.map((n) => ({ name: n, type: "ROW", members: [n] }));
                 layout.push({ name: `${normalizeDcName(activeDC)} TOTAL`, type: "GRAND_TOTAL", members: list });
             } else if (activeViewLevel === "DIVISION") {
-                const dcs = getDivisionDcNames(activeDiv).map((d) => normalizeDcName(d));
+                const dcs = scRevVisDivDcs_(activeDiv).map((d) => normalizeDcName(d));
                 layout = dcs.map((d) => ({ name: d, type: "ROW", members: [d] }));
                 layout.push({ name: `${activeDiv} TOTAL`, type: "GRAND_TOTAL", members: dcs });
             } else {
                 const all = [];
                 Object.keys(divisionConfigs).forEach((dv) => {
-                    const dcs = getDivisionDcNames(dv).map((d) => normalizeDcName(d));
+                    const dcs = scRevVisDivDcs_(dv).map((d) => normalizeDcName(d));
                     dcs.forEach((d) => layout.push({ name: d, type: "ROW", members: [d] }));
                     layout.push({ name: `${dv} TOTAL`, type: "SUB_TOTAL", members: dcs });
                     all.push(...dcs);
@@ -8925,8 +8992,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     lokGrandTU += distributed;
                 } else {
                     const targetDcs = [...new Set((activeViewLevel === "DIVISION"
-                        ? getDivisionDcNames(activeDiv)
-                        : getAllDcNames()).map((dc) => normalizeDcName(dc)).filter(Boolean))];
+                        ? scRevVisDivDcs_(activeDiv)
+                        : scRevVisAllDcs_()).map((dc) => normalizeDcName(dc)).filter(Boolean))];
                     targetDcs.forEach((dc) => {
                         const total = getLokCount(dc);
                         const distributed = getLokDistributedCount(dc);
@@ -9055,7 +9122,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             try {
                 const targetMobileDcs = activeViewLevel === "DC"
                     ? [activeDC]
-                    : (activeViewLevel === "DIVISION" ? getDivisionDcNames(activeDiv) : getAllDcNames());
+                    : (activeViewLevel === "DIVISION" ? scRevVisDivDcs_(activeDiv) : scRevVisAllDcs_());
                 // SPEED PHASE 1: Division/Circle - jin DC ka master abhi memory me
                 // nahi hai, unka compact summary (IndexedDB) ho to 27MB master ka
                 // intezaar nahi; master background me aata hai aur kuch badla ho to
@@ -9089,7 +9156,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 // karega - koi breaking change nahi.
                 const mobileScopeDcs = activeViewLevel === "DC"
                     ? [activeDC]
-                    : (activeViewLevel === "DIVISION" ? getDivisionDcNames(activeDiv) : []);
+                    : (activeViewLevel === "DIVISION" ? scRevVisDivDcs_(activeDiv) : []);
                 const mobileSummaryDcParam = activeViewLevel === "DC" && activeDC
                     ? `&dc=${encodeURIComponent(activeDC)}`
                     : (activeViewLevel === "DIVISION" && mobileScopeDcs.length
@@ -10820,8 +10887,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
         function scBriefScopeDcs_() {
             if (activeViewLevel === "DC") return activeDC ? [activeDC] : [];
-            if (activeViewLevel === "DIVISION") return getDivisionDcNames(activeDiv);
-            return getAllDcNames();
+            if (activeViewLevel === "DIVISION") return scRevVisDivDcs_(activeDiv);
+            return scRevVisAllDcs_();
         }
         function scBriefDivOf_(dc) {
             const n = normalizeDcName(dc);
@@ -10931,6 +10998,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             updateProgressReportScopeTitle();
             const cont = document.getElementById("summary-content");
             if (!cont) return;
+            try { if (!Object.keys(scDivMasterMeta_).length) await scDivMasterRefresh_(); } catch (_) {} // UPDATE 175: META needed to hide no-master DCs
             const dcs = scBriefScopeDcs_();
             const todayDmy = getCurrentDateDDMMYYYY();
             const todayKey = normalizeRevenueReportDate(todayDmy);
@@ -11012,6 +11080,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     try {
                         const rc = await pRecon;
                         if (!rc || !rc.supported || !rc.byKey) return null;
+                        try { await ensureRevenueCategoryMasterDataLoadedStrict_(reconDcs_); } catch (_) {} // UPDATE 176: instant bill paid ke liye master (LAST PAYMENT DATE/AMOUNT)
                         return scCollectionFromRecon_(rc, reconDcs_, ym, todayIso);
                     } catch (_) { return null; }
                 })();
@@ -11060,7 +11129,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     const k = normalizeDcName(dc);
                     per[k] = { dc, key: k, div: scBriefDivOf_(dc), master: master[k] || "FAIL",
                         revAmt: 0, revCnt: 0, revMAmt: 0, revMCnt: 0, td: 0, tdAmt: 0, tdM: 0, tdMAmt: 0, mobile: 0, mobileM: 0,
-                        paidCnt: null, paidAmt: 0, lastPay: "", cashTs: 0,
+                        paidCnt: null, paidAmt: 0, instCnt: 0, instAmt: 0, lastPay: "", cashTs: 0,
                         omDCnt: 0, omDAmt: 0, omMCnt: 0, omMAmt: 0, omPendCnt: 0, omPendAmt: 0, omPartCnt: 0, pumpPaidCnt: 0, pumpPaidAmt: 0, pumpPendCnt: 0, pumpPendAmt: 0 };
                 });
                 if (revOk) {
@@ -11109,6 +11178,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     if (cl) {
                         per[k].paidCnt = cl.n;
                         per[k].paidAmt = cl.a;
+                        per[k].instCnt = Number(cl.instN) || 0; per[k].instAmt = Number(cl.instA) || 0; // UPDATE 176
                         per[k].lastPay = cl.last ? `${cl.last.slice(6, 8)}-${cl.last.slice(4, 6)}-${cl.last.slice(0, 4)}` : (p.lastPay || "");
                     } else {
                         per[k].paidCnt = pe ? (Number(pe.n) || 0) : (p.cnt === undefined ? null : p.cnt);
@@ -11116,6 +11186,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         per[k].lastPay = p.lastPay || "";
                     }
                     per[k].cashTs = p.ts || 0;
+                    if (scDcHiddenNoMaster_(k)) { per[k].paidCnt = 0; per[k].paidAmt = 0; per[k].instCnt = 0; per[k].instAmt = 0; per[k].lastPay = ""; } // UPDATE 178: master nahi => zero
                 });
 
                 // Peechhe chal rahe DC ka niyam (user ne 28/09 ko manzoor kiya)
@@ -11144,7 +11215,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     p.red = red; p.orange = orange;
                 });
 
-                const F = ["revAmt", "revCnt", "revMAmt", "revMCnt", "td", "tdAmt", "tdM", "tdMAmt", "mobile", "mobileM", "paidAmt", "omDCnt", "omDAmt", "omMCnt", "omMAmt", "omPendCnt", "omPendAmt", "omPartCnt", "pumpPaidCnt", "pumpPaidAmt", "pumpPendCnt", "pumpPendAmt"];
+                const F = ["revAmt", "revCnt", "revMAmt", "revMCnt", "td", "tdAmt", "tdM", "tdMAmt", "mobile", "mobileM", "paidAmt", "instCnt", "instAmt", "omDCnt", "omDAmt", "omMCnt", "omMAmt", "omPendCnt", "omPendAmt", "omPartCnt", "pumpPaidCnt", "pumpPaidAmt", "pumpPendCnt", "pumpPendAmt"];
                 if (pumpData && pumpData.byDc) Object.keys(per).forEach((k) => { const b = pumpData.byDc[k]; if (b) { per[k].pumpPaidCnt = b.paidCnt; per[k].pumpPaidAmt = b.paidAmt; per[k].pumpPendCnt = b.pendCnt; per[k].pumpPendAmt = b.pendAmt; } });
                 const sum = (list) => {
                     const a = { paidCnt: 0, paidMissing: 0, lastPay: "" };
@@ -11276,7 +11347,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 ${box("💰", "Revenue (Paid by Staff)", "Paid entries made by staff through the app", [TODAY, MONTH], [["Consumers", nm(r.revOk, t.revCnt), nm(r.revOk, t.revMCnt)], ["Amount", rs(r.revOk, t.revAmt), rs(r.revOk, t.revMAmt)]], "#15803d")}
                 ${box("✂️", "Line TD (by Staff)", "TD entries made by staff through the app · Amount = arrears of TD consumers", [TODAY, MONTH], [["Consumers", nm(r.revOk, t.td), nm(r.revOk, t.tdM)], ["Arrears Amount", rs(r.revOk, t.tdAmt), rs(r.revOk, t.tdMAmt)]], "#b91c1c")}
                 ${box("📱", "Mobile Updated (by Staff)", "Mobile numbers corrected by staff", [TODAY, MONTH], [["Consumers", nm(r.mobOk, t.mobile), nm(r.mobMOk, t.mobileM)]], "#0284c7")}
-                ${box("✅", "Paid as per Cash List", `${r.collOk ? "Every payment in the cash list (1st to today)" : "Uploaded cash list"} · ${escapeHtml(r.monthLabel)}${t.lastPay ? " · till " + escapeHtml(t.lastPay) : ""}`, [MONTH], [["Count", `${nm(r.paidOk, t.paidCnt)}`], ["Amount", `${rs(r.paidOk, t.paidAmt)}`]], "#db2777",
+                ${box("✅", "Paid as per Cash List", `${r.collOk ? "Every payment in the cash list (1st to today)" : "Uploaded cash list"} · ${escapeHtml(r.monthLabel)}${t.lastPay ? " · till " + escapeHtml(t.lastPay) : ""}${scInstNote_(t.instCnt, t.instAmt)}`, [MONTH], [["Count", `${nm(r.paidOk, t.paidCnt)}`], ["Amount", `${rs(r.paidOk, t.paidAmt)}`]], "#db2777",
                     `<div style="margin-top:4px; padding:5px 7px; background:#f0fdf4; border-radius:8px; font-size:0.58rem; font-weight:800; color:#166534;">(Of this, manual entry by staff: ${nm(r.revOk, t.revMCnt)} consumers · ${rs(r.revOk, t.revMAmt)})</div>`)}
                 ${box("🛡️", "O&M / VIG", `Panchnama cases${r.omFreeze ? " · freeze " + escapeHtml(r.omFreeze) : ""}`, [`Paid ${r.omDate ? "(" + escapeHtml(r.omDate.slice(0, 5)) + ")" : "(Last day)"}`, `Paid (${escapeHtml(r.omMLabel || "This Month")})`], [["Consumers", nm(r.omOk, t.omDCnt), nm(r.omMOk, t.omMCnt)], ["Amount", rs(r.omOk, t.omDAmt), rs(r.omMOk, t.omMAmt)]], "#334155",
                     `<div style="margin-top:4px; padding:5px 7px; background:#f1f5f9; border-radius:8px; font-size:0.58rem; font-weight:800; color:#334155;">Of which part paid: ${nm(r.omMOk, t.omPartCnt)} · Pending (incl. part-paid balance): ${nm(r.omMOk, t.omPendCnt)} consumers · ${rs(r.omMOk, t.omPendAmt)}</div>${(r.omNew && (r.omNew.m.newCnt || r.omNew.d.newCnt)) ? `<div style="margin-top:4px; padding:5px 7px; background:#fff7ed; border:1px dashed #fb923c; border-radius:8px; font-size:0.58rem; font-weight:800; color:#9a3412;">🆕 New cases after Freeze (separate): Yesterday ${r.omNew.d.newCnt} · ₹ ${scBriefLakh_(r.omNew.d.newAmt)} | ${escapeHtml(r.omMLabel || "This Month")} ${r.omNew.m.newCnt} · ₹ ${scBriefLakh_(r.omNew.m.newAmt)}</div>` : ""}`)}
@@ -11381,7 +11452,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     { label: "REVENUE (PAID BY STAFF)", src: "Staff app paid entries", cols: [TD_, MO_], rows: [["Consumers", NM(r.revOk, t.revCnt), NM(r.revOk, t.revMCnt)], ["Amount", RS(r.revOk, t.revAmt), RS(r.revOk, t.revMAmt)]], c: [21, 128, 61] },
                     { label: "LINE TD (BY STAFF)", src: "Amount = arrears of TD consumers", cols: [TD_, MO_], rows: [["Consumers", NM(r.revOk, t.td), NM(r.revOk, t.tdM)], ["Arrears", RS(r.revOk, t.tdAmt), RS(r.revOk, t.tdMAmt)]], c: [185, 28, 28] },
                     { label: "MOBILE UPDATED (BY STAFF)", src: "Corrected mobile numbers", cols: [TD_, MO_], rows: [["Consumers", NM(r.mobOk, t.mobile), NM(r.mobMOk, t.mobileM)]], c: [2, 132, 199] },
-                    { label: "PAID AS PER CASH LIST", src: `${r.collOk ? "Cash list payments (1st to today)" : "Uploaded cash list"}${t.lastPay ? " till " + t.lastPay : ""}`, cols: [MO_], rows: [["Count", NM(r.paidOk, t.paidCnt)], ["Amount", RS(r.paidOk, t.paidAmt)]], note: `(Staff entry: ${NM(r.revOk, t.revMCnt)} | ${RS(r.revOk, t.revMAmt)})`, c: [219, 39, 119] },
+                    { label: "PAID AS PER CASH LIST", src: `${r.collOk ? "Cash list payments (1st to today)" : "Uploaded cash list"}${t.lastPay ? " till " + t.lastPay : ""}`, cols: [MO_], rows: [["Count", NM(r.paidOk, t.paidCnt)], ["Amount", RS(r.paidOk, t.paidAmt)]], note2: (Number(t.instCnt) > 0 ? `Incl. instant bill: ${Number(t.instCnt).toLocaleString("en-IN")} | Rs ${(Number(t.instAmt) / 100000).toFixed(2)} L` : ""), note: `(Staff entry: ${NM(r.revOk, t.revMCnt)} | ${RS(r.revOk, t.revMAmt)})`, c: [219, 39, 119] },
                     { label: "O&M / VIG", src: r.omFreeze ? `Freeze ${r.omFreeze}` : "Panchnama cases", cols: [r.omDate ? `PAID ${r.omDate.slice(0, 5)}` : "PAID LAST DAY", (r.omMLabel || "This Month").toUpperCase()], rows: [["Consumers", NM(r.omOk, t.omDCnt), NM(r.omMOk, t.omMCnt)], ["Amount", RS(r.omOk, t.omDAmt), RS(r.omMOk, t.omMAmt)]], note: `Pending: ${NM(r.omMOk, t.omPendCnt)} | ${RS(r.omMOk, t.omPendAmt)}`, note2: `Of which part paid: ${NM(r.omMOk, t.omPartCnt)}`, note2old_: (r.omNew && (r.omNew.m.newCnt || r.omNew.d.newCnt)) ? `New cases (separate): Yesterday ${r.omNew.d.newCnt} | ${scBriefLakh_(r.omNew.d.newAmt)} · ${r.omMLabel || "Month"} ${r.omNew.m.newCnt} | ${scBriefLakh_(r.omNew.m.newAmt)}` : "", c: [51, 65, 85] },
                     { label: "ARREARS PUMP CONSUMERS", src: "LV5 pump arrears - this month's payments", cols: [MO_], rows: [["Total", NM(!!r.pump, r.pump && r.pump.total)], ["Paid", `${NM(!!r.pump, r.pump && r.pump.monthPaidCnt)} | ${RS(!!r.pump, r.pump && r.pump.paidAmt)}`]], note: `Of which part paid: ${NM(!!r.pump, r.pump && r.pump.partCnt)}`, note2: `Pending: ${NM(!!r.pump, r.pump && r.pump.pendCnt)} | ${RS(!!r.pump, r.pump && r.pump.pendAmt)}`, c: [124, 58, 237] }
                 ];
@@ -13744,10 +13815,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const plTitle_ = isMax_ ? "MAX LOAD - FEEDER WISE REPORT" : "DAILY HOURLY PEAK LOAD REPORT";
                 const plPrefix_ = isMax_ ? "PEAKLOAD_MAXLOAD" : "PEAKLOAD";
                 const headers = isMax_
-                    ? ["S.NO", "33/11 KV SUBSTATION", "11 KV FEEDER", "MAX LOAD (A)", "DATE (DD-MM-YYYY)", "TIME (HH:MM)", "NO. OF ENTRIES"]
+                    ? ["S.NO", "33/11 KV SUBSTATION", "11 KV FEEDER", "MAX LOAD (A)", "DATE (DD-MM-YYYY)", "TIME (HH:MM)"]
                     : ["S.NO", "33/11 KV SUBSTATION", "11 KV FEEDER", "METER NO", "DATE (DD-MM-YYYY)", "TIME (HH:MM)", "PEAK LOAD (A)", "NAME OF OPERATOR"];
                 const bodyRows = isMax_
-                    ? buildPeakLoadMaxRows_(rows).map((r, index) => [index + 1, r.substation, r.feeder, r.max === null ? "-" : r.max, r.max === null ? "-" : r.date, r.max === null ? "-" : r.time, r.entries])
+                    ? buildPeakLoadMaxRows_(rows).map((r, index) => [index + 1, r.substation, r.feeder, r.max === null ? "-" : r.max, r.max === null ? "-" : r.date, r.max === null ? "-" : r.time])
                     : rows.map((row, index) => [index + 1, ...headers.slice(1).map((key) => String(row[key] ?? ""))]);
                 const scSubTag_ = peakLoadReportSub !== "ALL" ? `_${String(peakLoadReportSub).replace(/\s+/g, "_")}` : "";
                 const scSubLine_ = peakLoadReportSub !== "ALL" ? `SUBSTATION - ${peakLoadReportSub}` : "ALL SUBSTATIONS";
@@ -13780,7 +13851,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 doc.autoTable({
                     startY: 29,
                     head: [headers],
-                    body: bodyRows.length ? bodyRows : [["", "", "", "", "", "", ""]],
+                    body: bodyRows.length ? bodyRows : [headers.map(() => "")],
                     theme: "grid",
                     headStyles: { fillColor: [17, 24, 39], halign: "center" },
                     styles: { fontSize: 7, cellPadding: 2, halign: "center" },
@@ -20194,6 +20265,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             // mapRevenueConsumerRow() me hai.
             const govtIndex = findIndex(["GOVTNONGOVT", "GOVT", "ISGOVERNMENT"], -1);
             const lastPaymentIndex = findIndex(["LASTPAYMENTDATE", "LASTPAYMENT"], -1);
+            const lastPayAmtIndex = findIndex(["LASTPAYMENTAMOUNT"], -1); // UPDATE 176
             const connectionIndex = findIndex(["CONNECTIONDATE", "DATEOFCONNECTION"], -1); // NP5Y 2026-10-20
             const meteringIndex = findIndex(["METERINGSTATUS", "METERING"], -1); // PUMP 2026-10-21
 
@@ -20212,6 +20284,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     netBill: String(cols[netBillIndex] || "").trim(),
                     govtFlag: govtIndex >= 0 ? parseConsumerGovtFlag(cols[govtIndex]) : false,
                     lastPaymentDate: lastPaymentDate,
+                    lastPaymentAmount: lastPayAmtIndex >= 0 ? scParseLpAmount_(cols[lastPayAmtIndex]) : 0,
                     connectionDate: connectionIndex >= 0 ? parseConsumerConnectionDate(cols[connectionIndex]) : "",
                     meteringStatus: meteringIndex >= 0 ? String(cols[meteringIndex] || "").trim() : "",
                     hasPaymentDateData: lastPaymentIndex >= 0,
@@ -20278,6 +20351,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 netBill: getConsumerField(row, ["NET BILL", "NETBILL", "NET AMOUNT", "BILL AMOUNT"]),
                 govtFlag: parseConsumerGovtFlag(getConsumerField(row, ["GOVT/NON GOVT", "GOVT NON GOVT", "GOVT", "IS GOVERNMENT"])),
                 lastPaymentDate: lastPaymentDate,
+                lastPaymentAmount: scParseLpAmount_(getConsumerField(row, ["LAST PAYMENT AMOUNT"])),
                 connectionDate: parseConsumerConnectionDate(getConsumerField(row, ["CONNECTION DATE", "DATE OF CONNECTION"])),
                 meteringStatus: String(getConsumerField(row, ["METERING STATUS", "METERING"]) || "").trim(),
                 hasPaymentDateData: hasPaymentDateData,
@@ -20501,6 +20575,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const netBillIndex = findIndex(["NETBILL", "NET"], 8);
             const govtIndex = findIndex(["GOVTNONGOVT", "GOVT", "ISGOVERNMENT"], -1);
             const lastPaymentIndex = findIndex(["LASTPAYMENTDATE", "LASTPAYMENT"], -1);
+            const lastPayAmtIndex = findIndex(["LASTPAYMENTAMOUNT"], -1); // UPDATE 176
             const connectionIndex = findIndex(["CONNECTIONDATE", "DATEOFCONNECTION"], -1); // NP5Y 2026-10-20
             const meteringIndex = findIndex(["METERINGSTATUS", "METERING"], -1); // PUMP 2026-10-21
             const cellValue = (cells, index) => {
@@ -20523,6 +20598,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     netBill: cellValue(cells, netBillIndex),
                     govtFlag: govtIndex >= 0 ? parseConsumerGovtFlag(cellValue(cells, govtIndex)) : false,
                     lastPaymentDate: lastPaymentDate,
+                    lastPaymentAmount: lastPayAmtIndex >= 0 ? scParseLpAmount_(cellValue(cells, lastPayAmtIndex)) : 0,
                     connectionDate: connectionIndex >= 0 ? parseConsumerConnectionDate(cellValue(cells, connectionIndex)) : "",
                     meteringStatus: meteringIndex >= 0 ? cellValue(cells, meteringIndex) : "",
                     hasPaymentDateData: lastPaymentIndex >= 0,
@@ -25750,7 +25826,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const src = best.matrix[r] || [];
                 const out = idx.map((ci, k) => {
                     const raw = ci < 0 ? "" : src[ci];
-                    if (SC_DIVMASTER_COLS_[k].name === "ARREARS" || SC_DIVMASTER_COLS_[k].name === "NET BILL") { // ARREARS, NET BILL - number rahe
+                    if (SC_DIVMASTER_COLS_[k].name === "ARREARS" || SC_DIVMASTER_COLS_[k].name === "NET BILL" || SC_DIVMASTER_COLS_[k].name === "LAST PAYMENT AMOUNT") { // ARREARS, NET BILL - number rahe
                         if (typeof raw === "number") return raw;
                         const t = String(raw === null || raw === undefined ? "" : raw).replace(/,/g, "").trim();
                         return (t !== "" && isFinite(Number(t))) ? Number(t) : t;
@@ -25844,10 +25920,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const plan = divisionDcs.map((dc) => ({ dc, rows: [], status: "WAITING", text: "" }));
                 const planByDc = Object.fromEntries(plan.map((p) => [p.dc, p]));
                 const unassigned = [];
-                let wrongDivision = 0;
+                let wrongDivision = 0, scDcConflict_ = 0;
                 entries.forEach((e) => {
                     if (!e.valid) { unassigned.push(e.row); return; }
-                    let dc = e.dc || SC_DIVMASTER_PREFIX_[e.iv.slice(0, 4)] || prefixDc[e.iv.slice(0, 4)] || metaPrefix[e.iv.slice(0, 4)] || "";
+                    // UPDATE 172 (2026-11-12, USER REQUEST): the DC NAME written in the file is FINAL (owner builds it with his lookup). Only when it is blank
+                    // or not a DC of this Division, the old order is used: owner's prefix list -> old master/paid history -> learned prefix.
+                    const scFileDc_ = normalizeDcName(e.row[SC_DIVMASTER_DCNAME_IDX_] || "");
+                    const scListDc_ = SC_DIVMASTER_PREFIX_[e.iv.slice(0, 4)] || "";
+                    let dc = (scFileDc_ && planByDc[scFileDc_]) ? scFileDc_ : (scListDc_ || e.dc || prefixDc[e.iv.slice(0, 4)] || metaPrefix[e.iv.slice(0, 4)] || "");
+                    if (scFileDc_ && planByDc[scFileDc_] && scListDc_ && scListDc_ !== scFileDc_ && planByDc[scListDc_]) scDcConflict_++;
                     if (dc && !planByDc[dc]) { wrongDivision++; dc = ""; }
                     if (dc) { e.row[SC_DIVMASTER_DCNAME_IDX_] = dc; planByDc[dc].rows.push(e.row); } else unassigned.push(e.row);
                 });
@@ -25855,7 +25936,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     p.prefixes = Array.from(new Set(p.rows.map((r) => String(r[0]).slice(0, 4))));
                     p.before = (() => { try { return getRevenueMasterRowsForDc(p.dc).length; } catch (_) { return 0; } })();
                 });
-                scDivMasterCtx_ = { division, key, plan, unassigned, fileName: file.name, wrongDivision, invalidCount, dupCount, total: parsed.rows.length, badHq: scDivMasterBadRows_(parsed.rows) };
+                scDivMasterCtx_ = { division, key, plan, unassigned, fileName: file.name, wrongDivision, scDcConflict: scDcConflict_, invalidCount, dupCount, total: parsed.rows.length, badHq: scDivMasterBadRows_(parsed.rows) };
                 renderDivMasterPlan_();
                 const withRows = plan.filter((p) => p.rows.length).length;
                 if (!parsed.rows.length) {
@@ -25894,6 +25975,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const notes = [
                 un ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:6px;">${un} rows could not be assigned to a DC${ctx.wrongDivision ? ` (${ctx.wrongDivision} belong to another Division)` : ""}${ctx.invalidCount ? ` (${ctx.invalidCount} with invalid IVRS)` : ""} - they will be saved in the UNASSIGNED tab, not in any DC.</div>` : "",
                 ctx.dupCount ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:4px;">${ctx.dupCount} duplicate IVRS rows found in the file.</div>` : "",
+                ctx.scDcConflict ? `<div style="font-size:0.62rem; font-weight:950; color:#b45309; margin-top:4px;">${ctx.scDcConflict} rows: DC NAME in the file differs from the IVRS starting-digits list (file DC NAME is used).</div>` : "",
                 scDivMasterBadHtml_(ctx.badHq)
             ].join("");
             setDivMasterPreview_(`<div style="font-size:0.66rem; font-weight:950; color:#312e81; margin-bottom:6px;">${escapeHtml(ctx.fileName)} - ${ctx.total} rows</div>${head}${rows}${notes}`);
@@ -26839,7 +26921,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 .filter(Boolean)));
             const expectedNames = requestedNames.length
                 ? requestedNames
-                : getAllDcNames().map((name) => normalizeDcName(name)).filter(Boolean);
+                : scRevVisAllDcs_().map((name) => normalizeDcName(name)).filter(Boolean);
             const scopeParam = requestedNames.length
                 ? `&dc_names=${encodeURIComponent(requestedNames.join(","))}`
                 : "";
@@ -27013,10 +27095,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (isRevenueDcScreen && activeDC) return rowDc === normalizeDcName(activeDC);
             if (activeViewLevel === "DC") return rowDc === normalizeDcName(activeDC);
             if (activeViewLevel === "DIVISION") {
-                return getDivisionDcNames(activeDiv).some((dc) => normalizeDcName(dc) === rowDc);
+                return scRevVisDivDcs_(activeDiv).some((dc) => normalizeDcName(dc) === rowDc);
             }
             if (activeViewLevel === "CIRCLE") {
-                return getAllDcNames().some((dc) => normalizeDcName(dc) === rowDc);
+                return scRevVisAllDcs_().some((dc) => normalizeDcName(dc) === rowDc);
             }
             if (activeDC) return rowDc === normalizeDcName(activeDC);
             return true;
@@ -27298,7 +27380,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (myToken !== revenueLiveProgressToken) { progress.stop(); return; }
             } else if (activeViewLevel === "DIVISION" || activeViewLevel === "CIRCLE") {
                 const divisionDcNames = activeViewLevel === "DIVISION" && activeDiv
-                    ? getDivisionDcNames(activeDiv)
+                    ? scRevVisDivDcs_(activeDiv)
                     : [];
                 // Naya compact summary endpoint pehle try hota hai. Circle me bhi
                 // raw consumer rows browser tak nahi aate; sirf per-DC totals aate hain.
@@ -27307,7 +27389,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (myToken !== revenueLiveProgressToken) { progress.stop(); return; }
                 if (todayRows) {
                     if (activeViewLevel === "DIVISION" && activeDiv) {
-                        const dcSet = new Set(getDivisionDcNames(activeDiv).map((n) => normalizeDcName(n)));
+                        const dcSet = new Set(scRevVisDivDcs_(activeDiv).map((n) => normalizeDcName(n)));
                         rows = todayRows.filter((r) => dcSet.has(normalizeDcName(r.dcName)));
                     } else {
                         rows = todayRows;
@@ -28236,7 +28318,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         function getRevenueReportScopeDcList_() {
-            return activeViewLevel === "DIVISION" ? getDivisionDcNames(activeDiv) : getAllDcNames();
+            return activeViewLevel === "DIVISION" ? scRevVisDivDcs_(activeDiv) : scRevVisAllDcs_();
         }
 
         // Purana (pre-speed-fix) Division/Circle unscoped shared-cache path -
@@ -28972,7 +29054,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 hqNodes.forEach((child) => add(dcNode, child));
                 return dcNode;
             };
-            const dcs = activeViewLevel === "DC" ? [activeDC] : (activeViewLevel === "DIVISION" ? getDivisionDcNames(activeDiv) : getRevenueCategoryTargetDcs());
+            const dcs = activeViewLevel === "DC" ? [activeDC] : (activeViewLevel === "DIVISION" ? scRevVisDivDcs_(activeDiv) : getRevenueCategoryTargetDcs());
             const dcNodes = dcs.map(buildDcNode).filter((node) => node.children && node.children.length);
             const tree = activeViewLevel === "DC" ? ((dcNodes[0] && dcNodes[0].children) || []) : dcNodes;
             const totals = tree.reduce((acc, row) => { add(acc, row); return acc; }, leaf("TOTAL"));
