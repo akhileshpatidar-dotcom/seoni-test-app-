@@ -6195,15 +6195,38 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         ];
         function scFzCategoryDropdownHtml_() {
             const cur = SC_FZ_CATS_.find((c) => c[0] === progressFreezeCategory);
-            const items = SC_FZ_CATS_.map((c) => {
+            // UPDATE 180 (2026-11-17, USER REQUEST): report types 3 group me - Non Payee / Top Defaulters / Arrears.
+            // Group par click karne par hi uske sub option dikhte hain (ek time par ek group khula).
+            const scFzRow_ = (c, indent) => {
                 const on = c[0] === progressFreezeCategory;
                 const box = `<span class="sc-fz-tick" style="display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; width:14px; height:14px; border:2px solid ${c[2]}; border-radius:4px; box-sizing:border-box; margin-right:9px; font-size:0.62rem; line-height:1; color:#ffffff; background:${on ? c[2] : "#ffffff"};">${on ? "&#10003;" : ""}</span>`;
-                return `<div onclick="scFzCatPick_('${c[0]}', this)" style="display:flex; align-items:center; padding:9px 12px; font-size:0.74rem; font-weight:900; color:${c[2]}; background:${c[3]}; border-bottom:1px solid #e2e8f0; cursor:pointer;">${box}<span>${escapeHtml(c[1])}</span></div>`;
+                return `<div onclick="scFzCatPick_('${c[0]}', this)" style="display:flex; align-items:center; padding:9px 12px 9px ${indent}px; font-size:0.74rem; font-weight:900; color:${c[2]}; background:${c[3]}; border-bottom:1px solid #e2e8f0; cursor:pointer;">${box}<span>${escapeHtml(c[1])}</span></div>`;
+            };
+            const scFzGroups_ = [
+                ["NP", "Non Payee", ["NP3", "NP6", "SINCE_CONNECTION", "NP5Y"], "#1d4ed8", "#dbeafe"],
+                ["TOP", "Top Defaulters", ["TOP20", "TOP50"], "#c2410c", "#ffedd5"],
+                ["ARR", "Arrears", ["ARREARS_1L", "ARREARS_PUMP", "ARREARS_SLAB", "CATEGORY_WISE"], "#0f172a", "#cbd5e1"]
+            ];
+            const items = scFzGroups_.map((g) => {
+                const hasCur = g[2].indexOf(progressFreezeCategory) >= 0;
+                const rows = g[2].map((k) => SC_FZ_CATS_.find((c) => c[0] === k)).filter(Boolean).map((c) => scFzRow_(c, 28)).join("");
+                return `<div onclick="scFzGrpToggle_(event, '${g[0]}')" style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; font-size:0.76rem; font-weight:950; color:${g[3]}; background:${g[4]}; border-bottom:1px solid #cbd5e1; cursor:pointer;"><span>${escapeHtml(g[1])}${hasCur ? " &#9679;" : ""}</span><span id="sc-fz-grp-arr-${g[0]}" style="font-size:0.7rem;">&#9662;</span></div><div id="sc-fz-grp-${g[0]}" style="display:none;">${rows}</div>`;
             }).join("");
             return `<div id="sc-fz-cat-dd" style="position:relative; margin:5px auto 0;">
                 <button type="button" onclick="scFzCatToggle_(event)" style="width:100%; height:38px; display:flex; align-items:center; justify-content:space-between; border:2px solid #0e7490; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#ffffff; background:#0891b2; box-shadow:0 2px 6px rgba(8,145,178,0.35);"><span>${escapeHtml(cur ? cur[1] : "Choose Report Type")}</span><span style="font-size:0.7rem;">&#9662;</span></button>
                 <div id="sc-fz-cat-list" style="display:none; position:absolute; left:0; right:0; top:42px; z-index:60; background:#ffffff; border:1.5px solid #0e7490; border-radius:12px; overflow:hidden; box-shadow:0 8px 20px rgba(15,23,42,0.25);">${items}</div>
             </div>`;
+        }
+        function scFzGrpToggle_(ev, key) {
+            if (ev && ev.stopPropagation) ev.stopPropagation();
+            ["NP", "TOP", "ARR"].forEach((k) => {
+                const box = document.getElementById("sc-fz-grp-" + k);
+                const arr = document.getElementById("sc-fz-grp-arr-" + k);
+                if (!box) return;
+                const open = k === key && box.style.display === "none";
+                box.style.display = open ? "block" : "none";
+                if (arr) arr.innerHTML = open ? "&#9652;" : "&#9662;";
+            });
         }
         function scFzCatToggle_(ev) {
             if (ev && ev.stopPropagation) ev.stopPropagation();
