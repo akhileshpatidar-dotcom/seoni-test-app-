@@ -5199,6 +5199,79 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             return true;
         }
 
+        // UPDATE 179 (2026-11-17, USER REQUEST): Revenue ke sabhi Category filter me pehle MAIN category
+        // (LV1..LV6) dikhti hai, uske niche alag SUB filter (LV1.1, LV1.2 ...). Effective filter value ek hi
+        // string rehti hai (sub chuna to sub, nahi to main) - isliye purane setters/state same rehte hain.
+        function scCatKey_(v) { return String(v == null ? "" : v).toUpperCase().replace(/\s+/g, "").replace(/^LV-?/, "LV"); }
+        function scCatMain_(v) { const k = scCatKey_(v); const m = k.match(/^LV([1-6])/); return m ? "LV" + m[1] : k; }
+        function scCatSort_(a, b) { return String(a).localeCompare(String(b), undefined, { numeric: true }); }
+        function scCatMatch_(rowCat, filterVal) {
+            if (!filterVal) return true;
+            const fk = scCatKey_(filterVal), rk = scCatKey_(rowCat);
+            if (fk === rk) return true;
+            return /^LV[1-6]$/.test(fk) && scCatMain_(rk) === fk;
+        }
+        function scCatValues_(rows) { return (rows || []).map((r) => (r && (r.tariffSub || r.tariffCategory)) || "").filter(Boolean); }
+        function scCatLists_(values) {
+            const mains = new Map();
+            (values || []).forEach((v) => {
+                const k = scCatKey_(v);
+                if (!k) return;
+                const mk = scCatMain_(k);
+                if (!mains.has(mk)) mains.set(mk, new Set());
+                if (k !== mk) mains.get(mk).add(k);
+            });
+            return mains;
+        }
+        function scCatSelectsHtml_(values, selected, handlerPrefix, style, placeholder) {
+            const mains = scCatLists_(values);
+            const sel = scCatKey_(selected);
+            const selMain = sel ? scCatMain_(sel) : "";
+            let html = `<select onchange="${handlerPrefix}this.value)" style="${style}"><option value="">${escapeHtml(placeholder || "All Categories")}</option>${Array.from(mains.keys()).sort(scCatSort_).map((m) => `<option value="${escapeHtml(m)}" ${m === selMain ? "selected" : ""}>${escapeHtml(m)}</option>`).join("")}</select>`;
+            const subs = (selMain && mains.has(selMain)) ? Array.from(mains.get(selMain)).sort(scCatSort_) : [];
+            if (subs.length) {
+                html += `<select onchange="${handlerPrefix}this.value)" style="${style}"><option value="${escapeHtml(selMain)}">All ${escapeHtml(selMain)} Sub Categories</option>${subs.map((c) => `<option value="${escapeHtml(c)}" ${c === sel ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}</select>`;
+            }
+            return html;
+        }
+        function scCatFillSub_(selectEl) {
+            if (!selectEl) return;
+            const sub = document.getElementById(selectEl.id + "-sub");
+            if (!sub) return;
+            const mains = selectEl.__scCatMap;
+            const m = selectEl.value;
+            const subs = (m && mains && mains.has(m)) ? Array.from(mains.get(m)).sort(scCatSort_) : [];
+            if (!subs.length) { sub.innerHTML = ""; sub.style.display = "none"; return; }
+            sub.innerHTML = `<option value="">All ${escapeHtml(m)} Sub Categories</option>` + subs.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+            sub.style.display = "block";
+        }
+        function scCatPopulate_(selectEl, values) {
+            if (!selectEl) return;
+            const mains = scCatLists_(values);
+            selectEl.innerHTML = `<option value="">All Categories</option>` + Array.from(mains.keys()).sort(scCatSort_).map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+            if (!selectEl.__scCat) {
+                selectEl.__scCat = true;
+                const orig = selectEl.onchange;
+                const sub = document.createElement("select");
+                sub.id = selectEl.id + "-sub";
+                sub.className = selectEl.className;
+                sub.style.cssText = selectEl.style.cssText;
+                sub.style.display = "none";
+                sub.onchange = function (ev) { return orig ? orig.call(selectEl, ev) : undefined; };
+                selectEl.parentNode.insertBefore(sub, selectEl.nextSibling);
+                selectEl.onchange = function (ev) { scCatFillSub_(selectEl); return orig ? orig.call(selectEl, ev) : undefined; };
+            }
+            selectEl.__scCatMap = mains;
+            scCatFillSub_(selectEl);
+        }
+        function scCatValue_(id) {
+            const m = document.getElementById(id);
+            const sub = document.getElementById(id + "-sub");
+            const mv = m ? m.value : "";
+            if (mv && sub && sub.style.display !== "none" && sub.value) return sub.value;
+            return mv;
+        }
+
         function buildFreezeOptionsHtml(values, selectedValue, placeholder) {
             const options = [`<option value="">${escapeHtml(placeholder)}</option>`].concat(
                 (values || []).map((v) => `<option value="${escapeHtml(v)}" ${v === selectedValue ? "selected" : ""}>${escapeHtml(v)}</option>`)
@@ -5224,7 +5297,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 && (!f.dc || normalizeDcName(row.dc_name) === normalizeDcName(f.dc))
                 && (!f.hq || normalizeLookupValue(row.hq_name) === normalizeLookupValue(f.hq))
                 && (!f.village || normalizeLookupValue(row.village) === normalizeLookupValue(f.village))
-                && (!f.category || normalizeLookupValue(row.tariff_category) === normalizeLookupValue(f.category))
+                && scCatMatch_(row.tariff_category, f.category)
                 && isFreezeNetBillInSlab(row, f.slab)
                 && (!f.govt || (f.govt === "GOVT" ? row.govt_flag === "GOVT" : row.govt_flag !== "GOVT"))
                 && isFreezePaymentStatusMatch_(row, f.payment)
@@ -6240,14 +6313,13 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const divisionOptionsHtml_ = buildFreezeOptionsHtml(Object.keys(divisionConfigs), f.division, "All Division");
                 const hqOptionsHtml = buildFreezeOptionsHtml(getRevenueUniqueValues(dcScoped, "hq_name"), f.hq, revenueHqAllLabel(f.dc || activeDC));
                 const villageOptionsHtml = buildFreezeOptionsHtml(getRevenueUniqueValues(villageScoped, "village"), f.village, revenueVillageAllLabel(f.dc || activeDC));
-                const categoryOptionsHtml = buildFreezeOptionsHtml(getRevenueUniqueValues(allScoped, "tariff_category"), f.category, "All Categories");
                 const freezeSelectStyle = "width:100%; height:38px; margin:5px auto 0; display:block; border:1.5px solid #fb923c; border-radius:14px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#0f172a; background:#ffffff;";
                 filterBlockHtml = `
                     ${activeViewLevel === "CIRCLE" ? `<select onchange="setFreezeNonPayeeFilter('division', this.value)" style="${freezeSelectStyle}">${divisionOptionsHtml_}</select>` : ""}
                     ${showDcColumn ? `<select onchange="setFreezeNonPayeeFilter('dc', this.value)" style="${freezeSelectStyle}">${dcOptionsHtml}</select>` : ""}
                     <select onchange="setFreezeNonPayeeFilter('hq', this.value)" style="${freezeSelectStyle}">${hqOptionsHtml}</select>
                     <select onchange="setFreezeNonPayeeFilter('village', this.value)" style="${freezeSelectStyle}">${villageOptionsHtml}</select>
-                    <select onchange="setFreezeNonPayeeFilter('category', this.value)" style="${freezeSelectStyle}">${categoryOptionsHtml}</select>
+                    ${scCatSelectsHtml_(getRevenueUniqueValues(allScoped, "tariff_category"), f.category, "setFreezeNonPayeeFilter('category', ", freezeSelectStyle, "All Categories")}
                     <select onchange="setFreezeNonPayeeFilter('slab', this.value)" style="${freezeSelectStyle}">
                         <option value="">All Net Bill Slabs</option>
                         <option value="0-500" ${f.slab === "0-500" ? "selected" : ""}>₹0 - ₹500</option>
@@ -7894,6 +7966,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         hqName: String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL",
                         village: String(row.village || "").trim().toUpperCase(), mobileNo: row.mobileNo || "",
                         tariffCategory: normalizeRevenueCategory(row.tariffCategory || row.category || ""),
+                        tariffSub: scCatKey_(row.tariffCategory || row.category || ""),
                         govt: !!row.govtFlag, netBill,
                         metering: (pump || (slabMode && arrearsIsPumpRow_(row))) ? arrearsMeteringClass_(row) : "",
                         slab: arrearsSlabKey_(netBill)
@@ -7953,7 +8026,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 (!dcKey || r.dcName === dcKey)
                 && (!f.division || divSet_.has(r.dcName))
                 && (!f.hq || r.hqName === String(f.hq).toUpperCase())
-                && (!f.category || r.tariffCategory === f.category)
+                && scCatMatch_(r.tariffSub || r.tariffCategory, f.category)
                 && (!f.slab || r.slab === f.slab)
                 && (!f.govt || (f.govt === "GOVT" ? r.govt : !r.govt))
                 && (!f.payment || (isFreeze
@@ -8060,8 +8133,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     const hqOpts = [...new Set((allRows || []).map((r) => r.hqName).filter(Boolean))].sort().map((h) => `<option value="${escapeHtml(h)}" ${f.hq === h ? "selected" : ""}>${escapeHtml(h)}</option>`).join("");
                     html += `<select onchange="${setter}('hq', this.value)" style="${selectStyle}"><option value="">${escapeHtml(revenueHqAllLabel())}</option>${hqOpts}</select>`;
                 }
-                const catOpts = [...new Set((allRows || []).map((r) => r.tariffCategory).filter(Boolean))].sort().map((c) => `<option value="${escapeHtml(c)}" ${f.category === c ? "selected" : ""}>${escapeHtml(c)}</option>`).join("");
-                html += `<select onchange="${setter}('category', this.value)" style="${selectStyle}"><option value="">All Categories</option>${catOpts}</select>`;
+                html += scCatSelectsHtml_(scCatValues_(allRows), f.category, `${setter}('category', `, selectStyle, "All Categories");
                 if (slabMode_) {
                     html += `<select onchange="${setter}('slab', this.value)" style="${selectStyle}"><option value="">All Arrears Slabs</option>${ARREARS_SLABS_.map((sl) => `<option value="${sl.k}" ${f.slab === sl.k ? "selected" : ""}>${sl.l}</option>`).join("")}</select>`;
                 }
@@ -23491,7 +23563,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             if (listBox) listBox.innerHTML = "";
             populateRevenueSelect(hqSelect, [], revenueHqAllLabel());
             populateRevenueSelect(document.getElementById("revenue-pending-village"), [], revenueVillageAllLabel());
-            populateRevenueSelect(document.getElementById("revenue-pending-category"), [], "All Categories");
+            scCatPopulate_(document.getElementById("revenue-pending-category"), []);
             // NOTE: pehle yahan turant local/purana paid-set (getRevenuePendingPaidIvrsSetLocal)
             // laga ke list render kar dete the, aur sahi (uploaded cash list wala) paid-set
             // background me chhup ke baad me update hota tha - isse "Pending Consumer: ..."
@@ -23547,9 +23619,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const villageSelect = document.getElementById("revenue-pending-village");
                 const categorySelect = document.getElementById("revenue-pending-category");
                 populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenuePendingBaseRows, "village"), revenueVillageAllLabel());
-                populateRevenueSelect(categorySelect, getRevenueUniqueValues(revenuePendingBaseRows, "tariffCategory"), "All Categories");
+                scCatPopulate_(categorySelect, scCatValues_(revenuePendingBaseRows));
                 if (villageSelect) villageSelect.value = "";
-                if (categorySelect) categorySelect.value = "";
+                if (categorySelect) { categorySelect.value = ""; scCatFillSub_(categorySelect); }
                 const slabSelect = document.getElementById("revenue-pending-arrears-slab");
                 if (slabSelect) slabSelect.value = "";
                 const ivrsSearch = document.getElementById("revenue-pending-ivrs-search");
@@ -23621,7 +23693,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 !hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue)
             ));
             populateRevenueSelect(document.getElementById("revenue-pending-village"), getRevenueUniqueValues(scopedRows, "village"), revenueVillageAllLabel());
-            populateRevenueSelect(document.getElementById("revenue-pending-category"), getRevenueUniqueValues(scopedRows, "tariffCategory"), "All Categories");
+            scCatPopulate_(document.getElementById("revenue-pending-category"), scCatValues_(scopedRows));
             renderRevenuePendingList();
         }
 
@@ -23632,7 +23704,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 (!hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue))
                 && (!villageValue || normalizeLookupValue(row.village) === normalizeLookupValue(villageValue))
             ));
-            populateRevenueSelect(document.getElementById("revenue-pending-category"), getRevenueUniqueValues(scopedRows, "tariffCategory"), "All Categories");
+            scCatPopulate_(document.getElementById("revenue-pending-category"), scCatValues_(scopedRows));
             renderRevenuePendingList();
         }
 
@@ -23693,7 +23765,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function getRevenuePendingFilteredRows() {
             const hqValue = document.getElementById("revenue-pending-hq")?.value || "";
             const villageValue = document.getElementById("revenue-pending-village")?.value || "";
-            const categoryValue = document.getElementById("revenue-pending-category")?.value || "";
+            const categoryValue = scCatValue_("revenue-pending-category");
             const slabValue = document.getElementById("revenue-pending-arrears-slab")?.value || "";
             const govtValue = document.getElementById("revenue-pending-govt")?.value || "";
             const ivrsSearch = normalizeRevenueIvrs(document.getElementById("revenue-pending-ivrs-search")?.value || "");
@@ -23704,7 +23776,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     && (!ivrsSearch || ivrsNo.includes(ivrsSearch))
                     && (!hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue))
                     && (!villageValue || normalizeLookupValue(row.village) === normalizeLookupValue(villageValue))
-                    && (!categoryValue || normalizeLookupValue(row.tariffCategory) === normalizeLookupValue(categoryValue))
+                    && (!categoryValue || scCatMatch_(row.tariffSub || row.tariffCategory, categoryValue))
                     && isRevenuePendingNetBillInSlab(row, slabValue)
                     && (!govtValue || (govtValue === "GOVT" ? !!row.govtFlag : !row.govtFlag))
                     && !isRevenuePendingIvrsPaid(ivrsNo);
@@ -23731,7 +23803,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function getRevenuePendingFilteredRowsWithPart_() {
             const hqValue = document.getElementById("revenue-pending-hq")?.value || "";
             const villageValue = document.getElementById("revenue-pending-village")?.value || "";
-            const categoryValue = document.getElementById("revenue-pending-category")?.value || "";
+            const categoryValue = scCatValue_("revenue-pending-category");
             const slabValue = document.getElementById("revenue-pending-arrears-slab")?.value || "";
             const govtValue = document.getElementById("revenue-pending-govt")?.value || "";
             const ivrsSearch = normalizeRevenueIvrs(document.getElementById("revenue-pending-ivrs-search")?.value || "");
@@ -23742,7 +23814,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (ivrsSearch && !ivrsNo.includes(ivrsSearch)) return;
                 if (hqValue && normalizeLookupValue(row.hqName) !== normalizeLookupValue(hqValue)) return;
                 if (villageValue && normalizeLookupValue(row.village) !== normalizeLookupValue(villageValue)) return;
-                if (categoryValue && normalizeLookupValue(row.tariffCategory) !== normalizeLookupValue(categoryValue)) return;
+                if (categoryValue && !scCatMatch_(row.tariffSub || row.tariffCategory, categoryValue)) return;
                 if (!isRevenuePendingNetBillInSlab(row, slabValue)) return;
                 if (govtValue && (govtValue === "GOVT" ? !row.govtFlag : !!row.govtFlag)) return;
                 const b = scPendingBalanceOf_(row);
@@ -23767,7 +23839,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const listBox = document.getElementById("revenue-pending-list-box");
             const hqValue = document.getElementById("revenue-pending-hq")?.value || "";
             const villageValue = document.getElementById("revenue-pending-village")?.value || "";
-            const categoryValue = document.getElementById("revenue-pending-category")?.value || "";
+            const categoryValue = scCatValue_("revenue-pending-category");
             const slabValue = document.getElementById("revenue-pending-arrears-slab")?.value || "";
             const govtValue = document.getElementById("revenue-pending-govt")?.value || "";
             const govtLabel = govtValue === "GOVT" ? "Govt" : (govtValue === "NONGOVT" ? "Non Govt" : "ALL");
@@ -23837,7 +23909,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         function getRevenuePendingFileName() {
             const hqValue = document.getElementById("revenue-pending-hq")?.value || "ALL-HQ";
             const villageValue = document.getElementById("revenue-pending-village")?.value || "ALL-VILLAGES";
-            const categoryValue = document.getElementById("revenue-pending-category")?.value || "ALL-CATEGORIES";
+            const categoryValue = scCatValue_("revenue-pending-category") || "ALL-CATEGORIES";
             const slabValue = document.getElementById("revenue-pending-arrears-slab")?.value || "ALL-NET-BILL";
             const govtValue = document.getElementById("revenue-pending-govt")?.value || "ALL-TYPE";
             const tdValue = document.getElementById("revenue-pending-td")?.value || "";
@@ -29926,6 +29998,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                         village: String(row.village || "UNKNOWN").trim().toUpperCase() || "UNKNOWN",
                         hqName: String(row.hqName || "GENERAL").trim().toUpperCase() || "GENERAL",
                         tariffCategory: normalizeRevenueCategory(row.tariffCategory || row.category || ""),
+                        tariffSub: scCatKey_(row.tariffCategory || row.category || ""),
                         mobileNo: row.mobileNo || "",
                         netBill: row.netBill || "",
                         dcName: normalizedDc,
@@ -30058,10 +30131,10 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const govtSelect = document.getElementById("revenue-hq-village-list-govt");
             populateRevenueSelect(hqSelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "hqName"), revenueHqAllLabel());
             populateRevenueSelect(villageSelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "village"), revenueVillageAllLabel());
-            populateRevenueSelect(categorySelect, getRevenueUniqueValues(revenueHqVillageConsumerRows, "tariffCategory"), "All Categories");
+            scCatPopulate_(categorySelect, scCatValues_(revenueHqVillageConsumerRows));
             if (hqSelect) hqSelect.value = "";
             if (villageSelect) villageSelect.value = "";
-            if (categorySelect) categorySelect.value = "";
+            if (categorySelect) { categorySelect.value = ""; scCatFillSub_(categorySelect); }
             if (statusSelect) statusSelect.value = "ALL";
             if (govtSelect) govtSelect.value = "";
             renderRevenueHqVillageList();
@@ -30071,7 +30144,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "";
             const scoped = revenueHqVillageConsumerRows.filter((row) => !hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue));
             populateRevenueSelect(document.getElementById("revenue-hq-village-list-village"), getRevenueUniqueValues(scoped, "village"), revenueVillageAllLabel());
-            populateRevenueSelect(document.getElementById("revenue-hq-village-list-category"), getRevenueUniqueValues(scoped, "tariffCategory"), "All Categories");
+            scCatPopulate_(document.getElementById("revenue-hq-village-list-category"), scCatValues_(scoped));
             renderRevenueHqVillageList();
         }
 
@@ -30082,20 +30155,20 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 (!hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue))
                 && (!villageValue || normalizeLookupValue(row.village) === normalizeLookupValue(villageValue))
             ));
-            populateRevenueSelect(document.getElementById("revenue-hq-village-list-category"), getRevenueUniqueValues(scoped, "tariffCategory"), "All Categories");
+            scCatPopulate_(document.getElementById("revenue-hq-village-list-category"), scCatValues_(scoped));
             renderRevenueHqVillageList();
         }
 
         function getRevenueHqVillageListFilteredRows() {
             const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "";
             const villageValue = document.getElementById("revenue-hq-village-list-village")?.value || "";
-            const categoryValue = document.getElementById("revenue-hq-village-list-category")?.value || "";
+            const categoryValue = scCatValue_("revenue-hq-village-list-category");
             const statusValue = document.getElementById("revenue-hq-village-list-status")?.value || "ALL";
             const govtValue = document.getElementById("revenue-hq-village-list-govt")?.value || "";
             return revenueHqVillageConsumerRows.filter((row) => (
                 (!hqValue || normalizeLookupValue(row.hqName) === normalizeLookupValue(hqValue))
                 && (!villageValue || normalizeLookupValue(row.village) === normalizeLookupValue(villageValue))
-                && (!categoryValue || normalizeLookupValue(row.tariffCategory) === normalizeLookupValue(categoryValue))
+                && (!categoryValue || scCatMatch_(row.tariffSub || row.tariffCategory, categoryValue))
                 // USER REQUEST (2026-08-13): "UNPAID" ab row.pendingAmount > 0 se
                 // decide hota hai (partial payment wale consumer, jinka bakaya kuch
                 // bacha hai, ab UNPAID filter me bhi dikhenge) - "PAID" filter pehle
@@ -30112,7 +30185,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const rows = getRevenueHqVillageListFilteredRows();
             const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "";
             const villageValue = document.getElementById("revenue-hq-village-list-village")?.value || "";
-            const categoryValue = document.getElementById("revenue-hq-village-list-category")?.value || "";
+            const categoryValue = scCatValue_("revenue-hq-village-list-category");
             const statusValue = document.getElementById("revenue-hq-village-list-status")?.value || "ALL";
             const govtValue = document.getElementById("revenue-hq-village-list-govt")?.value || "";
             const categoryLabel = categoryValue ? getRevenueCategoryDisplayLabel(categoryValue) : "All Categories";
@@ -30162,7 +30235,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const rows = getRevenueHqVillageListExportRows(filteredRows);
                 const hqValue = document.getElementById("revenue-hq-village-list-hq")?.value || "";
                 const villageValue = document.getElementById("revenue-hq-village-list-village")?.value || "";
-                const categoryValue = document.getElementById("revenue-hq-village-list-category")?.value || "";
+                const categoryValue = scCatValue_("revenue-hq-village-list-category");
                 const statusValue = document.getElementById("revenue-hq-village-list-status")?.value || "ALL";
                 const govtValue = document.getElementById("revenue-hq-village-list-govt")?.value || "";
                 const categoryLabel = categoryValue ? getRevenueCategoryDisplayLabel(categoryValue) : "All Categories";
