@@ -10724,7 +10724,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 const html = scOpt_("🔄", "Refresh App", "Load latest app version and data", "scTabSheetClose_(true);refreshAppNow()")
                     + scOpt_(dark ? "☀️" : "🌙", dark ? "Light Mode" : "Night Mode", dark ? "Switch to light theme" : "Switch to dark theme", "scTabSheetClose_(true);toggleDarkMode()")
                     + scOpt_("📷", "GPS Camera", "Capture photo with location", "scTabSheetClose_(true);openGpsCameraFlow()")
-                    + helpChatMenuOptHtml_(); // Help / Chat with Admin (empty until its script URL is set)
+                    + helpChatMenuOptHtml_() // Help / Chat with Admin (empty until its script URL is set)
+                    + notifyMenuOptHtml_(); // Notifications (empty until notifyScriptUrl is set)
                 scTabSheetOpen_("☰ Menu", html, "menu");
             }
             scTabHighlight_();
@@ -32949,6 +32950,382 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         // ---- open / back ---------------------------------------------------------------
+        // ===== NOTIFICATIONS (2026-11-19, USER REQUEST) ======================================================
+        // Admin ka notice sab / Division / DC ke phone par (push) + app ke andar (inbox + app kholne par popup).
+        // Backend: backend-scripts/Notify_Backend.gs (alag project, apni Google Sheet). notifyScriptUrl khali = menu item chhupa
+        // rehta hai aur app me kuch nahi badalta. Firebase config + VAPID key public hote hain (secret nahi).
+        var notifyScriptUrl = "https://script.google.com/macros/s/AKfycbxk5n1EVamTUVlG_sjhvsXy36DNtyj-7dm_87MZ5EU0qhmoOVENwE7bv-aI7QeaYAUAow/exec";
+        var NOTIFY_FB_CONFIG_ = {
+            apiKey: "AIzaSyCxtfxWkDHWH-8CGeI4-4xGeuhzwoOyXIM",
+            authDomain: "seoni-circle-app.firebaseapp.com",
+            projectId: "seoni-circle-app",
+            storageBucket: "seoni-circle-app.firebasestorage.app",
+            messagingSenderId: "671780768569",
+            appId: "1:671780768569:web:44a690b6029334bc4db6e8"
+        };
+        var NOTIFY_VAPID_ = "BL3rWCZMl1HWzEswZOY98nYjKbsUslTyGa3Xg8PkS9BLki7yPNTGdr3P4HXGbp7tutLSo6YA6y8gRXyedJu6Z9U";
+        var NOTIFY_SDK_VER_ = "10.14.1";
+        var NOTIFY_LS_KEY_ = "seoni-notify-v1";
+        var notifyState_ = { busy: false, notices: [], loaded: false, error: "", msg: "", ok: true, draft: null, adminOpen: false, admin: { aud: "ALL", val: "", title: "", body: "" }, adminMsg: "", adminOk: true, prevSeen: 0 };
+        var notifyLastCheck_ = 0;
+        var notifyPopupShown_ = false;
+        var notifySdkPromise_ = null;
+        var notifyReturnView_ = "home";
+
+        function notifyUrl_() { return String(typeof notifyScriptUrl !== "undefined" && notifyScriptUrl ? notifyScriptUrl : "").trim(); }
+        function notifyLs_() { try { return JSON.parse(localStorage.getItem(NOTIFY_LS_KEY_) || "{}") || {}; } catch (_) { return {}; } }
+        function notifySetLs_(patch) { try { localStorage.setItem(NOTIFY_LS_KEY_, JSON.stringify(Object.assign(notifyLs_(), patch || {}))); } catch (_) {} }
+        function notifyPlatform_() { const ua = navigator.userAgent || ""; return /iPhone|iPad|iPod/i.test(ua) ? "ios" : (/Android/i.test(ua) ? "android" : "web"); }
+        function notifyIsStandalone_() { try { return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true; } catch (_) { return false; } }
+        function notifySupport_() {
+            const ok = ("serviceWorker" in navigator) && ("PushManager" in window) && ("Notification" in window);
+            if (ok) return { ok: true };
+            if (notifyPlatform_() === "ios" && !notifyIsStandalone_()) return { ok: false, msg: "On iPhone: open this app in Safari, tap the Share button, choose 'Add to Home Screen', then open the app from the Home Screen icon and turn on notifications here." };
+            return { ok: false, msg: "This phone/browser does not support notifications. Notices will still be shown inside the app." };
+        }
+        async function notifyPost_(payload, timeoutMs) {
+            const url = notifyUrl_();
+            if (!url) { const e0 = new Error("Notifications are not available yet."); e0.nfUser = true; throw e0; }
+            const res = await fetchWithTimeout(url, { method: "POST", headers: { "Content-Type": "text/plain;charset=UTF-8" }, body: JSON.stringify(payload) }, timeoutMs || 30000);
+            const text = await res.text();
+            let parsed = null;
+            try { parsed = JSON.parse(text || "{}"); } catch (_) {}
+            if (!parsed || parsed.status !== "success") {
+                const e = new Error(parsed && parsed.message ? String(parsed.message) : "Request failed");
+                e.nfUser = !!(parsed && parsed.message);
+                throw e;
+            }
+            return parsed;
+        }
+        function notifyErrText_(e) {
+            if (e && e.nfUser && e.message) return e.message;
+            if (e && e.message && /permission|token|notification|load|support/i.test(e.message) && !/fetch|network|abort/i.test(e.message)) return e.message;
+            if (typeof navigator !== "undefined" && navigator.onLine === false) return "No internet connection. Please try again.";
+            return "Server is slow or not reachable. Please try again.";
+        }
+        function notifyLoadScript_(src) {
+            return new Promise((resolve, reject) => {
+                const s = document.createElement("script");
+                s.src = src; s.async = true;
+                s.onload = () => resolve();
+                s.onerror = () => reject(new Error("Could not load the notification service. Please check internet and try again."));
+                document.head.appendChild(s);
+            });
+        }
+        function notifyLoadSdk_() {
+            if (window.firebase && window.firebase.messaging) return Promise.resolve();
+            if (!notifySdkPromise_) {
+                const base = "https://www.gstatic.com/firebasejs/" + NOTIFY_SDK_VER_ + "/";
+                notifySdkPromise_ = notifyLoadScript_(base + "firebase-app-compat.js")
+                    .then(() => notifyLoadScript_(base + "firebase-messaging-compat.js"))
+                    .catch((e) => { notifySdkPromise_ = null; throw e; });
+            }
+            return notifySdkPromise_;
+        }
+        async function notifyGetToken_() {
+            await notifyLoadSdk_();
+            if (!window.firebase.apps.length) window.firebase.initializeApp(NOTIFY_FB_CONFIG_);
+            const reg = await Promise.race([
+                navigator.serviceWorker.ready,
+                new Promise((_, rej) => setTimeout(() => rej(new Error("App service is not ready yet. Please reopen the app and try again.")), 12000))
+            ]);
+            const token = await window.firebase.messaging().getToken({ vapidKey: NOTIFY_VAPID_, serviceWorkerRegistration: reg });
+            if (!token) throw new Error("Could not get the notification token. Please try again.");
+            return token;
+        }
+
+        // ---- menu / view ----------------------------------------------------------------------
+        function notifyUnread_() {
+            const seen = Number(notifyLs_().seenId || 0);
+            return (notifyState_.notices || []).filter((n) => Number(n.id) > seen).length;
+        }
+        function notifyMenuOptHtml_() {
+            try {
+                if (!notifyUrl_()) return "";
+                try { notifyCheckNew_(false); } catch (_) {}
+                const n = notifyUnread_();
+                return scOpt_("🔔", "Notifications" + (n > 0 ? " 🔴 NEW " + n : ""), "Notices from admin and phone alerts", "scTabSheetClose_(true);openNotify_()");
+            } catch (_) { return ""; }
+        }
+        function notifyEnsureView_() {
+            if (document.getElementById("notify-view")) return;
+            const m = document.createElement("main");
+            m.id = "notify-view";
+            m.className = "view";
+            m.innerHTML = '<div class="search-panel" style="padding-top:14px;"><div id="notify-body" style="width:100%; max-width:400px; margin:0 auto; padding-bottom:96px; text-align:left;"></div></div>';
+            const ref = document.getElementById("help-chat-view");
+            if (ref && ref.parentNode) ref.parentNode.insertBefore(m, ref.nextSibling);
+            else document.body.appendChild(m);
+        }
+        function openNotify_() {
+            try {
+                closeHeaderMenu();
+                if (!notifyUrl_()) { showToast("Notifications are not available yet", false); return; }
+                const cur = typeof scActiveViewId_ === "function" ? scActiveViewId_() : "";
+                if (cur === "notify-view") return;
+                if (typeof scTabOkToLeave_ === "function" && !scTabOkToLeave_()) return;
+                notifyReturnView_ = cur === "home-view" ? "home" : (cur === "dc-selection-view" ? "dc-selection" : (cur === "dc-dashboard-view" ? "dc-dashboard" : (activeDC ? "dc-dashboard" : "home")));
+                notifyEnsureView_();
+                switchView("notify");
+            } catch (e) { showToast("Could not open Notifications", false); }
+        }
+        function notifyBack_() {
+            notifyState_.busy = false;
+            switchView(notifyReturnView_ || "home");
+        }
+        function initNotify_() {
+            const s = notifyState_;
+            const ls = notifyLs_();
+            s.msg = ""; s.adminMsg = ""; s.busy = false;
+            s.draft = { division: ls.division || "", dc: ls.dc || "" };
+            s.prevSeen = Number(ls.seenId || 0);
+            renderNotify_();
+            notifyCheckNew_(true).then(() => {
+                const mx = (s.notices || []).reduce((m, n) => Math.max(m, Number(n.id) || 0), 0);
+                if (mx) notifySetLs_({ seenId: mx });
+                if (document.getElementById("notify-body")) renderNotify_();
+            }).catch(() => {});
+        }
+
+        // ---- notices (read) -------------------------------------------------------------------
+        async function notifyCheckNew_(force) {
+            if (!notifyUrl_()) return;
+            if (!force && Date.now() - notifyLastCheck_ < 10 * 60 * 1000) return;
+            notifyLastCheck_ = Date.now();
+            const ls = notifyLs_();
+            try {
+                const r = await notifyPost_({ action: "getNotices", division: ls.division || "", dc: ls.dc || "" }, 25000);
+                notifyState_.notices = r.notices || [];
+                notifyState_.loaded = true; notifyState_.error = "";
+                if (!force) notifyMaybePopup_();
+            } catch (e) {
+                notifyState_.error = notifyErrText_(e);
+                notifyLastCheck_ = 0;
+            }
+        }
+        function notifyMaybePopup_() {
+            try {
+                if (notifyPopupShown_) return;
+                const ls = notifyLs_();
+                const seen = ls.seenId === undefined ? (Date.now() - 7 * 86400000) : Number(ls.seenId || 0);
+                const fresh = (notifyState_.notices || []).filter((n) => Number(n.id) > seen);
+                if (!fresh.length) return;
+                const v = typeof scActiveViewId_ === "function" ? scActiveViewId_() : "";
+                if (v !== "home-view" && v !== "dc-selection-view" && v !== "dc-dashboard-view") return;
+                if (document.getElementById("notify-popup") || document.getElementById("sc-refresh-overlay")) return;
+                notifyPopupShown_ = true;
+                const items = fresh.slice(0, 3).map((n) => `<div style="border-top:1px solid #e2e8f0; padding:9px 0; text-align:left;"><div style="font-size:0.78rem; font-weight:950; color:#0f172a;">${escapeHtml(n.title)}</div><div style="font-size:0.74rem; font-weight:700; color:#334155; margin-top:3px; line-height:1.45; white-space:pre-wrap; word-break:break-word;">${escapeHtml(n.body)}</div><div style="font-size:0.6rem; font-weight:800; color:#94a3b8; margin-top:3px;">${escapeHtml(n.created || "")}</div></div>`).join("");
+                const ov = document.createElement("div");
+                ov.id = "notify-popup";
+                ov.style.cssText = "position:fixed; inset:0; z-index:99990; background:rgba(15,23,42,0.55); display:flex; align-items:center; justify-content:center; padding:18px;";
+                ov.innerHTML = `<div style="width:100%; max-width:360px; max-height:80vh; overflow:auto; background:#ffffff; border-radius:18px; padding:16px; box-shadow:0 12px 40px rgba(15,23,42,0.4);">
+                    <div style="font-size:0.9rem; font-weight:950; color:#1d4ed8; text-align:center; margin-bottom:6px;">📢 New Notice${fresh.length > 1 ? "s (" + fresh.length + ")" : ""}</div>
+                    ${items}
+                    ${fresh.length > 3 ? `<div style="font-size:0.66rem; font-weight:800; color:#64748b; text-align:center; margin-top:4px;">+ ${fresh.length - 3} more in Menu &gt; Notifications</div>` : ""}
+                    <button type="button" onclick="notifyPopupClose_()" style="width:100%; height:42px; margin-top:10px; border:none; border-radius:12px; background:#1d4ed8; color:#ffffff; font-size:0.8rem; font-weight:950;">OK</button>
+                </div>`;
+                document.body.appendChild(ov);
+            } catch (_) {}
+        }
+        function notifyPopupClose_() {
+            const mx = (notifyState_.notices || []).reduce((m, n) => Math.max(m, Number(n.id) || 0), 0);
+            if (mx) notifySetLs_({ seenId: mx });
+            const ov = document.getElementById("notify-popup");
+            if (ov) ov.remove();
+        }
+
+        // ---- screen ---------------------------------------------------------------------------
+        function notifySel_(id, label, options, value, onchange) {
+            const st = "width:100%; height:40px; margin-top:6px; border:1.5px solid #93c5fd; border-radius:12px; padding:0 12px; font-size:0.76rem; font-weight:900; color:#0f172a; background:#ffffff;";
+            return `<select id="${id}" onchange="${onchange}" style="${st}"><option value="">${escapeHtml(label)}</option>${options.map((o) => `<option value="${escapeHtml(o)}" ${o === value ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}</select>`;
+        }
+        function notifyDcList_(division) {
+            try { return division ? (scRevVisDivDcs_(division) || []).map((d) => String(normalizeDcName(d))) : []; } catch (_) { return []; }
+        }
+        function notifyAllDcList_() {
+            try { return (scRevVisAllDcs_() || []).map((d) => String(normalizeDcName(d))); } catch (_) { return []; }
+        }
+        function renderNotify_() {
+            const body = document.getElementById("notify-body");
+            if (!body) return;
+            const s = notifyState_;
+            const ls = notifyLs_();
+            const sup = notifySupport_();
+            const perm = ("Notification" in window) ? Notification.permission : "denied";
+            const on = !!ls.token && perm === "granted";
+            const d = s.draft || { division: "", dc: "" };
+            const card = "background:#ffffff; border:1px solid #e2e8f0; border-radius:16px; padding:14px; margin-bottom:12px; box-shadow:0 1px 3px rgba(15,23,42,0.06);";
+            const btn = (txt, act, bg, dis) => `<button type="button" ${dis ? "disabled" : ""} onclick="${act}" style="width:100%; height:42px; margin-top:10px; border:none; border-radius:12px; background:${bg}; color:#ffffff; font-size:0.78rem; font-weight:950; ${dis ? "opacity:0.6;" : ""}">${txt}</button>`;
+            let h = `<div style="${card}">
+                <div style="font-size:0.86rem; font-weight:950; color:#0f172a;">🔔 Phone notifications</div>
+                <div style="font-size:0.68rem; font-weight:800; color:#64748b; margin-top:3px; line-height:1.5;">Get notices from the admin on this phone, even when the app is closed. Choose your Division and DC so you receive the notices meant for you.</div>`;
+            if (!sup.ok) {
+                h += `<div style="margin-top:10px; background:#fffbeb; border:1.5px solid #fcd34d; border-radius:12px; padding:10px; font-size:0.72rem; font-weight:800; color:#92400e; line-height:1.5;">${escapeHtml(sup.msg)}</div>`;
+            } else if (perm === "denied") {
+                h += `<div style="margin-top:10px; background:#fef2f2; border:1.5px solid #fca5a5; border-radius:12px; padding:10px; font-size:0.72rem; font-weight:800; color:#991b1b; line-height:1.5;">Notifications are blocked for this app. Open the phone Settings (or the browser's site settings), allow notifications for this app, then come back here.</div>`;
+            } else {
+                h += `<div style="margin-top:10px; font-size:0.72rem; font-weight:950; color:${on ? "#047857" : "#b45309"};">Status: ${on ? "ON for this phone ✅" : "OFF"}</div>`;
+                h += notifySel_("notify-division", "Select Division", Object.keys(divisionConfigs), d.division, "notifySetDivision_(this.value)");
+                h += notifySel_("notify-dc", "All DCs of this division", notifyDcList_(d.division), d.dc, "notifySetDc_(this.value)");
+                h += btn(s.busy ? "Please wait..." : (on ? "Save changes" : "Turn ON notifications"), "notifyEnable_()", "#1d4ed8", s.busy);
+                if (on) h += btn("Turn OFF", "notifyDisable_()", "#64748b", s.busy);
+            }
+            if (s.msg) h += `<div style="margin-top:10px; border-radius:12px; padding:10px; font-size:0.72rem; font-weight:900; text-align:center; background:${s.ok ? "#ecfdf5" : "#fef2f2"}; color:${s.ok ? "#047857" : "#991b1b"}; border:1.5px solid ${s.ok ? "#86efac" : "#fca5a5"};">${escapeHtml(s.msg)}</div>`;
+            h += `</div>`;
+
+            // notices
+            h += `<div style="${card}"><div style="font-size:0.86rem; font-weight:950; color:#0f172a;">📢 Notices</div>`;
+            if (!s.loaded && !s.error) h += `<div style="font-size:0.72rem; font-weight:800; color:#64748b; margin-top:8px;">Loading...</div>`;
+            else if (s.error && !s.loaded) h += `<div style="font-size:0.72rem; font-weight:800; color:#991b1b; margin-top:8px;">${escapeHtml(s.error)}</div>`;
+            else if (!(s.notices || []).length) h += `<div style="font-size:0.72rem; font-weight:800; color:#64748b; margin-top:8px;">No notices yet.</div>`;
+            else h += (s.notices || []).map((n) => {
+                const isNew = Number(n.id) > s.prevSeen;
+                const tag = n.aud === "ALL" ? "ALL" : (n.val || n.aud);
+                return `<div style="border-top:1px solid #e2e8f0; margin-top:9px; padding-top:9px; ${isNew ? "background:#eff6ff; border-radius:10px; padding:9px; margin-top:7px;" : ""}">
+                    <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;"><div style="font-size:0.78rem; font-weight:950; color:#0f172a; word-break:break-word;">${isNew ? "🔴 " : ""}${escapeHtml(n.title)}</div><span style="flex:0 0 auto; font-size:0.56rem; font-weight:900; color:#1d4ed8; background:#dbeafe; border-radius:6px; padding:2px 6px;">${escapeHtml(tag)}</span></div>
+                    <div style="font-size:0.74rem; font-weight:700; color:#334155; margin-top:3px; line-height:1.45; white-space:pre-wrap; word-break:break-word;">${escapeHtml(n.body)}</div>
+                    <div style="font-size:0.6rem; font-weight:800; color:#94a3b8; margin-top:3px;">${escapeHtml(n.created || "")}</div></div>`;
+            }).join("");
+            h += `</div>`;
+
+            // admin
+            const a = s.admin;
+            h += `<div style="${card}">
+                <button type="button" onclick="notifyToggleAdmin_()" style="width:100%; display:flex; justify-content:space-between; align-items:center; background:none; border:none; padding:0; font-size:0.84rem; font-weight:950; color:#9f1239;"><span>🔐 Admin: send a notice</span><span>${s.adminOpen ? "▴" : "▾"}</span></button>`;
+            if (s.adminOpen) {
+                const inp = "width:100%; border:1.5px solid #fda4af; border-radius:12px; padding:9px 12px; font-size:0.78rem; font-weight:800; color:#0f172a; background:#ffffff; margin-top:8px; box-sizing:border-box;";
+                const audOpts = [["ALL", "All users"], ["DIVISION", "One Division"], ["DC", "One DC"], ["TEST", "Test - only this phone"]];
+                h += `<input id="notify-admin-pw" type="password" autocomplete="off" placeholder="Admin password" style="${inp}">
+                    <input id="notify-admin-title" type="text" maxlength="80" placeholder="Title" value="${escapeHtml(a.title)}" style="${inp}">
+                    <textarea id="notify-admin-body" maxlength="400" rows="4" placeholder="Message (max 400 characters)" style="${inp} resize:vertical;">${escapeHtml(a.body)}</textarea>
+                    <select id="notify-admin-aud" onchange="notifyAdminAudChange_()" style="${inp} height:40px; padding:0 12px;">${audOpts.map((o) => `<option value="${o[0]}" ${a.aud === o[0] ? "selected" : ""}>${o[1]}</option>`).join("")}</select>`;
+                if (a.aud === "DIVISION") h += `<select id="notify-admin-val" style="${inp} height:40px; padding:0 12px;"><option value="">Select Division</option>${Object.keys(divisionConfigs).map((dv) => `<option value="${escapeHtml(dv)}" ${a.val === dv ? "selected" : ""}>${escapeHtml(dv)}</option>`).join("")}</select>`;
+                if (a.aud === "DC") h += `<select id="notify-admin-val" style="${inp} height:40px; padding:0 12px;"><option value="">Select DC</option>${notifyAllDcList_().map((dc) => `<option value="${escapeHtml(dc)}" ${a.val === dc ? "selected" : ""}>${escapeHtml(dc)}</option>`).join("")}</select>`;
+                h += btn(s.busy ? "Please wait..." : "Send notice", "notifyAdminSend_()", "#be123c", s.busy);
+                h += btn("Phones registered (count)", "notifyAdminStats_()", "#475569", s.busy);
+                if (s.adminMsg) h += `<div style="margin-top:10px; border-radius:12px; padding:10px; font-size:0.72rem; font-weight:900; line-height:1.5; white-space:pre-wrap; background:${s.adminOk ? "#ecfdf5" : "#fef2f2"}; color:${s.adminOk ? "#047857" : "#991b1b"}; border:1.5px solid ${s.adminOk ? "#86efac" : "#fca5a5"};">${escapeHtml(s.adminMsg)}</div>`;
+            }
+            h += `</div>`;
+            body.innerHTML = h;
+        }
+        function notifySetDivision_(v) { const s = notifyState_; s.draft = { division: v || "", dc: "" }; renderNotify_(); }
+        function notifySetDc_(v) { const s = notifyState_; s.draft = { division: (s.draft && s.draft.division) || "", dc: v || "" }; }
+        async function notifyEnable_() {
+            const s = notifyState_;
+            if (s.busy) return;
+            const sup = notifySupport_();
+            if (!sup.ok) { showToast(sup.msg, false); return; }
+            const d = s.draft || {};
+            if (!d.division) { s.msg = "Please select your Division first."; s.ok = false; renderNotify_(); return; }
+            s.busy = true; s.msg = ""; renderNotify_();
+            try {
+                const perm = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+                if (perm !== "granted") throw new Error("Notification permission was not allowed. Please allow notifications for this app in the phone settings and try again.");
+                const token = await notifyGetToken_();
+                await notifyPost_({ action: "register", token, division: d.division, dc: d.dc || "", platform: notifyPlatform_() }, 30000);
+                notifySetLs_({ token, division: d.division, dc: d.dc || "", regAt: Date.now() });
+                s.msg = "Notifications are ON for this phone."; s.ok = true;
+                notifyLastCheck_ = 0;
+            } catch (e) {
+                s.msg = notifyErrText_(e); s.ok = false;
+            }
+            s.busy = false;
+            renderNotify_();
+        }
+        async function notifyDisable_() {
+            const s = notifyState_;
+            if (s.busy) return;
+            s.busy = true; s.msg = ""; renderNotify_();
+            try {
+                const token = notifyLs_().token;
+                try { await notifyLoadSdk_(); if (!window.firebase.apps.length) window.firebase.initializeApp(NOTIFY_FB_CONFIG_); await window.firebase.messaging().deleteToken(); } catch (_) {}
+                if (token) await notifyPost_({ action: "unregister", token }, 20000);
+                notifySetLs_({ token: "", regAt: 0 });
+                s.msg = "Notifications are OFF for this phone."; s.ok = true;
+            } catch (e) {
+                s.msg = notifyErrText_(e); s.ok = false;
+            }
+            s.busy = false;
+            renderNotify_();
+        }
+        function notifyToggleAdmin_() { notifyAdminSync_(); notifyState_.adminOpen = !notifyState_.adminOpen; renderNotify_(); }
+        function notifyAdminSync_() {
+            const a = notifyState_.admin;
+            const g = (id) => { const el = document.getElementById(id); return el ? el.value : null; };
+            const t = g("notify-admin-title"); if (t !== null) a.title = t;
+            const b = g("notify-admin-body"); if (b !== null) a.body = b;
+            const au = g("notify-admin-aud"); if (au !== null) a.aud = au;
+            const v = g("notify-admin-val"); if (v !== null) a.val = v;
+        }
+        function notifyAdminAudChange_() { notifyAdminSync_(); notifyState_.admin.val = ""; renderNotify_(); }
+        async function notifyAdminSend_() {
+            const s = notifyState_;
+            if (s.busy) return;
+            notifyAdminSync_();
+            const a = s.admin;
+            const pw = (document.getElementById("notify-admin-pw") || {}).value || "";
+            if (!pw) { s.adminMsg = "Please enter the admin password."; s.adminOk = false; renderNotify_(); return; }
+            if (!String(a.title).trim() || !String(a.body).trim()) { s.adminMsg = "Please write the title and the message."; s.adminOk = false; renderNotify_(); return; }
+            if ((a.aud === "DIVISION" || a.aud === "DC") && !a.val) { s.adminMsg = "Please choose the " + (a.aud === "DC" ? "DC" : "Division") + "."; s.adminOk = false; renderNotify_(); return; }
+            let value = a.val || "";
+            if (a.aud === "TEST") {
+                value = notifyLs_().token || "";
+                if (!value) { s.adminMsg = "Turn ON notifications on this phone first (top card), then use Test."; s.adminOk = false; renderNotify_(); return; }
+            }
+            const who = a.aud === "ALL" ? "ALL users" : (a.aud === "TEST" ? "this phone only (test)" : (a.aud === "DIVISION" ? "Division: " : "DC: ") + a.val);
+            if (!window.confirm("Send this notice to " + who + "?\n\n" + a.title)) return;
+            s.busy = true; s.adminMsg = ""; renderNotify_();
+            try {
+                const r = await notifyPost_({ action: "send", password: pw, title: a.title, body: a.body, audience: a.aud, value }, 120000);
+                s.adminMsg = r.message || "Notice sent."; s.adminOk = true;
+                if (a.aud !== "TEST") { a.title = ""; a.body = ""; }
+                notifyLastCheck_ = 0;
+                notifyCheckNew_(true).then(() => { const mx = (s.notices || []).reduce((m, n) => Math.max(m, Number(n.id) || 0), 0); if (mx) notifySetLs_({ seenId: mx }); if (document.getElementById("notify-body")) renderNotify_(); }).catch(() => {});
+            } catch (e) {
+                s.adminMsg = notifyErrText_(e); s.adminOk = false;
+            }
+            s.busy = false;
+            renderNotify_();
+        }
+        async function notifyAdminStats_() {
+            const s = notifyState_;
+            if (s.busy) return;
+            notifyAdminSync_();
+            const pw = (document.getElementById("notify-admin-pw") || {}).value || "";
+            if (!pw) { s.adminMsg = "Please enter the admin password."; s.adminOk = false; renderNotify_(); return; }
+            s.busy = true; s.adminMsg = ""; renderNotify_();
+            try {
+                const r = await notifyPost_({ action: "stats", password: pw }, 30000);
+                const lines = ["Phones registered: " + r.total];
+                Object.keys(r.byDivision || {}).forEach((k) => lines.push(k + ": " + r.byDivision[k]));
+                const dcs = Object.keys(r.byDc || {}).sort();
+                if (dcs.length) lines.push("", "DC-wise: " + dcs.map((k) => k + " " + r.byDc[k]).join(", "));
+                s.adminMsg = lines.join("\n"); s.adminOk = true;
+            } catch (e) {
+                s.adminMsg = notifyErrText_(e); s.adminOk = false;
+            }
+            s.busy = false;
+            renderNotify_();
+        }
+
+        // ---- background (light): check notices on open + refresh token weekly -------------------
+        async function notifyBoot_() {
+            try {
+                if (!notifyUrl_()) return;
+                await notifyCheckNew_(false);
+                const ls = notifyLs_();
+                if (ls.token && ("Notification" in window) && Notification.permission === "granted" && Date.now() - Number(ls.regAt || 0) > 7 * 86400000) {
+                    const token = await notifyGetToken_();
+                    await notifyPost_({ action: "register", token, division: ls.division || "", dc: ls.dc || "", platform: notifyPlatform_() }, 30000);
+                    notifySetLs_({ token, regAt: Date.now() });
+                }
+            } catch (_) {}
+        }
+        try {
+            setTimeout(() => { notifyBoot_(); }, 7000);
+            document.addEventListener("visibilitychange", () => { try { if (document.visibilityState === "visible" && notifyUrl_()) notifyCheckNew_(false); } catch (_) {} });
+        } catch (_) {}
+
         function openHelpChat() {
             try {
                 closeHeaderMenu();
@@ -33603,6 +33980,9 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (id === "help-chat") {
                     initHelpChat_(); // USER REQUEST (2026-10-06) Help / Chat with Admin
                 }
+                if (id === "notify") {
+                    initNotify_(); // 2026-11-19 Notifications
+                }
                 if (id === "revenue-pending-list") {
                     initRevenuePendingList();
                 }
@@ -33691,6 +34071,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 if (id === "revenue-pending-list") headerTitle = "PENDING DO LIST";
                 if (id === "staff-contact") headerTitle = "STAFF CONTACT";
                 if (id === "help-chat") headerTitle = "HELP / CHAT";
+                if (id === "notify") headerTitle = "NOTIFICATIONS";
                 if (id === "division-paid-upload") headerTitle = "DIVISION CASH LIST";
                 if (id === "division-master-upload") headerTitle = "DIVISION MASTER";
                 if (id === "revenue-paid-upload") headerTitle = "ADMIN UPLOAD CASH LIST";
@@ -33893,6 +34274,8 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                     document.getElementById("selected-dc-label").innerText = "Choose DC Name...";
                     switchView("dc-selection");
                 }
+            } else if (act === "notify-view") {
+                notifyBack_(); // 2026-11-19 Notifications
             } else if (act === "help-chat-view") {
                 helpChatBack_(); // USER REQUEST (2026-10-06) Help / Chat with Admin
             } else if (act === "summary-view") {
