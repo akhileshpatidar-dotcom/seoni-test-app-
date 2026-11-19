@@ -6214,7 +6214,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             }).join("");
             return `<div id="sc-fz-cat-dd" style="position:relative; margin:5px auto 0;">
                 <button type="button" onclick="scFzCatToggle_(event)" style="width:100%; height:38px; display:flex; align-items:center; justify-content:space-between; border:2px solid #0e7490; border-radius:12px; padding:0 12px; font-size:0.74rem; font-weight:900; color:#ffffff; background:#0891b2; box-shadow:0 2px 6px rgba(8,145,178,0.35);"><span>${escapeHtml(cur ? cur[1] : "Choose Report Type")}</span><span style="font-size:0.7rem;">&#9662;</span></button>
-                <div id="sc-fz-cat-list" style="display:none; position:absolute; left:0; right:0; top:42px; z-index:60; background:#ffffff; border:1.5px solid #0e7490; border-radius:12px; overflow:hidden; box-shadow:0 8px 20px rgba(15,23,42,0.25);">${items}</div>
+                <div id="sc-fz-cat-list" style="display:none; position:absolute; left:0; right:0; top:42px; z-index:60; background:#ffffff; border:1.5px solid #0e7490; border-radius:12px; overflow:hidden; box-shadow:0 8px 20px rgba(15,23,42,0.25);"><div onclick="scFzPendingPick_()" style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; font-size:0.76rem; font-weight:950; color:#0f766e; background:#ccfbf1; border-bottom:1px solid #99f6e4; cursor:pointer;"><span>Pending DO List</span><span style="font-size:0.7rem;">&#8250;</span></div>${items}</div>
             </div>`;
         }
         function scFzGrpToggle_(ev, key) {
@@ -6227,6 +6227,54 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
                 box.style.display = open ? "block" : "none";
                 if (arr) arr.innerHTML = open ? "&#9652;" : "&#9662;";
             });
+        }
+        // UPDATE 181 (2026-11-17, USER REQUEST): Freeze report ke dropdown me sabse pehle "Pending DO List" (DC Revenue 3-dots wali wahi screen).
+        // DC level: seedha wahi screen. Division level: upar DC filter. Circle level: Division + DC filter. Back dabane par report par wapas.
+        var scPendFromRpt_ = null;
+        function scFzPendingPick_() {
+            const l = document.getElementById("sc-fz-cat-list");
+            if (l) l.style.display = "none";
+            scFzOpenPendingDo_();
+        }
+        function scFzOpenPendingDo_() {
+            if (activeViewLevel === "DC" && !activeDC) return showToast("Please select a DC first", false);
+            scPendFromRpt_ = { level: activeViewLevel, div: activeDiv, dc: activeDC, module: summaryModule || "FREEZE", pickDiv: "" };
+            revenueMessageSelectionMode = false;
+            if (scPendFromRpt_.level !== "DC") activeDC = "";
+            activeViewLevel = "DC";
+            switchView("revenue-pending-list");
+        }
+        function scPendRptBuildFilters_() {
+            const anchor = document.getElementById("revenue-pending-dc-name");
+            if (!anchor || !anchor.parentNode) return;
+            let box = document.getElementById("revenue-pending-rpt-filters");
+            const sv = scPendFromRpt_;
+            if (!sv || sv.level === "DC") { if (box) box.remove(); return; }
+            if (!box) {
+                box = document.createElement("div");
+                box.id = "revenue-pending-rpt-filters";
+                anchor.parentNode.insertBefore(box, anchor.nextSibling);
+            }
+            const st = "width:100%; max-width:360px; height:38px; margin:6px auto 0; display:block; border:1.5px solid #fb923c; border-radius:15px; padding:0 14px; font-size:0.74rem; font-weight:900; color:#0f172a; background:#ffffff;";
+            const div = sv.level === "CIRCLE" ? (sv.pickDiv || "") : (sv.div || "");
+            let html = "";
+            if (sv.level === "CIRCLE") {
+                html += `<select onchange="scPendRptPickDivision_(this.value)" style="${st}"><option value="">Select Division</option>${Object.keys(divisionConfigs).map((dv) => `<option value="${escapeHtml(dv)}" ${sv.pickDiv === dv ? "selected" : ""}>${escapeHtml(dv)}</option>`).join("")}</select>`;
+            }
+            const dcs = div ? scRevVisDivDcs_(div) : [];
+            html += `<select onchange="scPendRptPickDc_(this.value)" style="${st}"><option value="">Select DC</option>${dcs.map((d) => `<option value="${escapeHtml(d)}" ${activeDC && normalizeDcName(activeDC) === normalizeDcName(d) ? "selected" : ""}>${escapeHtml(normalizeDcName(d))}</option>`).join("")}</select>`;
+            box.innerHTML = html;
+        }
+        function scPendRptPickDivision_(v) {
+            if (!scPendFromRpt_) return;
+            scPendFromRpt_.pickDiv = v || "";
+            activeDC = "";
+            initRevenuePendingList();
+        }
+        function scPendRptPickDc_(v) {
+            if (!scPendFromRpt_) return;
+            activeDC = v || "";
+            initRevenuePendingList();
         }
         function scFzCatToggle_(ev) {
             if (ev && ev.stopPropagation) ev.stopPropagation();
@@ -22784,6 +22832,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
 
         function openRevenuePendingList() {
             closeHeaderMenu();
+            scPendFromRpt_ = null;
             switchView("revenue-pending-list");
         }
 
@@ -22798,6 +22847,7 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
         }
 
         function openRevenueTopDefaulters() {
+            scPendFromRpt_ = null;
             closeHeaderMenu();
             switchView("revenue-top-defaulters");
         }
@@ -23575,6 +23625,13 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const listBox = document.getElementById("revenue-pending-list-box");
             const hqSelect = document.getElementById("revenue-pending-hq");
             const refreshToken = ++revenuePendingPaidRefreshToken;
+            scPendRptBuildFilters_(); // UPDATE 181: Freeze report se aane par Division/DC filter
+            if (scPendFromRpt_ && !activeDC) {
+                revenuePendingBaseRows = [];
+                if (listBox) listBox.innerHTML = "";
+                if (statusBox) { statusBox.style.display = "block"; statusBox.innerHTML = scPendFromRpt_.level === "CIRCLE" && !scPendFromRpt_.pickDiv ? "Please select Division and DC to view the Pending DO List." : "Please select a DC to view the Pending DO List."; }
+                return;
+            }
             // Baaki reports (Live Progress, HQ/Village, Cash Reconcile) jaisa hi animated
             // syncing bar - pehle yahan sirf static "load ho rahi hai..." text tha.
             const isPendingRenderValid = () => refreshToken === revenuePendingPaidRefreshToken && document.getElementById("revenue-pending-list-view")?.classList.contains("active");
@@ -33767,7 +33824,15 @@ const MASTER_SECURE_API_URL = "https://script.google.com/macros/s/AKfycbzaimPwzU
             const activeNode = document.querySelector(".view.active");
             if (!activeNode) return;
             const act = activeNode.id;
-            if (act === "dc-selection-view") {
+            if (scPendFromRpt_ && act === "revenue-pending-list-view") { // UPDATE 181: Freeze report se aaye the -> wahin wapas
+                const sv_ = scPendFromRpt_;
+                scPendFromRpt_ = null;
+                activeViewLevel = sv_.level; activeDiv = sv_.div; activeDC = sv_.dc;
+                const f_ = document.getElementById("revenue-pending-rpt-filters");
+                if (f_) f_.remove();
+                switchView("summary");
+                setProgressModule(sv_.module || "FREEZE");
+            } else if (act === "dc-selection-view") {
                 activeDC = "";
                 document.getElementById("selected-dc-label").innerText = "Choose DC Name...";
                 switchView("home");
